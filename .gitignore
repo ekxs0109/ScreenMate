@@ -140,3 +140,7 @@ vite.config.ts.timestamp-*
 
 # Local git worktrees
 .worktrees/
+.turbo/
+apps/viewer-web/dist/
+apps/cloudflare/.wrangler/
+docs/.DS_Store
