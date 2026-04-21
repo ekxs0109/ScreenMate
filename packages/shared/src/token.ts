@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { signalingRoleSchema } from "./signaling";
+import { signalingRoleSchema } from "./signaling.js";
 
 export const tokenPayloadSchema = z.object({
   roomId: z.string().min(1),

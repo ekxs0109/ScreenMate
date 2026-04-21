@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "smoke:dist": "node --input-type=module -e \"import('./dist/index.js')\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
