@@ -43,6 +43,14 @@ describe("room routes", () => {
     expect(payload?.sessionId).toMatch(/^host_/);
   });
 
+  it("returns the websocket placeholder response from GET /rooms/:roomId/ws", async () => {
+    const response = await app.request("/rooms/room_test/ws");
+    const body = await response.text();
+
+    expect(response.status).toBe(426);
+    expect(body).toBe("WebSocket upgrade handled in a later step");
+  });
+
   it("requires a token secret for POST /rooms", async () => {
     const response = await app.request("/rooms", { method: "POST" });
 

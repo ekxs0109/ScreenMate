@@ -1,10 +1,17 @@
-type SessionRole = "host" | "viewer";
+import type { CloudflareBindings } from "../env.js";
 
-export class RoomObject {
+type SessionRole = "host" | "viewer";
+type RoomLifecycleState =
+  | "idle"
+  | "hosting"
+  | "streaming"
+  | "degraded"
+  | "closed";
+
+export class RoomState {
   private hostSessionId: string | null = null;
   private viewers = new Set<string>();
-  private state: "idle" | "hosting" | "streaming" | "degraded" | "closed" =
-    "idle";
+  private state: RoomLifecycleState = "idle";
 
   registerSession(sessionId: string, role: SessionRole) {
     if (role === "host") {
@@ -25,5 +32,22 @@ export class RoomObject {
       viewerCount: this.viewers.size,
       state: this.state,
     };
+  }
+}
+
+export class RoomObject {
+  private readonly roomState = new RoomState();
+
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env: CloudflareBindings,
+  ) {}
+
+  registerSession(sessionId: string, role: SessionRole) {
+    this.roomState.registerSession(sessionId, role);
+  }
+
+  getStateSnapshot() {
+    return this.roomState.getStateSnapshot();
   }
 }

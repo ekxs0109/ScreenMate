@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { RoomObject } from "../src/do/room-object";
+import { RoomState } from "../src/do/room-object";
 
-describe("RoomObject", () => {
+describe("RoomState", () => {
   it("registers the host and the viewer in room state", () => {
-    const room = new RoomObject({} as never, {} as never);
+    const room = new RoomState();
 
     room.registerSession("host_1", "host");
     room.registerSession("viewer_1", "viewer");
