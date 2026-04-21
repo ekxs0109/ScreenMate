@@ -1,2 +1,2 @@
-export * from "./ice-config";
-export * from "./peer-state";
+export * from "./ice-config.js";
+export * from "./peer-state.js";
