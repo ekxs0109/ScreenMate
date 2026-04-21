@@ -2,7 +2,9 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  collectPageVideos,
   collectVisibleVideos,
+  findVisibleVideoByHandle,
   getVideoHandle,
   listVisibleVideoSources,
 } from "../entrypoints/content/video-detector";
@@ -64,18 +66,70 @@ describe("collectVisibleVideos", () => {
   });
 });
 
+describe("collectPageVideos", () => {
+  it("includes hidden videos and open shadow-dom videos", () => {
+    document.body.innerHTML = `
+      <video id="visible"></video>
+      <video id="hidden" hidden></video>
+      <div id="shadow-host"></div>
+    `;
+
+    const visible = document.getElementById("visible") as HTMLVideoElement;
+    const hidden = document.getElementById("hidden") as HTMLVideoElement;
+    const shadowHost = document.getElementById("shadow-host") as HTMLDivElement;
+    const shadowRoot = shadowHost.attachShadow({ mode: "open" });
+    const shadowVideo = document.createElement("video");
+    shadowVideo.id = "shadow-video";
+    shadowRoot.appendChild(shadowVideo);
+
+    setVideoRect(visible, 320, 180);
+    setVideoRect(hidden, 0, 0);
+    setVideoRect(shadowVideo, 200, 100);
+
+    const videos = collectPageVideos();
+
+    expect(videos.map((video) => video.id)).toEqual([
+      "visible",
+      "shadow-video",
+      "hidden",
+    ]);
+  });
+
+  it("detects videos even when HTMLVideoElement instanceof checks are unreliable", () => {
+    document.body.innerHTML = `<video id="cross-realm"></video>`;
+    const video = document.getElementById("cross-realm") as HTMLVideoElement;
+    const originalVideoCtor = globalThis.HTMLVideoElement;
+
+    setVideoRect(video, 320, 180);
+    Object.defineProperty(globalThis, "HTMLVideoElement", {
+      configurable: true,
+      value: class HTMLVideoElementMock extends HTMLElement {},
+    });
+
+    try {
+      const videos = collectPageVideos();
+      expect(videos.map((item) => item.id)).toContain("cross-realm");
+    } finally {
+      Object.defineProperty(globalThis, "HTMLVideoElement", {
+        configurable: true,
+        value: originalVideoCtor,
+      });
+    }
+  });
+});
+
 describe("listVisibleVideoSources", () => {
   it("returns stable handles and useful labels", () => {
     document.body.innerHTML = `
       <video id="named" src="https://example.com/a.mp4"></video>
-      <video id=""></video>
+      <video id="hidden" hidden></video>
     `;
 
     const named = document.querySelectorAll("video")[0] as HTMLVideoElement;
-    const unnamed = document.querySelectorAll("video")[1] as HTMLVideoElement;
+    const hidden = document.querySelectorAll("video")[1] as HTMLVideoElement;
 
     setVideoRect(named, 300, 200);
-    setVideoRect(unnamed, 200, 100);
+    setVideoRect(hidden, 0, 0);
 
     const firstPass = listVisibleVideoSources();
     const secondPass = listVisibleVideoSources();
@@ -86,9 +140,27 @@ describe("listVisibleVideoSources", () => {
       label: "https://example.com/a.mp4",
     });
     expect(firstPass[1]).toEqual({
-      id: getVideoHandle(unnamed),
-      label: "Video 2",
+      id: getVideoHandle(hidden),
+      label: "hidden (not visible)",
     });
+  });
+});
+
+describe("findVisibleVideoByHandle", () => {
+  it("returns the matching visible video by handle", () => {
+    document.body.innerHTML = `
+      <video id="first"></video>
+      <video id="second"></video>
+    `;
+
+    const first = document.getElementById("first") as HTMLVideoElement;
+    const second = document.getElementById("second") as HTMLVideoElement;
+    setVideoRect(first, 100, 100);
+    setVideoRect(second, 200, 100);
+
+    const secondHandle = getVideoHandle(second);
+
+    expect(findVisibleVideoByHandle(secondHandle)).toBe(second);
   });
 });
 
@@ -113,5 +185,40 @@ describe("createVideoMessageListener", () => {
         label: "https://example.com/message.mp4",
       },
     ]);
+  });
+
+  it("routes preview messages to the preview controller", async () => {
+    const previewController = {
+      clear: vi.fn(() => ({ ok: true as const })),
+      destroy: vi.fn(),
+      preview: vi.fn(() => ({ ok: true as const })),
+      refresh: vi.fn(),
+    };
+    const listener = createVideoMessageListener(undefined, previewController);
+    const sendResponse = vi.fn();
+
+    const shouldKeepOpen = listener(
+      {
+        type: "screenmate:preview-video",
+        active: true,
+        frameId: 5,
+        label: "Preview video",
+        videoId: "screenmate-video-1",
+      },
+      {} as never,
+      sendResponse,
+    );
+
+    expect(shouldKeepOpen).toBe(true);
+
+    await Promise.resolve();
+
+    expect(previewController.preview).toHaveBeenCalledWith({
+      active: true,
+      frameId: 5,
+      label: "Preview video",
+      videoId: "screenmate-video-1",
+    });
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true });
   });
 });
