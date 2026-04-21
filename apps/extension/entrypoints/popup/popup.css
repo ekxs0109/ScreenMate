@@ -1,0 +1,10 @@
+.popup-shell {
+  min-width: 280px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.popup-shell button {
+  width: 100%;
+}

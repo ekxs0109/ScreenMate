@@ -48,6 +48,9 @@ importers:
       '@screenmate/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@screenmate/webrtc-core':
+        specifier: workspace:*
+        version: link:../../packages/webrtc-core
       react:
         specifier: ^19.2.4
         version: 19.2.5
