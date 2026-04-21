@@ -10,6 +10,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@screenmate/shared": "workspace:*",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

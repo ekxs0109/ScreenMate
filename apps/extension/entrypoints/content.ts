@@ -1,39 +1,40 @@
+import { browser, type Browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 
-import { collectVisibleVideos } from "./content/video-detector";
+import { listVisibleVideoSources } from "./content/video-detector";
 
-type ListVideosMessage = {
+export type ListVideosMessage = {
   type: "screenmate:list-videos";
 };
 
 type ContentMessage = ListVideosMessage | { type: string };
 
-const extensionBrowser = (
-  globalThis as typeof globalThis & {
-    browser: {
-      runtime: {
-        onMessage: {
-          addListener: (
-            listener: (message: ContentMessage) => Promise<{ id: string; label: string }[]> | undefined,
-          ) => void;
-        };
-      };
-    };
-  }
-).browser;
+export function createVideoMessageListener() {
+  return (
+    message: ContentMessage,
+    _sender: Browser.runtime.MessageSender,
+    sendResponse: (response: Array<{ id: string; label: string }>) => void,
+  ) => {
+    if (message.type !== "screenmate:list-videos") {
+      return undefined;
+    }
+
+    queueMicrotask(() => {
+      sendResponse(listVisibleVideoSources());
+    });
+
+    return true;
+  };
+}
 
 export default defineContentScript({
   matches: ["<all_urls>"],
-  main() {
-    extensionBrowser.runtime.onMessage.addListener((message) => {
-      if (message.type === "screenmate:list-videos") {
-        return Promise.resolve(
-          collectVisibleVideos().map((video, index) => ({
-            id: video.id || `video-${index}`,
-            label: video.currentSrc || video.src || `Video ${index + 1}`,
-          })),
-        );
-      }
+  main(ctx) {
+    const listener = createVideoMessageListener();
+
+    browser.runtime.onMessage.addListener(listener);
+    ctx.onInvalidated(() => {
+      browser.runtime.onMessage.removeListener(listener);
     });
   },
 });
