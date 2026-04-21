@@ -5,16 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "build": "wrangler deploy --dry-run",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@screenmate/shared": "workspace:*",
     "hono": "^4.8.12",
     "nanoid": "^5.1.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260420.0",
+    "typescript": "^5.9.3",
     "wrangler": "^4.41.0"
   }
 }

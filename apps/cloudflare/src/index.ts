@@ -1,21 +1,36 @@
 import { Hono } from "hono";
 import { nanoid } from "nanoid";
-import { getDefaultIcePool } from "./lib/ice-pool";
-import { issueScopedToken } from "./lib/token";
+import {
+  type CloudflareBindings,
+  getRoomTokenSecret,
+} from "./env.js";
+import { getDefaultIcePool } from "./lib/ice-pool.js";
+import { issueScopedToken } from "./lib/token.js";
 
-const app = new Hono();
+const app = new Hono<{ Bindings: CloudflareBindings }>();
 
 app.get("/config/ice", (c) => {
   return c.json({ iceServers: getDefaultIcePool() });
 });
 
-app.post("/rooms", (c) => {
+app.post("/rooms", async (c) => {
   const roomId = `room_${nanoid(8)}`;
+  const hostSessionId = `host_${nanoid(12)}`;
+  const hostToken = await issueScopedToken(
+    {
+      roomId,
+      role: "host",
+      sessionId: hostSessionId,
+    },
+    {
+      secret: getRoomTokenSecret(c.env),
+    },
+  );
 
   return c.json(
     {
       roomId,
-      hostToken: issueScopedToken(roomId, "host"),
+      hostToken,
       signalingUrl: `/rooms/${roomId}/ws`,
       iceServers: getDefaultIcePool()
     },
