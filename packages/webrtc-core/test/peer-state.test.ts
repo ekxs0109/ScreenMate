@@ -9,4 +9,9 @@ describe("nextPeerState", () => {
   it("moves to failed after a failure event", () => {
     expect(nextPeerState("connecting", "fail")).toBe("failed");
   });
+
+  it("keeps the current state for unsupported transitions", () => {
+    expect(nextPeerState("idle", "connect")).toBe("idle");
+    expect(nextPeerState("closed", "begin")).toBe("closed");
+  });
 });
