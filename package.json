@@ -9,6 +9,7 @@
     "test": "turbo run test"
   },
   "devDependencies": {
+    "jsdom": "^29.0.2",
     "turbo": "^2.5.4",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
