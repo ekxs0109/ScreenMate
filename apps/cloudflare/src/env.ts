@@ -3,10 +3,14 @@ export type CloudflareBindings = {
   ROOM_TOKEN_SECRET?: string;
 };
 
-export const DEFAULT_ROOM_TOKEN_SECRET = "screenmate-dev-secret";
-
 export function getRoomTokenSecret(
   bindings?: Partial<CloudflareBindings>,
 ): string {
-  return bindings?.ROOM_TOKEN_SECRET ?? DEFAULT_ROOM_TOKEN_SECRET;
+  const secret = bindings?.ROOM_TOKEN_SECRET;
+
+  if (!secret) {
+    throw new Error("ROOM_TOKEN_SECRET binding is required");
+  }
+
+  return secret;
 }

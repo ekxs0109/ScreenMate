@@ -39,39 +39,43 @@ export async function verifyScopedToken(
   token: string,
   options: VerifyScopedTokenOptions,
 ): Promise<typeof tokenPayloadSchema._output | null> {
-  const [version, encodedPayload, encodedSignature] = token.split(".");
+  try {
+    const [version, encodedPayload, encodedSignature] = token.split(".");
 
-  if (
-    version !== TOKEN_VERSION ||
-    !encodedPayload ||
-    !encodedSignature
-  ) {
+    if (
+      version !== TOKEN_VERSION ||
+      !encodedPayload ||
+      !encodedSignature
+    ) {
+      return null;
+    }
+
+    const isValid = await verifySignature(
+      `${version}.${encodedPayload}`,
+      encodedSignature,
+      options.secret,
+    );
+
+    if (!isValid) {
+      return null;
+    }
+
+    const parsedPayload = tokenPayloadSchema.safeParse(
+      JSON.parse(decodeText(encodedPayload)),
+    );
+
+    if (!parsedPayload.success) {
+      return null;
+    }
+
+    if (parsedPayload.data.exp <= (options.now ?? nowInSeconds())) {
+      return null;
+    }
+
+    return parsedPayload.data;
+  } catch {
     return null;
   }
-
-  const isValid = await verifySignature(
-    `${version}.${encodedPayload}`,
-    encodedSignature,
-    options.secret,
-  );
-
-  if (!isValid) {
-    return null;
-  }
-
-  const parsedPayload = tokenPayloadSchema.safeParse(
-    JSON.parse(decodeText(encodedPayload)),
-  );
-
-  if (!parsedPayload.success) {
-    return null;
-  }
-
-  if (parsedPayload.data.exp <= (options.now ?? nowInSeconds())) {
-    return null;
-  }
-
-  return parsedPayload.data;
 }
 
 async function signToken(value: string, secret: string): Promise<Uint8Array> {

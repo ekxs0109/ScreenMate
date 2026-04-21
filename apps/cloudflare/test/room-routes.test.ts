@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ROOM_TOKEN_SECRET } from "../src/env";
 import app from "../src/index";
 import { verifyScopedToken } from "../src/lib/token";
+
+const TEST_SECRET = "screenmate-dev-secret";
 
 describe("room routes", () => {
   it("returns the ICE pool from GET /config/ice", async () => {
@@ -15,7 +16,11 @@ describe("room routes", () => {
   });
 
   it("creates a room token from POST /rooms", async () => {
-    const response = await app.request("/rooms", { method: "POST" });
+    const response = await app.request(
+      "/rooms",
+      { method: "POST" },
+      { ROOM_TOKEN_SECRET: TEST_SECRET } as never,
+    );
     const body = (await response.json()) as {
       roomId: string;
       hostToken: string;
@@ -30,11 +35,17 @@ describe("room routes", () => {
     expect(body.iceServers).toHaveLength(4);
 
     const payload = await verifyScopedToken(body.hostToken, {
-      secret: DEFAULT_ROOM_TOKEN_SECRET,
+      secret: TEST_SECRET,
     });
 
     expect(payload?.roomId).toBe(body.roomId);
     expect(payload?.role).toBe("host");
     expect(payload?.sessionId).toMatch(/^host_/);
+  });
+
+  it("requires a token secret for POST /rooms", async () => {
+    const response = await app.request("/rooms", { method: "POST" });
+
+    expect(response.status).toBe(500);
   });
 });
