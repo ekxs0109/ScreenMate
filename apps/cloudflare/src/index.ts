@@ -1,20 +1,24 @@
+import { errorCodes } from "@screenmate/shared";
 import { Hono } from "hono";
 import { nanoid } from "nanoid";
 import {
   type CloudflareBindings,
+  getNow,
   getRoomTokenSecret,
 } from "./env.js";
 export { RoomObject } from "./do/room-object.js";
 import { getDefaultIcePool } from "./lib/ice-pool.js";
-import { issueScopedToken } from "./lib/token.js";
+import { issueScopedToken, verifyScopedToken } from "./lib/token.js";
 
 const app = new Hono<{ Bindings: CloudflareBindings }>();
+const ROOM_TTL_MS = 2 * 60 * 60 * 1_000;
 
 app.get("/config/ice", (c) => {
   return c.json({ iceServers: getDefaultIcePool() });
 });
 
 app.post("/rooms", async (c) => {
+  const now = getNow(c.env);
   const roomId = `room_${nanoid(8)}`;
   const hostSessionId = `host_${nanoid(12)}`;
   const hostToken = await issueScopedToken(
@@ -25,22 +29,133 @@ app.post("/rooms", async (c) => {
     },
     {
       secret: getRoomTokenSecret(c.env),
+      now: Math.floor(now / 1_000),
     },
+  );
+  const roomObject = getRoomObject(c.env, roomId);
+
+  await roomObject.fetch(
+    buildInternalRequest("/internal/initialize", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        roomId,
+        hostSessionId,
+        createdAt: now,
+        expiresAt: now + ROOM_TTL_MS,
+      }),
+    }),
   );
 
   return c.json(
     {
       roomId,
+      hostSessionId,
       hostToken,
       signalingUrl: `/rooms/${roomId}/ws`,
-      iceServers: getDefaultIcePool()
+      wsUrl: buildWebSocketUrl(c.req.url, roomId),
+      iceServers: getDefaultIcePool(),
     },
-    201
+    201,
   );
 });
 
-app.get("/rooms/:roomId/ws", (c) => {
-  return c.text("WebSocket upgrade handled in a later step", 426);
+app.get("/rooms/:roomId", async (c) => {
+  const roomObject = getRoomObject(c.env, c.req.param("roomId"));
+
+  return roomObject.fetch(buildInternalRequest("/internal/state"));
+});
+
+app.post("/rooms/:roomId/join", async (c) => {
+  const roomId = c.req.param("roomId");
+  const roomObject = getRoomObject(c.env, roomId);
+  const joinValidation = await roomObject.fetch(
+    buildInternalRequest("/internal/join", { method: "POST" }),
+  );
+
+  if (!joinValidation.ok) {
+    return joinValidation;
+  }
+
+  const now = getNow(c.env);
+  const viewerSessionId = `viewer_${nanoid(12)}`;
+  const viewerToken = await issueScopedToken(
+    {
+      roomId,
+      role: "viewer",
+      sessionId: viewerSessionId,
+    },
+    {
+      secret: getRoomTokenSecret(c.env),
+      now: Math.floor(now / 1_000),
+    },
+  );
+
+  return c.json({
+    roomId,
+    sessionId: viewerSessionId,
+    viewerSessionId,
+    viewerToken,
+    signalingUrl: `/rooms/${roomId}/ws`,
+    wsUrl: buildWebSocketUrl(c.req.url, roomId),
+    iceServers: getDefaultIcePool(),
+  });
+});
+
+app.get("/rooms/:roomId/ws", async (c) => {
+  if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
+    return c.text("WebSocket upgrade required", 426);
+  }
+
+  const roomId = c.req.param("roomId");
+  const token = c.req.query("token");
+
+  if (!token) {
+    return c.json({ error: errorCodes.ROOM_NOT_FOUND }, 401);
+  }
+
+  const claims = await verifyScopedToken(token, {
+    secret: getRoomTokenSecret(c.env),
+    now: Math.floor(getNow(c.env) / 1_000),
+  });
+
+  if (!claims || claims.roomId !== roomId) {
+    return c.json({ error: errorCodes.ROOM_NOT_FOUND }, 401);
+  }
+
+  const headers = new Headers(c.req.raw.headers);
+  headers.set("x-screenmate-room-id", claims.roomId);
+  headers.set("x-screenmate-role", claims.role);
+  headers.set("x-screenmate-session-id", claims.sessionId);
+
+  const roomObject = getRoomObject(c.env, roomId);
+
+  return roomObject.fetch(
+    buildInternalRequest("/internal/ws", {
+      method: "GET",
+      headers,
+    }),
+  );
 });
 
 export default app;
+
+function getRoomObject(
+  env: CloudflareBindings,
+  roomId: string,
+): DurableObjectStub {
+  return env.ROOM_OBJECT.get(env.ROOM_OBJECT.idFromName(roomId));
+}
+
+function buildInternalRequest(path: string, init?: RequestInit): Request {
+  return new Request(`https://room.internal${path}`, init);
+}
+
+function buildWebSocketUrl(requestUrl: string, roomId: string): string {
+  const url = new URL(requestUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = `/rooms/${roomId}/ws`;
+  url.search = "";
+
+  return url.toString();
+}

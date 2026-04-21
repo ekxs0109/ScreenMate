@@ -1,6 +1,7 @@
 export type CloudflareBindings = {
   ROOM_OBJECT: DurableObjectNamespace;
   ROOM_TOKEN_SECRET?: string;
+  SCREENMATE_NOW?: number;
 };
 
 export function getRoomTokenSecret(
@@ -13,4 +14,8 @@ export function getRoomTokenSecret(
   }
 
   return secret;
+}
+
+export function getNow(bindings?: Partial<CloudflareBindings>): number {
+  return bindings?.SCREENMATE_NOW ?? Date.now();
 }
