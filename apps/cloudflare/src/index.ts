@@ -4,6 +4,7 @@ import {
   type CloudflareBindings,
   getRoomTokenSecret,
 } from "./env.js";
+export { RoomObject } from "./do/room-object.js";
 import { getDefaultIcePool } from "./lib/ice-pool.js";
 import { issueScopedToken } from "./lib/token.js";
 
@@ -36,6 +37,10 @@ app.post("/rooms", async (c) => {
     },
     201
   );
+});
+
+app.get("/rooms/:roomId/ws", (c) => {
+  return c.text("WebSocket upgrade handled in a later step", 426);
 });
 
 export default app;
