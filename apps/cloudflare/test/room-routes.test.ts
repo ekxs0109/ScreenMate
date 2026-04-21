@@ -142,6 +142,33 @@ describe("room routes", () => {
     });
   });
 
+  it("allows the viewer app to fetch room state from a different origin", async () => {
+    const roomNamespace = createRoomNamespace((roomId) => {
+      expect(roomId).toBe("room_demo");
+
+      return Response.json({
+        roomId,
+        state: "hosting",
+        hostConnected: true,
+        viewerCount: 2,
+      });
+    });
+    const response = await app.request(
+      "/rooms/room_demo",
+      {
+        headers: {
+          Origin: "http://localhost:4173",
+        },
+      },
+      { ROOM_OBJECT: roomNamespace, ROOM_TOKEN_SECRET: TEST_SECRET } as never,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost:4173",
+    );
+  });
+
   it("issues a viewer token from POST /rooms/:roomId/join when the room is joinable", async () => {
     const roomNamespace = createRoomNamespace((roomId, request) => {
       expect(roomId).toBe("room_demo");

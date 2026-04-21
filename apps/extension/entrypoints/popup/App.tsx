@@ -1,4 +1,5 @@
 import "./popup.css";
+import { buildScreenMateViewerRoomUrl } from "../../lib/config";
 import { useHostControls } from "./useHostControls";
 
 function App() {
@@ -11,6 +12,9 @@ function App() {
     stopSharing,
   } = useHostControls();
   const isBusy = snapshot.status === "starting";
+  const viewerRoomUrl = snapshot.roomId
+    ? buildScreenMateViewerRoomUrl(snapshot.roomId)
+    : null;
 
   return (
     <main className="popup-shell">
@@ -19,6 +23,19 @@ function App() {
       <p>{snapshot.status}</p>
       <p className="popup-label">Room</p>
       <p>{snapshot.roomId ?? "Not started"}</p>
+      <p className="popup-label">Viewer URL</p>
+      {viewerRoomUrl ? (
+        <a
+          className="popup-link"
+          href={viewerRoomUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {viewerRoomUrl}
+        </a>
+      ) : (
+        <p>Not started</p>
+      )}
       <p className="popup-label">Viewers</p>
       <p>{snapshot.viewerCount}</p>
       <p className="popup-label">Source</p>

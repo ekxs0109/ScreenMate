@@ -21,6 +21,9 @@ ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 - `WXT_PUBLIC_SCREENMATE_API_BASE_URL`
   Optional. Used by the extension to point at the Cloudflare API.
   Default: `http://localhost:8787`
+- `WXT_PUBLIC_SCREENMATE_VIEWER_BASE_URL`
+  Optional. Used by the extension popup to build the viewer room link.
+  Default: `http://localhost:4173`
 - `VITE_API_BASE_URL`
   Optional. Used by the viewer web app to point at the Cloudflare API.
   Default: `http://127.0.0.1:8787`
@@ -32,7 +35,7 @@ ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 3. Load the built extension from `apps/extension/.output/chrome-mv3`.
 4. Open a page with a normal capturable `video` element.
 5. Click `Start sharing` in the extension popup.
-6. Copy the displayed room code into the viewer page and join.
+6. Open the displayed viewer room link from the extension popup, or paste the room code into the viewer page and join.
 
 ## Commands
 

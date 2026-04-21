@@ -1,5 +1,6 @@
 import { errorCodes } from "@screenmate/shared";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { nanoid } from "nanoid";
 import {
   type CloudflareBindings,
@@ -12,6 +13,16 @@ import { issueScopedToken, verifyScopedToken } from "./lib/token.js";
 
 const app = new Hono<{ Bindings: CloudflareBindings }>();
 const ROOM_TTL_MS = 2 * 60 * 60 * 1_000;
+
+app.use(
+  "*",
+  cors({
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    origin(origin) {
+      return origin || "*";
+    },
+  }),
+);
 
 app.get("/config/ice", (c) => {
   return c.json({ iceServers: getDefaultIcePool() });

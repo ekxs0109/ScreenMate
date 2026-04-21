@@ -280,4 +280,34 @@ describe("createHostController", () => {
     expect(snapshot.status).toBe("idle");
     expect(snapshot.errorMessage).toContain(errorCodes.NO_VIDEO_FOUND);
   });
+
+  it("includes the room creation error body when the API rejects the request", async () => {
+    document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
+
+    const video = document.getElementById("host") as HTMLVideoElement;
+    setVideoRect(video, 640, 360);
+    Object.defineProperty(video, "captureStream", {
+      configurable: true,
+      value: vi.fn(() => ({ getTracks: () => [{ stop: vi.fn(), kind: "video" }] })),
+    });
+    const selectedVideoId = getVideoHandle(video);
+
+    const controller = createHostController({
+      apiBaseUrl: "https://api.screenmate.dev",
+      fetchImpl: vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => '{"error":"ROOM_TOKEN_SECRET binding is required"}',
+        headers: new Headers({ "content-type": "application/json" }),
+      }),
+      WebSocketImpl: MockWebSocket as never,
+      RTCPeerConnectionImpl: MockRTCPeerConnection as never,
+    });
+
+    const snapshot = await controller.start(selectedVideoId);
+
+    expect(snapshot.status).toBe("idle");
+    expect(snapshot.errorMessage).toContain("Failed to create room (500)");
+    expect(snapshot.errorMessage).toContain("ROOM_TOKEN_SECRET binding is required");
+  });
 });

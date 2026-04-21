@@ -35,6 +35,16 @@
   gap: 8px;
 }
 
+.popup-link {
+  color: #67e8f9;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.popup-link:hover {
+  text-decoration: underline;
+}
+
 .popup-video {
   display: flex;
   gap: 10px;

@@ -76,7 +76,17 @@ export function createVideoMessageListener(
           href: window.location.href,
           videoId,
         });
-        void hostController.start(videoId).then(sendResponse);
+        void hostController.start(videoId).then((snapshot) => {
+          contentLogger.info("Share start finished.", {
+            errorMessage: snapshot.errorMessage,
+            href: window.location.href,
+            roomId: snapshot.roomId,
+            snapshot,
+            status: snapshot.status,
+            videoId,
+          });
+          sendResponse(snapshot);
+        });
       });
 
       return true;
@@ -87,7 +97,16 @@ export function createVideoMessageListener(
         contentLogger.info("Stopping active share.", {
           href: window.location.href,
         });
-        void hostController.stop().then(sendResponse);
+        void hostController.stop().then((snapshot) => {
+          contentLogger.info("Share stop finished.", {
+            errorMessage: snapshot.errorMessage,
+            href: window.location.href,
+            roomId: snapshot.roomId,
+            snapshot,
+            status: snapshot.status,
+          });
+          sendResponse(snapshot);
+        });
       });
 
       return true;

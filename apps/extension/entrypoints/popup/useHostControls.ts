@@ -10,6 +10,11 @@ import {
 const POLL_INTERVAL_MS = 2_000;
 const popupLogger = createLogger("popup");
 
+export type PopupLogger = Pick<
+  ReturnType<typeof createLogger>,
+  "error" | "info" | "warn"
+>;
+
 export function useHostControls() {
   const [snapshot, setSnapshot] = useState<HostSnapshot>(createHostSnapshot());
   const [videos, setVideos] = useState<TabVideoSource[]>([]);
@@ -177,11 +182,25 @@ export function useHostControls() {
               videoId: selectedVideo.id,
               frameId: selectedVideo.frameId,
             })
-            .then((nextSnapshot) => setSnapshot(normalizeSnapshot(nextSnapshot)))
-            .catch(() => {
+            .then((nextSnapshot) => {
+              const normalizedSnapshot = normalizeSnapshot(nextSnapshot);
+              reportStartSharingResult(
+                popupLogger,
+                normalizedSnapshot,
+                nextSnapshot,
+              );
+              setSnapshot(normalizedSnapshot);
+            })
+            .catch((error) => {
+              popupLogger.error("Start sharing runtime request failed.", {
+                error: error instanceof Error ? error.message : String(error),
+              });
               setSnapshot(
                 createHostSnapshot({
-                  errorMessage: "Could not start sharing in the active tab.",
+                  errorMessage:
+                    error instanceof Error && error.message
+                      ? error.message
+                      : "Could not start sharing in the active tab.",
                 }),
               );
             });
@@ -189,7 +208,15 @@ export function useHostControls() {
     stopSharing: () =>
       browser.runtime
         .sendMessage({ type: "screenmate:stop-sharing" })
-        .then((nextSnapshot) => setSnapshot(normalizeSnapshot(nextSnapshot)))
+        .then((nextSnapshot) => {
+          const normalizedSnapshot = normalizeSnapshot(nextSnapshot);
+          popupLogger.info("Stop sharing returned a snapshot.", {
+            errorMessage: normalizedSnapshot.errorMessage,
+            roomId: normalizedSnapshot.roomId,
+            status: normalizedSnapshot.status,
+          });
+          setSnapshot(normalizedSnapshot);
+        })
         .catch(() => {
           setSnapshot(
             createHostSnapshot({
@@ -242,4 +269,26 @@ function normalizeVideos(value: unknown): TabVideoSource[] {
 
 function getVideoSelectionKey(video: TabVideoSource): string {
   return `${video.frameId}:${video.id}`;
+}
+
+export function reportStartSharingResult(
+  logger: PopupLogger,
+  normalizedSnapshot: HostSnapshot,
+  rawSnapshot: unknown,
+) {
+  const details = {
+    errorMessage: normalizedSnapshot.errorMessage,
+    normalizedSnapshot,
+    rawSnapshot,
+    roomId: normalizedSnapshot.roomId,
+    sourceLabel: normalizedSnapshot.sourceLabel,
+    status: normalizedSnapshot.status,
+  };
+
+  if (normalizedSnapshot.errorMessage) {
+    logger.error("Start sharing returned an error snapshot.", details);
+    return;
+  }
+
+  logger.info("Start sharing returned a snapshot.", details);
 }

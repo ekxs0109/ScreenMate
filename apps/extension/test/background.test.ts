@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createHostMessageHandler,
+  createInternalHostNetworkHandler,
   createHostRuntimeMessageListener,
   type HostMessage,
 } from "../entrypoints/background";
@@ -280,10 +281,13 @@ describe("createHostMessageHandler", () => {
         frameId: 0,
       },
     ]);
-    const listener = createHostRuntimeMessageListener(handler);
+    const internalHandler = vi.fn().mockReturnValue(undefined);
     const sendResponse = vi.fn();
 
-    const keepChannelOpen = listener(
+    const keepChannelOpen = createHostRuntimeMessageListener(
+      handler,
+      internalHandler,
+    )(
       { type: "screenmate:list-videos" },
       {} as never,
       sendResponse,
@@ -300,5 +304,71 @@ describe("createHostMessageHandler", () => {
         frameId: 0,
       },
     ]);
+  });
+
+  it("does not swallow normal host messages when the internal handler is present", async () => {
+    const handler = vi.fn().mockResolvedValue([
+      {
+        id: "screenmate-video-1",
+        label: "https://example.com/a.mp4 [iframe #0]",
+        frameId: 0,
+      },
+    ]);
+    const internalHandler = createInternalHostNetworkHandler({
+      fetchImpl: vi.fn() as typeof fetch,
+    });
+    const sendResponse = vi.fn();
+
+    const keepChannelOpen = createHostRuntimeMessageListener(
+      handler,
+      internalHandler,
+    )(
+      { type: "screenmate:list-videos" },
+      {} as never,
+      sendResponse,
+    );
+
+    expect(keepChannelOpen).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(handler).toHaveBeenCalledWith({ type: "screenmate:list-videos" });
+    expect(sendResponse).toHaveBeenCalledWith([
+      {
+        id: "screenmate-video-1",
+        label: "https://example.com/a.mp4 [iframe #0]",
+        frameId: 0,
+      },
+    ]);
+  });
+
+  it("creates a room through the extension background network context", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        roomId: "room_123",
+        hostToken: "host-token",
+        signalingUrl: "/rooms/room_123/ws",
+        iceServers: [{ urls: ["stun:stun.screenmate.dev"] }],
+      }),
+    });
+    const handler = createInternalHostNetworkHandler({
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const result = await handler({
+      type: "screenmate:create-room",
+      apiBaseUrl: "http://localhost:8787",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith("http://localhost:8787/rooms", {
+      method: "POST",
+    });
+    expect(result).toEqual({
+      roomId: "room_123",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [{ urls: ["stun:stun.screenmate.dev"] }],
+    });
   });
 });

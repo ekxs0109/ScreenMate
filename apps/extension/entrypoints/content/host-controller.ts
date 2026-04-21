@@ -1,3 +1,4 @@
+import { browser } from "wxt/browser";
 import { normalizeIceServers } from "@screenmate/webrtc-core";
 import {
   errorCodes,
@@ -8,6 +9,11 @@ import {
   getScreenMateApiBaseUrl,
   toScreenMateWebSocketUrl,
 } from "../../lib/config";
+import { createLogger } from "../../lib/logger";
+import {
+  requestRoomCreation,
+  type RoomCreateResponse,
+} from "../../lib/room-api";
 import { createHostSessionStore, type HostSnapshot } from "./host-session";
 import { createPeerRegistry } from "./peer-manager";
 import { captureVideoStream } from "./video-capture";
@@ -15,14 +21,6 @@ import {
   collectVisibleVideos,
   findVisibleVideoByHandle,
 } from "./video-detector";
-
-type RoomCreateResponse = {
-  roomId: string;
-  hostSessionId?: string;
-  hostToken: string;
-  signalingUrl: string;
-  iceServers?: RTCIceServer[];
-};
 
 type HostSocket = Pick<
   WebSocket,
@@ -43,6 +41,7 @@ type HostPeerConnection = Pick<
 
 type HostControllerDependencies = {
   apiBaseUrl?: string;
+  createRoomImpl?: (apiBaseUrl: string) => Promise<RoomCreateResponse>;
   fetchImpl?: typeof fetch;
   WebSocketImpl?: new (url: string) => HostSocket;
   RTCPeerConnectionImpl?: new (
@@ -59,13 +58,19 @@ type ActiveHostRoom = {
   iceServers: RTCIceServer[];
 };
 
+const hostLogger = createLogger("host");
+
 export function createHostController(
   dependencies: HostControllerDependencies = {},
 ) {
   const store = createHostSessionStore();
   const peers = createPeerRegistry<HostPeerConnection>();
   const apiBaseUrl = dependencies.apiBaseUrl ?? getScreenMateApiBaseUrl();
-  const fetchImpl = dependencies.fetchImpl ?? fetch;
+  const createRoomImpl =
+    dependencies.createRoomImpl ??
+    (dependencies.fetchImpl
+      ? ((baseUrl: string) => createRoomWithFetch(dependencies.fetchImpl!, baseUrl))
+      : requestRoomCreationFromBackground);
   const WebSocketImpl = dependencies.WebSocketImpl ?? globalThis.WebSocket;
   const RTCPeerConnectionImpl =
     dependencies.RTCPeerConnectionImpl ?? globalThis.RTCPeerConnection;
@@ -101,16 +106,34 @@ export function createHostController(
       }
 
       const sourceLabel = video.currentSrc || video.src || "Visible video";
+      hostLogger.info("Preparing to share selected video.", {
+        selectedVideoId: selectedVideoId ?? null,
+        sourceLabel,
+        videoCurrentTime: video.currentTime,
+        videoReadyState: video.readyState,
+      });
       store.beginStarting(sourceLabel);
 
       const stream = captureVideoStream(video);
-      if (stream.getTracks().length === 0) {
+      const streamTracks = stream.getTracks();
+      hostLogger.info("Captured media stream from selected video.", {
+        audioTracks: streamTracks.filter((track) => track.kind === "audio").length,
+        trackKinds: streamTracks.map((track) => track.kind),
+        totalTracks: streamTracks.length,
+        videoTracks: streamTracks.filter((track) => track.kind === "video").length,
+      });
+      if (streamTracks.length === 0) {
         throw new Error(
           `${errorCodes.CAPTURE_NOT_SUPPORTED}: stream has no tracks`,
         );
       }
 
-      const roomResponse = await createRoom(fetchImpl, apiBaseUrl);
+      const roomResponse = await createRoomImpl(apiBaseUrl);
+      hostLogger.info("Created host room.", {
+        iceServerCount: roomResponse.iceServers?.length ?? 0,
+        roomId: roomResponse.roomId,
+        signalingUrl: roomResponse.signalingUrl,
+      });
       const sessionId =
         roomResponse.hostSessionId ??
         decodeHostToken(roomResponse.hostToken)?.sessionId ??
@@ -138,12 +161,24 @@ export function createHostController(
       };
 
       attachSocketListeners(room);
+      hostLogger.info("Connecting signaling socket.", {
+        roomId: room.roomId,
+        sessionId,
+        socketUrl: toScreenMateWebSocketUrl(
+          roomResponse.signalingUrl,
+          roomResponse.hostToken,
+          apiBaseUrl,
+        ),
+      });
       await waitForSocketOpen(socket);
 
       activeRoom = room;
       store.setRoom(room.roomId);
       return store.getSnapshot();
     } catch (error) {
+      hostLogger.error("Starting share failed.", {
+        error: toErrorMessage(error),
+      });
       cleanupSession();
       return store.setError(toHostErrorMessage(error));
     }
@@ -190,7 +225,15 @@ export function createHostController(
     room.socket.addEventListener("message", (event) => {
       void handleSocketMessage(room, event);
     });
+    room.socket.addEventListener("open", () => {
+      hostLogger.info("Signaling socket opened.", {
+        roomId: room.roomId,
+      });
+    });
     room.socket.addEventListener("close", () => {
+      hostLogger.warn("Signaling socket closed.", {
+        roomId: room.roomId,
+      });
       if (!activeRoom || activeRoom.roomId !== room.roomId) {
         return;
       }
@@ -200,6 +243,9 @@ export function createHostController(
       }
     });
     room.socket.addEventListener("error", () => {
+      hostLogger.error("Signaling socket errored.", {
+        roomId: room.roomId,
+      });
       if (!activeRoom || activeRoom.roomId !== room.roomId) {
         return;
       }
@@ -229,6 +275,11 @@ export function createHostController(
     }
 
     const envelope = parsedEnvelope.data;
+    hostLogger.debug("Received signaling message.", {
+      messageType: envelope.messageType,
+      roomId: envelope.roomId,
+      sessionId: envelope.sessionId,
+    });
     if (envelope.roomId !== room.roomId) {
       return;
     }
@@ -372,25 +423,57 @@ export function createHostController(
   };
 }
 
-async function createRoom(
+async function createRoomWithFetch(
   fetchImpl: typeof fetch,
   apiBaseUrl: string,
 ): Promise<RoomCreateResponse> {
-  const response = await fetchImpl(`${apiBaseUrl}/rooms`, {
-    method: "POST",
+  hostLogger.info("Requesting room creation from API.", {
+    endpoint: `${apiBaseUrl}/rooms`,
+    networkContext: "content-fetch",
+  });
+  try {
+    return await requestRoomCreation(fetchImpl, apiBaseUrl);
+  } catch (error) {
+    hostLogger.error("Room creation request failed.", {
+      error: toErrorMessage(error),
+      networkContext: "content-fetch",
+    });
+    throw error;
+  }
+}
+
+async function requestRoomCreationFromBackground(
+  apiBaseUrl: string,
+): Promise<RoomCreateResponse> {
+  hostLogger.info("Requesting room creation via extension background.", {
+    endpoint: `${apiBaseUrl}/rooms`,
+    networkContext: "extension-background",
   });
 
-  if (!response.ok) {
-    throw new Error(`Failed to create room (${response.status}).`);
+  const response = await browser.runtime.sendMessage({
+    type: "screenmate:create-room",
+    apiBaseUrl,
+  });
+
+  if (
+    !response ||
+    typeof response !== "object" ||
+    typeof (response as RoomCreateResponse).roomId !== "string" ||
+    typeof (response as RoomCreateResponse).hostToken !== "string" ||
+    typeof (response as RoomCreateResponse).signalingUrl !== "string"
+  ) {
+    const error =
+      typeof (response as { error?: unknown })?.error === "string"
+        ? (response as { error: string }).error
+        : "Background room creation returned an invalid response.";
+    hostLogger.error("Background room creation failed.", {
+      error,
+      networkContext: "extension-background",
+    });
+    throw new Error(error);
   }
 
-  const payload = (await response.json()) as RoomCreateResponse;
-
-  if (!payload.roomId || !payload.hostToken || !payload.signalingUrl) {
-    throw new Error("Room creation returned an incomplete response.");
-  }
-
-  return payload;
+  return response as RoomCreateResponse;
 }
 
 function decodeHostToken(token: string) {
@@ -462,4 +545,16 @@ function toHostErrorMessage(error: unknown): string {
   }
 
   return message;
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return "Unknown error";
 }

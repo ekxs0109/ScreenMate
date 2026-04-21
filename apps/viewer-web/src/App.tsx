@@ -1,25 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { JoinForm } from "./components/JoinForm";
 import { ViewerPlayer } from "./components/ViewerPlayer";
+import {
+  getViewerApiBaseUrl,
+  getViewerRoomIdFromLocation,
+} from "./lib/config";
 import {
   initialViewerSessionState,
   type ViewerSessionState,
 } from "./lib/session-state";
 import { ViewerSession } from "./viewer-session";
 
-const API_BASE_URL =
-  import.meta.env.VITE_SCREENMATE_API_BASE_URL ??
-  import.meta.env.VITE_API_BASE_URL ??
-  window.location.origin;
-
 export default function App() {
+  const initialRoomId = getViewerRoomIdFromLocation();
   const [session, setSession] = useState<ViewerSessionState>(initialViewerSessionState);
   const [viewerSession] = useState(
     () =>
       new ViewerSession({
-        apiBaseUrl: API_BASE_URL,
+        apiBaseUrl: getViewerApiBaseUrl(),
       }),
   );
+  const autoJoinedRoomIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = viewerSession.subscribe(setSession);
@@ -30,6 +31,18 @@ export default function App() {
     };
   }, [viewerSession]);
 
+  useEffect(() => {
+    if (
+      !initialRoomId ||
+      autoJoinedRoomIdRef.current === initialRoomId
+    ) {
+      return;
+    }
+
+    autoJoinedRoomIdRef.current = initialRoomId;
+    void viewerSession.join(initialRoomId);
+  }, [initialRoomId, viewerSession]);
+
   async function handleJoin(roomCode: string) {
     await viewerSession.join(roomCode);
   }
@@ -39,7 +52,9 @@ export default function App() {
       <section className="viewer-card">
         <h1>ScreenMate Viewer</h1>
         <p className="viewer-status">
-          Join a room with the code from the host extension popup.
+          {initialRoomId
+            ? "Joining the room from the shared link."
+            : "Join a room with the code from the host extension popup."}
         </p>
         <JoinForm isBusy={session.status === "joining"} onJoin={handleJoin} />
         {session.error ? <p className="viewer-error">{session.error}</p> : null}

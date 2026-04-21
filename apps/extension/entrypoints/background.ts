@@ -2,6 +2,10 @@ import { browser, type Browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
 import { createLogger } from "../lib/logger";
 import {
+  requestRoomCreation,
+  type RoomCreateResponse,
+} from "../lib/room-api";
+import {
   createHostSnapshot,
   type HostSnapshot,
 } from "./content/host-session";
@@ -25,8 +29,18 @@ export type TabVideoSource = LocalVideoSource & {
   frameId: number;
 };
 
-type PreviewAck = { ok: true };
+export type PreviewAck = { ok: true };
+export type InternalHostNetworkMessage = {
+  type: "screenmate:create-room";
+  apiBaseUrl: string;
+};
+export type InternalHostNetworkErrorResponse = {
+  error: string;
+};
 type TabMessageResponse = HostSnapshot | LocalVideoSource[] | PreviewAck;
+type InternalHostNetworkResponse =
+  | RoomCreateResponse
+  | InternalHostNetworkErrorResponse;
 const backgroundLogger = createLogger("background");
 
 function isHostMessage(message: unknown): message is HostMessage {
@@ -68,6 +82,10 @@ type HostMessageHandlerDependencies = {
     message: HostMessage,
     options?: { frameId?: number },
   ) => Promise<TabMessageResponse>;
+};
+
+type InternalHostNetworkHandlerDependencies = {
+  fetchImpl: typeof fetch;
 };
 
 export function createHostMessageHandler(
@@ -118,12 +136,39 @@ export function createHostMessageHandler(
 
 export function createHostRuntimeMessageListener(
   handler: ReturnType<typeof createHostMessageHandler>,
+  internalHandler: ReturnType<typeof createInternalHostNetworkHandler>,
 ) {
   return (
     message: unknown,
     _sender: Browser.runtime.MessageSender,
-    sendResponse: (response?: TabMessageResponse | HostSnapshot | TabVideoSource[]) => void,
+    sendResponse: (
+      response?:
+        | TabMessageResponse
+        | HostSnapshot
+        | TabVideoSource[]
+        | InternalHostNetworkResponse,
+    ) => void,
   ) => {
+    const internalResult = internalHandler(message);
+
+    if (internalResult !== undefined) {
+      void Promise.resolve(internalResult)
+        .then((response) => {
+          sendResponse(response);
+        })
+        .catch((error) => {
+          backgroundLogger.error("Internal network handler failed.", {
+            error: toErrorMessage(error),
+            message,
+          });
+          sendResponse({
+            error: `Background network handler failed: ${toErrorMessage(error)}`,
+          });
+        });
+
+      return true;
+    }
+
     const result = handler(message);
 
     if (result === undefined) {
@@ -176,11 +221,51 @@ export default defineBackground(() => {
       ) as Promise<TabMessageResponse>;
     },
   });
+  const internalHandler = createInternalHostNetworkHandler({
+    fetchImpl: fetch,
+  });
 
   browser.runtime.onMessage.addListener(
-    createHostRuntimeMessageListener(handler),
+    createHostRuntimeMessageListener(handler, internalHandler),
   );
 });
+
+export function createInternalHostNetworkHandler(
+  dependencies: InternalHostNetworkHandlerDependencies,
+) {
+  return (
+    message: unknown,
+  ): Promise<InternalHostNetworkResponse> | undefined => {
+    if (!isInternalHostNetworkMessage(message)) {
+      return undefined;
+    }
+
+    return (async () => {
+      backgroundLogger.info("Creating room via extension background.", {
+        endpoint: `${message.apiBaseUrl}/rooms`,
+      });
+
+      try {
+        const response = await requestRoomCreation(
+          dependencies.fetchImpl,
+          message.apiBaseUrl,
+        );
+        backgroundLogger.info("Background room creation succeeded.", {
+          roomId: response.roomId,
+          signalingUrl: response.signalingUrl,
+        });
+        return response;
+      } catch (error) {
+        const formattedError = toErrorMessage(error);
+        backgroundLogger.error("Background room creation failed.", {
+          endpoint: `${message.apiBaseUrl}/rooms`,
+          error: formattedError,
+        });
+        return { error: formattedError };
+      }
+    })();
+  };
+}
 
 async function listVideosForTab(
   dependencies: HostMessageHandlerDependencies,
@@ -394,6 +479,15 @@ async function sendMessageToFrame(
       });
     }
 
+    backgroundLogger.info("Frame-targeted message returned snapshot.", {
+      errorMessage: response.errorMessage,
+      frameId,
+      roomId: response.roomId,
+      status: response.status,
+      tabId,
+      type: message.type,
+    });
+
     return response;
   } catch (error) {
     backgroundLogger.error("Frame-targeted message failed.", {
@@ -463,6 +557,19 @@ function getSnapshotPriority(snapshot: HostSnapshot): number {
 
 function formatFrameScopedLabel(label: string, frameId: number): string {
   return frameId === 0 ? label : `${label} [iframe #${frameId}]`;
+}
+
+function isInternalHostNetworkMessage(
+  message: unknown,
+): message is InternalHostNetworkMessage {
+  if (typeof message !== "object" || message === null) {
+    return false;
+  }
+
+  return (
+    (message as InternalHostNetworkMessage).type === "screenmate:create-room" &&
+    typeof (message as InternalHostNetworkMessage).apiBaseUrl === "string"
+  );
 }
 
 function toErrorMessage(error: unknown): string {
