@@ -39,6 +39,13 @@ export async function buildSessionIceServers(
   input: TurnCredentialInput,
   options: TurnCredentialOptions,
 ) {
+  if (options.urls.length === 0) {
+    return {
+      iceServers: BASE_STUN_SERVERS,
+      turnCredentialExpiresAt: null,
+    };
+  }
+
   const issued = await issueTurnCredentials(input, options);
 
   return {

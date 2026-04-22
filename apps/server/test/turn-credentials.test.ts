@@ -57,4 +57,26 @@ describe("turn credentials", () => {
       },
     ]);
   });
+
+  it("returns stun-only ICE when no turn urls are configured", async () => {
+    const ice = await buildSessionIceServers(
+      {
+        roomId: "room_demo",
+        sessionId: "viewer_demo",
+        role: "viewer",
+      },
+      {
+        nowSeconds: 1_700_000_000,
+        secret: "turn-secret",
+        ttlSeconds: 600,
+        urls: [],
+      },
+    );
+
+    expect(ice.turnCredentialExpiresAt).toBeNull();
+    expect(ice.iceServers).toEqual([
+      { urls: ["stun:stun.miwifi.com:3478"] },
+      { urls: ["stun:stun.cloudflare.com:3478"] },
+    ]);
+  });
 });
