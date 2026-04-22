@@ -49,19 +49,20 @@ ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 
 ## Local TURN
 
-Local TURN for ScreenMate runs through Docker so local ICE responses match non-local environments.
+Local TURN for ScreenMate runs through Docker for a simple local relay path. This setup is intentionally plain TURN on `3478` and does not enable local TLS/`turns:` listeners.
 
 ```bash
 docker compose -f docker-compose.turn.yml up -d
 export TURN_AUTH_SECRET=screenmate-local-turn-secret
 export TURN_REALM=screenmate.local
-export TURN_URLS="turn:127.0.0.1:3478?transport=udp,turn:127.0.0.1:3478?transport=tcp,turns:127.0.0.1:5349?transport=tcp"
+export TURN_URLS="turn:127.0.0.1:3478?transport=udp,turn:127.0.0.1:3478?transport=tcp"
 pnpm --filter @screenmate/cloudflare dev
 ```
 
 1. `docker compose -f docker-compose.turn.yml up -d`
 2. Set `TURN_AUTH_SECRET`, `TURN_REALM`, and `TURN_URLS` for `apps/server`
-3. Run `pnpm --filter @screenmate/cloudflare dev`
+3. Use only `turn:` URLs locally unless you also wire coturn certificate and key files yourself
+4. Run `pnpm --filter @screenmate/cloudflare dev`
 
 ## Commands
 

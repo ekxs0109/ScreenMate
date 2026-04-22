@@ -3,12 +3,12 @@
 - [ ] Start the Cloudflare worker with a real `ROOM_TOKEN_SECRET`.
 - [ ] Start local TURN with `docker compose -f docker-compose.turn.yml up -d`.
 - [ ] Confirm the worker has `TURN_AUTH_SECRET`, `TURN_REALM`, and `TURN_URLS` configured.
+- [ ] Verify a room creation response contains a TURN server entry.
 - [ ] Start the viewer web app and confirm the join page renders.
 - [ ] Build and load the extension from `apps/extension/.output/chrome-mv3`.
 - [ ] Open a page with at least one normal capturable `video` element.
 - [ ] Open the popup and verify it shows `Room idle · unattached` before sharing.
 - [ ] Click `Start room` and confirm a real room code appears.
-- [ ] Verify the room creation response contains a TURN server entry before opening the extension.
 - [ ] Attach the selected video and confirm the popup shows `attached`.
 - [ ] Join from the viewer web app with the room code.
 - [ ] Confirm the viewer transitions from joining/waiting to connected.
