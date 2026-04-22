@@ -1,11 +1,14 @@
 # Manual Room Streaming Checklist
 
 - [ ] Start the Cloudflare worker with a real `ROOM_TOKEN_SECRET`.
+- [ ] Start local TURN with `docker compose -f docker-compose.turn.yml up -d`.
+- [ ] Confirm the worker has `TURN_AUTH_SECRET`, `TURN_REALM`, and `TURN_URLS` configured.
 - [ ] Start the viewer web app and confirm the join page renders.
 - [ ] Build and load the extension from `apps/extension/.output/chrome-mv3`.
 - [ ] Open a page with at least one normal capturable `video` element.
 - [ ] Open the popup and verify it shows `Room idle · unattached` before sharing.
 - [ ] Click `Start room` and confirm a real room code appears.
+- [ ] Verify the room creation response contains a TURN server entry before opening the extension.
 - [ ] Attach the selected video and confirm the popup shows `attached`.
 - [ ] Join from the viewer web app with the room code.
 - [ ] Confirm the viewer transitions from joining/waiting to connected.
@@ -18,3 +21,4 @@
 - [ ] Stop the room from the popup and confirm the viewer receives an ended state.
 - [ ] Verify the popup shows a clear message when no capturable video exists.
 - [ ] Verify the popup shows a clear message when capture is unsupported.
+- [ ] In `chrome://webrtc-internals`, confirm at least one successful session reports a selected `relay` candidate pair when direct connectivity is blocked.

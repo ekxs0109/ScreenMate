@@ -1,0 +1,15 @@
+services:
+  coturn:
+    image: coturn/coturn:4.6.3
+    command:
+      - -c
+      - /etc/coturn/turnserver.conf
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "5349:5349"
+      - "49160-49200:49160-49200/udp"
+    volumes:
+      - ./docker/coturn/turnserver.local.conf:/etc/coturn/turnserver.conf:ro
+    environment:
+      TURN_SHARED_SECRET: screenmate-local-turn-secret

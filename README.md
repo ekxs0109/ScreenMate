@@ -18,6 +18,16 @@ ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 
 - `ROOM_TOKEN_SECRET`
   Used by `apps/server` to sign host and viewer session tokens.
+- `TURN_AUTH_SECRET`
+  Shared secret used to sign coturn REST credentials.
+- `TURN_REALM`
+  TURN auth realm.
+  Example: `screenmate.local`
+- `TURN_URLS`
+  Comma-separated TURN URLs returned to clients.
+- `TURN_TTL_SECONDS`
+  Lifetime of issued TURN credentials.
+  Default: `600`
 - `WXT_PUBLIC_SCREENMATE_API_BASE_URL`
   Optional. Used by the extension to point at the Cloudflare API.
   Default: `http://localhost:8787`
@@ -36,6 +46,22 @@ ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 4. Open a page with a normal capturable `video` element.
 5. Click `Start sharing` in the extension popup.
 6. Open the displayed viewer room link from the extension popup, or paste the room code into the viewer page and join.
+
+## Local TURN
+
+Local TURN for ScreenMate runs through Docker so local ICE responses match non-local environments.
+
+```bash
+docker compose -f docker-compose.turn.yml up -d
+export TURN_AUTH_SECRET=screenmate-local-turn-secret
+export TURN_REALM=screenmate.local
+export TURN_URLS="turn:127.0.0.1:3478?transport=udp,turn:127.0.0.1:3478?transport=tcp,turns:127.0.0.1:5349?transport=tcp"
+pnpm --filter @screenmate/cloudflare dev
+```
+
+1. `docker compose -f docker-compose.turn.yml up -d`
+2. Set `TURN_AUTH_SECRET`, `TURN_REALM`, and `TURN_URLS` for `apps/server`
+3. Run `pnpm --filter @screenmate/cloudflare dev`
 
 ## Commands
 
