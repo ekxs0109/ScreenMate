@@ -146,7 +146,7 @@ vite.config.ts.timestamp-*
 .wxt/
 .turbo/
 apps/viewer-web/dist/
-apps/cloudflare/.wrangler/
+apps/server/.wrangler/
 apps/extension/.output/
 apps/extension/.wxt/
 docs/.DS_Store

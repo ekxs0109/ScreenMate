@@ -3,13 +3,13 @@
 ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 
 - `apps/extension` hosts the selected page video from a browser extension.
-- `apps/cloudflare` creates rooms, issues scoped tokens, and relays signaling through Durable Objects.
+- `apps/server` creates rooms, issues scoped tokens, and relays signaling through Durable Objects.
 - `apps/viewer-web` lets viewers join with a room code and receive the forwarded WebRTC stream.
 
 ## Apps
 
 - `apps/extension` - WXT browser extension for hosts.
-- `apps/cloudflare` - Cloudflare Worker plus Durable Object signaling backend.
+- `apps/server` - Cloudflare Worker plus Durable Object signaling backend.
 - `apps/viewer-web` - Vite/React viewer app.
 - `packages/shared` - Shared room, signaling, token, and error schemas.
 - `packages/webrtc-core` - Shared ICE and peer-state helpers.
@@ -17,7 +17,7 @@ ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 ## Environment
 
 - `ROOM_TOKEN_SECRET`
-  Used by `apps/cloudflare` to sign host and viewer session tokens.
+  Used by `apps/server` to sign host and viewer session tokens.
 - `WXT_PUBLIC_SCREENMATE_API_BASE_URL`
   Optional. Used by the extension to point at the Cloudflare API.
   Default: `http://localhost:8787`
@@ -30,7 +30,7 @@ ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 
 ## Local Flow
 
-1. Start the Cloudflare worker in `apps/cloudflare`.
+1. Start the Cloudflare worker in `apps/server`.
 2. Start the viewer app in `apps/viewer-web`.
 3. Load the built extension from `apps/extension/.output/chrome-mv3`.
 4. Open a page with a normal capturable `video` element.

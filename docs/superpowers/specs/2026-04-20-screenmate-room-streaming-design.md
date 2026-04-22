@@ -235,7 +235,7 @@ The MVP uses lightweight session security rather than full user identity.
 - `session-state`
   - In-memory token, session, and room state management.
 
-### `apps/cloudflare`
+### `apps/server`
 
 - `routes/create-room`
 - `routes/join-room`
