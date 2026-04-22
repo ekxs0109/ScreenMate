@@ -62,12 +62,148 @@ function createSocketPair() {
 }
 
 describe("RoomState", () => {
+  it("persists renewal records with maxExpiresAt", () => {
+    const persisted: Array<{
+      roomId: string;
+      hostSessionId: string;
+      createdAt: number;
+      expiresAt: number;
+      maxExpiresAt: number;
+      closedAt: number | null;
+      closedReason: "host-left" | "expired" | "closed" | null;
+    }> = [];
+    const room = new RoomState(
+      {
+        roomId: "room_demo",
+        hostSessionId: "host_1",
+        createdAt: 100,
+        expiresAt: 1_000,
+        maxExpiresAt: 2_000,
+        closedAt: null,
+        closedReason: null,
+      },
+      {
+        now: () => 500,
+        onPersist: async (record) => {
+          persisted.push(record);
+        },
+      },
+    );
+
+    room.handleSocketMessage(
+      {
+        roomId: "room_demo",
+        role: "host",
+        sessionId: "host_1",
+        socket: createSocketPair().server,
+      },
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "heartbeat",
+        timestamp: 500,
+        payload: { sequence: 1 },
+      }),
+    );
+
+    expect(persisted.at(-1)).toMatchObject({
+      roomId: "room_demo",
+      hostSessionId: "host_1",
+      createdAt: 100,
+      maxExpiresAt: 2_000,
+      closedAt: null,
+      closedReason: null,
+    });
+  });
+
+  it("extends room expiry and persists renewal when host heartbeats near expiry", () => {
+    const persisted: Array<{ expiresAt: number }> = [];
+    const room = new RoomState(
+      {
+        roomId: "room_demo",
+        hostSessionId: "host_1",
+        createdAt: 0,
+        expiresAt: 1_000,
+        maxExpiresAt: 2_000_000,
+        closedAt: null,
+        closedReason: null,
+      },
+      {
+        now: () => 1_500,
+        onPersist: async (record) => {
+          persisted.push({ expiresAt: record.expiresAt });
+        },
+      },
+    );
+
+    room.handleSocketMessage(
+      {
+        roomId: "room_demo",
+        role: "host",
+        sessionId: "host_1",
+        socket: createSocketPair().server,
+      },
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "heartbeat",
+        timestamp: 1_500,
+        payload: { sequence: 1 },
+      }),
+    );
+
+    expect(persisted).toEqual([{ expiresAt: 1_801_500 }]);
+  });
+
+  it("does not renew or persist expiry when viewer heartbeats", () => {
+    const persisted: Array<{ expiresAt: number }> = [];
+    const room = new RoomState(
+      {
+        roomId: "room_demo",
+        hostSessionId: "host_1",
+        createdAt: 0,
+        expiresAt: 1_000,
+        maxExpiresAt: 2_000_000,
+        closedAt: null,
+        closedReason: null,
+      },
+      {
+        now: () => 1_500,
+        onPersist: async (record) => {
+          persisted.push({ expiresAt: record.expiresAt });
+        },
+      },
+    );
+
+    room.handleSocketMessage(
+      {
+        roomId: "room_demo",
+        role: "viewer",
+        sessionId: "viewer_1",
+        socket: createSocketPair().server,
+      },
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "viewer_1",
+        role: "viewer",
+        messageType: "heartbeat",
+        timestamp: 1_500,
+        payload: { sequence: 1 },
+      }),
+    );
+
+    expect(persisted).toEqual([]);
+  });
+
   it("reports a newly created room with a missing source as degraded", () => {
     const room = new RoomState({
       roomId: "room_demo",
       hostSessionId: "host_1",
       createdAt: 1,
       expiresAt: Number.MAX_SAFE_INTEGER,
+      maxExpiresAt: Number.MAX_SAFE_INTEGER,
       closedAt: null,
       closedReason: null,
     });
@@ -88,6 +224,7 @@ describe("RoomState", () => {
       hostSessionId: "host_1",
       createdAt: 1,
       expiresAt: Number.MAX_SAFE_INTEGER,
+      maxExpiresAt: Number.MAX_SAFE_INTEGER,
       closedAt: null,
       closedReason: null,
     });
@@ -111,6 +248,7 @@ describe("RoomState", () => {
       hostSessionId: "host_1",
       createdAt: 1,
       expiresAt: Number.MAX_SAFE_INTEGER,
+      maxExpiresAt: Number.MAX_SAFE_INTEGER,
       closedAt: null,
       closedReason: null,
     });
@@ -175,6 +313,7 @@ describe("RoomState", () => {
       hostSessionId: "host_1",
       createdAt: 1,
       expiresAt: Number.MAX_SAFE_INTEGER,
+      maxExpiresAt: Number.MAX_SAFE_INTEGER,
       closedAt: null,
       closedReason: null,
     });
@@ -287,6 +426,7 @@ describe("RoomState", () => {
         hostSessionId: "host_1",
         createdAt: 1,
         expiresAt: Number.MAX_SAFE_INTEGER,
+        maxExpiresAt: Number.MAX_SAFE_INTEGER,
         closedAt: null,
         closedReason: null,
       },

@@ -19,6 +19,7 @@ type RoomInitialization = {
   hostSessionId: string;
   createdAt: number;
   expiresAt: number;
+  maxExpiresAt: number;
 };
 
 type PersistedRoomRecord = RoomInitialization & {
@@ -57,11 +58,14 @@ type JoinValidation =
   | { ok: false; status: number; body: Record<string, unknown> };
 
 const ROOM_RECORD_KEY = "room-record";
+const ROOM_RENEWAL_WINDOW_MS = 30 * 60 * 1_000;
 
 export class RoomState {
   private readonly roomId: string;
   private readonly hostSessionId: string;
-  private readonly expiresAt: number;
+  private readonly createdAt: number;
+  private expiresAt: number;
+  private readonly maxExpiresAt: number;
   private closedAt: number | null;
   private closedReason: CloseReason | null;
   private sourceState: RoomSourceState = "missing";
@@ -76,11 +80,14 @@ export class RoomState {
         closedAt: number;
         reason: CloseReason;
       }) => void | Promise<void>;
+      onPersist?: (record: PersistedRoomRecord) => void | Promise<void>;
     } = {},
   ) {
     this.roomId = record.roomId;
     this.hostSessionId = record.hostSessionId;
+    this.createdAt = record.createdAt;
     this.expiresAt = record.expiresAt;
+    this.maxExpiresAt = record.maxExpiresAt;
     this.closedAt = record.closedAt;
     this.closedReason = record.closedReason;
   }
@@ -286,6 +293,10 @@ export class RoomState {
         this.broadcast(this.roomStateEnvelope());
         break;
       case "heartbeat":
+        if (connection.role === "host") {
+          void this.renewRoomExpiry();
+        }
+        break;
       case "reconnect":
         break;
       default:
@@ -345,10 +356,26 @@ export class RoomState {
       viewer.socket.close(1001, "room-closed");
     }
 
+    await this.options.onPersist?.(this.getPersistedRecord());
     await this.options.onClose?.({
       closedAt: this.closedAt,
       reason,
     });
+  }
+
+  private async renewRoomExpiry() {
+    const now = this.now();
+    const renewedExpiresAt = Math.min(
+      this.maxExpiresAt,
+      Math.max(this.expiresAt, now + ROOM_RENEWAL_WINDOW_MS),
+    );
+
+    if (renewedExpiresAt === this.expiresAt) {
+      return;
+    }
+
+    this.expiresAt = renewedExpiresAt;
+    await this.options.onPersist?.(this.getPersistedRecord());
   }
 
   private broadcast(
@@ -456,6 +483,18 @@ export class RoomState {
     return this.options.now?.() ?? Date.now();
   }
 
+  private getPersistedRecord(): PersistedRoomRecord {
+    return {
+      roomId: this.roomId,
+      hostSessionId: this.hostSessionId,
+      createdAt: this.createdAt,
+      expiresAt: this.expiresAt,
+      maxExpiresAt: this.maxExpiresAt,
+      closedAt: this.closedAt,
+      closedReason: this.closedReason,
+    };
+  }
+
   private isClosed(): boolean {
     return this.closedAt !== null || this.closedReason !== null;
   }
@@ -543,13 +582,9 @@ export class RoomObject {
 
   private createRoomState(record: PersistedRoomRecord): RoomState {
     return new RoomState(record, {
-      onClose: async ({ closedAt, reason }) => {
-        this.record = {
-          ...record,
-          closedAt,
-          closedReason: reason,
-        };
-        await this.state.storage.put(ROOM_RECORD_KEY, this.record);
+      onPersist: async (nextRecord) => {
+        this.record = nextRecord;
+        await this.state.storage.put(ROOM_RECORD_KEY, nextRecord);
       },
     });
   }
