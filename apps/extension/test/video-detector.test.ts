@@ -149,6 +149,7 @@ describe("listVisibleVideoSources", () => {
 
 describe("listVisibleVideoCandidates", () => {
   it("returns a recovery fingerprint for each visible video candidate", () => {
+    window.history.replaceState({}, "", "/video/BV1demo");
     document.body.innerHTML = `<video id="hero" src="https://example.com/hero.mp4"></video>`;
     const video = document.getElementById("hero") as HTMLVideoElement;
     setVideoRect(video, 640, 360);
@@ -160,6 +161,7 @@ describe("listVisibleVideoCandidates", () => {
       label: "https://example.com/hero.mp4",
       fingerprint: {
         primaryUrl: "https://example.com/hero.mp4",
+        pageUrl: "http://localhost:3000/video/BV1demo",
         elementId: "hero",
         label: "https://example.com/hero.mp4",
         visibleIndex: 0,

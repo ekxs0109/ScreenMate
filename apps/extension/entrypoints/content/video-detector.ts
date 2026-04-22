@@ -12,6 +12,7 @@ export type VideoCandidate = {
   label: string;
   fingerprint: {
     primaryUrl: string | null;
+    pageUrl: string | null;
     elementId: string | null;
     label: string;
     visibleIndex: number;
@@ -149,6 +150,31 @@ export function listVisibleVideoCandidates(): VideoCandidate[] {
       label,
       fingerprint: {
         primaryUrl: video.currentSrc || video.src || video.getAttribute("poster"),
+        pageUrl: window.location.href,
+        elementId: video.id || null,
+        label,
+        visibleIndex: index,
+      },
+    };
+  });
+}
+
+/**
+ * Returns fingerprint candidates for ALL videos on the page, including those
+ * that are not yet renderable (zero dimensions, hidden, etc.).  This is used
+ * by the recovery reattach flow where the video element may exist in the DOM
+ * but is not yet visible (e.g. Bilibili's async player initialisation).
+ */
+export function listAllPageVideoCandidates(): VideoCandidate[] {
+  return collectPageVideos().map((video, index) => {
+    const label = formatVideoLabel(video, index);
+
+    return {
+      id: getVideoHandle(video),
+      label,
+      fingerprint: {
+        primaryUrl: video.currentSrc || video.src || video.getAttribute("poster"),
+        pageUrl: window.location.href,
         elementId: video.id || null,
         label,
         visibleIndex: index,

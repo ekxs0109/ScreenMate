@@ -585,6 +585,21 @@ async function maybeReattachSource(
       isExactFingerprintMatch(sourceFingerprint, video.fingerprint),
   );
   if (!matchingVideo?.fingerprint) {
+    // No matching video found yet.  If the recovery window is still open,
+    // stay in "recovering" so later content-ready notifications (triggered by
+    // the MutationObserver when the video element appears late) can retry.
+    if (
+      snapshot.recoverByTimestamp !== null &&
+      snapshot.recoverByTimestamp > Date.now()
+    ) {
+      backgroundLogger.info("No matching video found yet, staying in recovery.", {
+        recoverByTimestamp: snapshot.recoverByTimestamp,
+        tabId,
+        videoCount: message.videos.length,
+      });
+      return snapshot;
+    }
+
     return dependencies.runtime.markMissing("No video attached.");
   }
 
@@ -826,12 +841,57 @@ function isExactFingerprintMatch(
   stored: SourceFingerprint,
   candidate: SourceFingerprintMatch,
 ) {
+  if (
+    stored.pageUrl !== null &&
+    candidate.pageUrl !== null &&
+    stored.pageUrl !== candidate.pageUrl
+  ) {
+    return false;
+  }
+
+  if (
+    stored.primaryUrl !== null &&
+    stored.primaryUrl === candidate.primaryUrl
+  ) {
+    return true;
+  }
+
+  if (!hasUnstableSourceUrl(stored.primaryUrl, candidate.primaryUrl)) {
+    return false;
+  }
+
+  if (
+    stored.pageUrl === null ||
+    candidate.pageUrl === null ||
+    stored.pageUrl !== candidate.pageUrl
+  ) {
+    return false;
+  }
+
+  if (stored.elementId !== null || candidate.elementId !== null) {
+    return (
+      stored.elementId !== null &&
+      stored.elementId === candidate.elementId
+    );
+  }
+
+  return stored.visibleIndex === candidate.visibleIndex;
+}
+
+function hasUnstableSourceUrl(
+  storedPrimaryUrl: string | null,
+  candidatePrimaryUrl: string | null,
+) {
   return (
-    stored.primaryUrl === candidate.primaryUrl &&
-    stored.elementId === candidate.elementId &&
-    stored.label === candidate.label &&
-    stored.visibleIndex === candidate.visibleIndex
+    storedPrimaryUrl === null ||
+    candidatePrimaryUrl === null ||
+    isBlobSourceUrl(storedPrimaryUrl) ||
+    isBlobSourceUrl(candidatePrimaryUrl)
   );
+}
+
+function isBlobSourceUrl(value: string) {
+  return value.startsWith("blob:");
 }
 
 function formatFrameScopedLabel(label: string, frameId: number): string {

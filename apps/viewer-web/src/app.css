@@ -76,9 +76,34 @@ body {
   gap: 12px;
 }
 
+.viewer-video-container {
+  position: relative;
+}
+
 .viewer-player video {
   width: 100%;
   border-radius: 16px;
   background: #020617;
   aspect-ratio: 16 / 9;
+}
+
+.viewer-unmute-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 16px;
+  background: rgba(2, 6, 23, 0.6);
+  color: #f8fafc;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background 0.2s;
+}
+
+.viewer-unmute-overlay:hover {
+  background: rgba(2, 6, 23, 0.45);
 }

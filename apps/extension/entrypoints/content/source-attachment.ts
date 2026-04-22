@@ -86,6 +86,7 @@ export function createSourceAttachmentRuntime(options: {
       sourceLabel: attachment.sourceLabel,
       fingerprint: {
         primaryUrl: video.currentSrc || video.src || video.getAttribute("poster"),
+        pageUrl: window.location.href,
         elementId: video.id || null,
         label: attachment.sourceLabel,
         visibleIndex: listVisibleVideoCandidates().findIndex(

@@ -16,6 +16,7 @@ export type SourceFingerprint = {
   tabId: number;
   frameId: number;
   primaryUrl: string | null;
+  pageUrl: string | null;
   elementId: string | null;
   label: string;
   visibleIndex: number;

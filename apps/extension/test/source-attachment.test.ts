@@ -467,6 +467,7 @@ describe("createSourceAttachmentRuntime", () => {
   });
 
   it("returns a visible-list fingerprint index when hidden videos exist", async () => {
+    window.history.replaceState({}, "", "/video/BV1demo");
     document.body.innerHTML = `
       <video id="hidden" src="https://example.com/hidden.mp4" hidden></video>
       <video id="host" src="https://example.com/host.mp4"></video>
@@ -504,6 +505,7 @@ describe("createSourceAttachmentRuntime", () => {
 
     expect(result.fingerprint).toMatchObject({
       primaryUrl: "https://example.com/host.mp4",
+      pageUrl: "http://localhost:3000/video/BV1demo",
       elementId: "host",
       label: "https://example.com/host.mp4",
       visibleIndex: 0,
