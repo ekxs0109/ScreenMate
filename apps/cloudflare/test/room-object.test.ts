@@ -62,7 +62,7 @@ function createSocketPair() {
 }
 
 describe("RoomState", () => {
-  it("tracks host and viewer presence and reports streaming while both are connected", () => {
+  it("tracks host and viewer presence and reports a missing source until the host publishes room state", () => {
     const room = new RoomState({
       roomId: "room_demo",
       hostSessionId: "host_1",
@@ -81,6 +81,71 @@ describe("RoomState", () => {
       hostConnected: true,
       viewerCount: 1,
       state: "streaming",
+      sourceState: "missing",
+    });
+  });
+
+  it("stores host source state updates and broadcasts them in room-state envelopes", () => {
+    const room = new RoomState({
+      roomId: "room_demo",
+      hostSessionId: "host_1",
+      createdAt: 1,
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      closedAt: null,
+      closedReason: null,
+    });
+    const host = createSocketPair();
+    const viewer = createSocketPair();
+    const hostConnection = {
+      roomId: "room_demo",
+      role: "host" as const,
+      sessionId: "host_1",
+      socket: host.server,
+    };
+    const viewerConnection = {
+      roomId: "room_demo",
+      role: "viewer" as const,
+      sessionId: "viewer_1",
+      socket: viewer.server,
+    };
+
+    room.connectSession(hostConnection);
+    room.connectSession(viewerConnection);
+    room.handleSocketMessage(
+      hostConnection,
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "room-state",
+        timestamp: 10,
+        payload: {
+          state: "degraded",
+          sourceState: "recovering",
+          viewerCount: 1,
+        },
+      }),
+    );
+
+    expect(room.getStateSnapshot()).toEqual({
+      roomId: "room_demo",
+      hostSessionId: "host_1",
+      hostConnected: true,
+      viewerCount: 1,
+      state: "degraded",
+      sourceState: "recovering",
+    });
+    expect(
+      viewer.client.messages.filter(
+        (message) => (message as { messageType: string }).messageType === "room-state",
+      ).at(-1),
+    ).toMatchObject({
+      messageType: "room-state",
+      payload: {
+        state: "degraded",
+        sourceState: "recovering",
+        viewerCount: 1,
+      },
     });
   });
 
@@ -237,6 +302,7 @@ describe("RoomState", () => {
       hostConnected: false,
       viewerCount: 0,
       state: "closed",
+      sourceState: "missing",
     });
     expect(
       viewer.client.messages.some(

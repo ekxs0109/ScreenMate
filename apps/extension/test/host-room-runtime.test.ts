@@ -356,4 +356,108 @@ describe("createHostRoomRuntime", () => {
       }),
     );
   });
+
+  it("publishes room-state on signaling connect and when host source state changes", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const sockets: MockHostSocket[] = [];
+    const runtime = createHostRoomRuntime({
+      storage,
+      WebSocketImpl: class {
+        constructor(_url: string) {
+          const socket = new MockHostSocket();
+          sockets.push(socket);
+          return socket as never;
+        }
+      } as never,
+    });
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: ["viewer_1"],
+      viewerCount: 1,
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    const connectPromise = runtime.connectSignaling(vi.fn());
+    sockets[0]!.readyState = 1;
+    sockets[0]?.emit("open");
+    await connectPromise;
+
+    await runtime.setAttachedSource("Primary source", {
+      tabId: 42,
+      frameId: 0,
+      primaryUrl: "https://example.com/video.mp4",
+      elementId: "video-1",
+      label: "Primary source",
+      visibleIndex: 0,
+    });
+    await runtime.markRecovering("track-ended");
+    await runtime.markMissing("No video attached.");
+
+    const sentPayloads = sockets[0]!.send.mock.calls.map(([payload]) =>
+      JSON.parse(payload as string),
+    );
+
+    expect(sentPayloads).toEqual([
+      {
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "room-state",
+        timestamp: expect.any(Number),
+        payload: {
+          state: "hosting",
+          sourceState: "missing",
+          viewerCount: 1,
+        },
+      },
+      {
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "room-state",
+        timestamp: expect.any(Number),
+        payload: {
+          state: "streaming",
+          sourceState: "attached",
+          viewerCount: 1,
+        },
+      },
+      {
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "room-state",
+        timestamp: expect.any(Number),
+        payload: {
+          state: "degraded",
+          sourceState: "recovering",
+          viewerCount: 1,
+        },
+      },
+      {
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "room-state",
+        timestamp: expect.any(Number),
+        payload: {
+          state: "hosting",
+          sourceState: "missing",
+          viewerCount: 1,
+        },
+      },
+    ]);
+  });
 });

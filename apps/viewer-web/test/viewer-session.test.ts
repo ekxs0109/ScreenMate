@@ -74,6 +74,7 @@ class FakePeerConnection {
 
   close() {
     this.connectionState = "closed";
+    this.onconnectionstatechange?.();
   }
 
   emitTrack(stream: MediaStream) {
@@ -288,6 +289,78 @@ describe("ViewerSession", () => {
     await Promise.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
+    expect(secondPeer.remoteDescription).toEqual({
+      type: "offer",
+      sdp: "reattach-offer",
+    });
+  });
+
+  it("does not emit an ended state when replacing a peer during reoffer recovery", async () => {
+    const socket = new FakeWebSocket();
+    const firstPeer = new FakePeerConnection();
+    firstPeer.close = () => {
+      firstPeer.connectionState = "closed";
+      firstPeer.onconnectionstatechange?.();
+    };
+    const secondPeer = new FakePeerConnection();
+    const peers = [firstPeer, secondPeer];
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+
+        if (url.endsWith("/rooms/room_demo") && !init?.method) {
+          return Response.json({
+            roomId: "room_demo",
+            state: "streaming",
+            sourceState: "attached",
+            hostConnected: true,
+            hostSessionId: "host_1",
+            viewerCount: 1,
+          });
+        }
+
+        return Response.json({
+          roomId: "room_demo",
+          sessionId: "viewer_1",
+          viewerToken: "viewer-token",
+          wsUrl: "ws://signal.example/rooms/room_demo/ws",
+          iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
+        });
+      },
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peers.shift() as never,
+    });
+    const statuses: string[] = [];
+    session.subscribe((snapshot) => {
+      statuses.push(snapshot.status);
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    statuses.length = 0;
+
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_2",
+        role: "host",
+        messageType: "offer",
+        timestamp: 11,
+        payload: {
+          targetSessionId: "viewer_1",
+          sdp: "reattach-offer",
+        },
+      }),
+    );
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(statuses).not.toContain("ended");
+    expect(session.getSnapshot()).toMatchObject({
+      status: "connecting",
+      endedReason: null,
+    });
     expect(secondPeer.remoteDescription).toEqual({
       type: "offer",
       sdp: "reattach-offer",

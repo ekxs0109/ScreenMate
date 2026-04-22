@@ -1,4 +1,8 @@
-import { errorCodes, signalEnvelopeSchema } from "@screenmate/shared";
+import {
+  errorCodes,
+  signalEnvelopeSchema,
+  type RoomSourceState,
+} from "@screenmate/shared";
 import type { CloudflareBindings } from "../env.js";
 
 type SessionRole = "host" | "viewer";
@@ -29,6 +33,7 @@ type RoomStateSnapshot = {
   hostConnected: boolean;
   viewerCount: number;
   state: RoomLifecycleState;
+  sourceState: RoomSourceState;
 };
 
 type ConnectionSocket = {
@@ -61,6 +66,7 @@ export class RoomState {
   private closedAt: number | null;
   private closedReason: CloseReason | null;
   private degraded = false;
+  private sourceState: RoomSourceState = "missing";
   private hostConnection: RoomConnection | null = null;
   private readonly viewers = new Map<string, RoomConnection>();
 
@@ -225,6 +231,7 @@ export class RoomState {
       hostConnected: this.hostConnection !== null,
       viewerCount,
       state,
+      sourceState: this.sourceState,
     };
   }
 
@@ -272,6 +279,15 @@ export class RoomState {
         this.relayToTarget(envelope, envelope.payload.targetSessionId);
         this.broadcast(this.roomStateEnvelope());
         break;
+      case "room-state":
+        if (connection.role !== "host") {
+          connection.socket.close(1008, "message-type-not-allowed");
+          return;
+        }
+        this.sourceState = envelope.payload.sourceState;
+        this.degraded = envelope.payload.state === "degraded";
+        this.broadcast(this.roomStateEnvelope());
+        break;
       case "heartbeat":
       case "reconnect":
         break;
@@ -317,6 +333,8 @@ export class RoomState {
 
     this.closedAt = this.now();
     this.closedReason = reason;
+    this.degraded = false;
+    this.sourceState = "missing";
 
     if (reason === "host-left" || reason === "closed") {
       this.broadcast(this.hostLeftEnvelope("host-disconnected"));
@@ -406,13 +424,19 @@ export class RoomState {
   }
 
   private roomStateEnvelope(): SignalEnvelope {
+    const snapshot = this.getStateSnapshot();
+
     return signalEnvelopeSchema.parse({
       roomId: this.roomId,
       sessionId: this.hostSessionId,
       role: "host",
       messageType: "room-state",
       timestamp: this.now(),
-      payload: { state: this.getStateSnapshot().state },
+      payload: {
+        state: snapshot.state,
+        sourceState: snapshot.sourceState,
+        viewerCount: snapshot.viewerCount,
+      },
     });
   }
 

@@ -1,10 +1,15 @@
-import { signalEnvelopeSchema } from "@screenmate/shared";
+import {
+  signalEnvelopeSchema,
+  type RoomSourceState,
+  type RoomState,
+} from "@screenmate/shared";
 import {
   getScreenMateApiBaseUrl,
   toScreenMateWebSocketUrl,
 } from "../../lib/config";
 import {
   createHostRoomStore,
+  type HostSourceState,
   type HostRoomSnapshot,
   type PersistedHostRoomSession,
   type SourceFingerprint,
@@ -90,6 +95,71 @@ export function createHostRoomRuntime(options: {
     return next;
   }
 
+  function toRoomSourceState(sourceState: HostSourceState): RoomSourceState {
+    if (sourceState === "attached") {
+      return "attached";
+    }
+
+    if (sourceState === "recovering") {
+      return "recovering";
+    }
+
+    return "missing";
+  }
+
+  function toRoomState(snapshot: HostRoomSnapshot): RoomState {
+    if (snapshot.roomLifecycle === "closed") {
+      return "closed";
+    }
+
+    if (snapshot.sourceState === "recovering") {
+      return "degraded";
+    }
+
+    if (snapshot.sourceState === "attached" && snapshot.viewerCount > 0) {
+      return "streaming";
+    }
+
+    return "hosting";
+  }
+
+  function publishRoomState(snapshot: HostRoomSnapshot) {
+    if (!session) {
+      return false;
+    }
+
+    return sendSignal(
+      signalEnvelopeSchema.parse({
+        roomId: session.roomId,
+        sessionId: session.hostSessionId,
+        role: "host",
+        messageType: "room-state",
+        timestamp: now(),
+        payload: {
+          state: toRoomState(snapshot),
+          sourceState: toRoomSourceState(snapshot.sourceState),
+          viewerCount: snapshot.viewerCount,
+        },
+      }),
+    );
+  }
+
+  function sendSignal(envelope: Record<string, unknown>) {
+    const payload = JSON.stringify(envelope);
+
+    if (!socket) {
+      return false;
+    }
+
+    if (socket.readyState !== OPEN_SOCKET_READY_STATE) {
+      pendingOutboundSignals.push(payload);
+      return true;
+    }
+
+    socket.send(payload);
+    return true;
+  }
+
   return {
     getSnapshot(): HostRoomSnapshot {
       return store.getSnapshot();
@@ -144,7 +214,9 @@ export function createHostRoomRuntime(options: {
         frameId: fingerprint.frameId,
       });
       await persist();
-      return store.getSnapshot();
+      const next = store.getSnapshot();
+      publishRoomState(next);
+      return next;
     },
     async markRecovering(message: string) {
       if (!session) {
@@ -154,6 +226,7 @@ export function createHostRoomRuntime(options: {
       const next = store.markRecovering(message);
       session = { ...session, recoverByTimestamp: next.recoverByTimestamp };
       await persist();
+      publishRoomState(next);
       return next;
     },
     async markMissing(message: string) {
@@ -164,6 +237,7 @@ export function createHostRoomRuntime(options: {
       session = { ...session, recoverByTimestamp: null };
       const next = store.markMissing(message);
       await persist();
+      publishRoomState(next);
       return next;
     },
     async close(message: string) {
@@ -215,6 +289,7 @@ export function createHostRoomRuntime(options: {
         for (const payload of queuedSignals) {
           nextSocket.send(payload);
         }
+        publishRoomState(store.getSnapshot());
       });
 
       nextSocket.addEventListener("message", (event) => {
@@ -293,21 +368,7 @@ export function createHostRoomRuntime(options: {
 
       return openPromise;
     },
-    sendSignal(envelope: Record<string, unknown>) {
-      const payload = JSON.stringify(envelope);
-
-      if (!socket) {
-        return false;
-      }
-
-      if (socket.readyState !== OPEN_SOCKET_READY_STATE) {
-        pendingOutboundSignals.push(payload);
-        return true;
-      }
-
-      socket.send(payload);
-      return true;
-    },
+    sendSignal,
     async restoreFromStorage() {
       const stored = (await options.storage.get(STORAGE_KEY))[STORAGE_KEY];
       if (!stored) {

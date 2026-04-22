@@ -286,13 +286,14 @@ export class ViewerSession {
           roomId: message.roomId,
           targetSessionId: message.payload.targetSessionId,
         });
-        this.peerClient?.close();
+        const previousPeerClient = this.peerClient;
+        this.peerClient = null;
+        previousPeerClient?.close();
         if (!this.joinResponse) {
           viewerSessionLogger.warn("Viewer ignored an offer before join state was ready.", {
             hostSessionId: message.sessionId,
             roomId: message.roomId,
           });
-          this.peerClient = null;
           break;
         }
         this.peerClient = this.createPeerClient(this.joinResponse);
@@ -387,8 +388,9 @@ export class ViewerSession {
     });
     this.socketClient?.close();
     this.socketClient = null;
-    this.peerClient?.close();
+    const peerClient = this.peerClient;
     this.peerClient = null;
+    peerClient?.close();
     this.joinResponse = null;
 
     if (resetSnapshot) {
