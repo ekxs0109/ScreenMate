@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  roomSourceStateSchema,
   roomStateSchema,
   signalEnvelopeSchema,
   tokenPayloadSchema,
@@ -137,7 +138,11 @@ describe("signalEnvelopeSchema", () => {
         role: "host",
         messageType: "room-state",
         timestamp: 11,
-        payload: { state: "streaming" },
+        payload: {
+          state: "streaming",
+          sourceState: "attached",
+          viewerCount: 0,
+        },
       }).success,
     ).toBe(true);
   });
@@ -154,12 +159,37 @@ describe("signalEnvelopeSchema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it("requires sourceState and viewerCount in room-state envelopes", () => {
+    const result = signalEnvelopeSchema.safeParse({
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "room-state",
+      timestamp: 11,
+      payload: {
+        state: "degraded",
+        sourceState: "recovering",
+        viewerCount: 2,
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("roomStateSchema", () => {
   it("accepts the approved room lifecycle states", () => {
     expect(roomStateSchema.parse("hosting")).toBe("hosting");
     expect(roomStateSchema.parse("streaming")).toBe("streaming");
+  });
+});
+
+describe("roomSourceStateSchema", () => {
+  it("exports the approved room source states", () => {
+    expect(roomSourceStateSchema.parse("attached")).toBe("attached");
+    expect(roomSourceStateSchema.parse("recovering")).toBe("recovering");
+    expect(roomSourceStateSchema.parse("missing")).toBe("missing");
   });
 });
 

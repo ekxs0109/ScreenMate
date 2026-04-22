@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { roomStateSchema } from "./room.js";
+import { roomSourceStateSchema, roomStateSchema } from "./room.js";
 
 export const signalingRoleSchema = z.enum(["host", "viewer"]);
 const envelopeBaseSchema = {
@@ -56,6 +56,8 @@ const reconnectPayloadSchema = z.object({
 
 const roomStatePayloadSchema = z.object({
   state: roomStateSchema,
+  sourceState: roomSourceStateSchema,
+  viewerCount: z.number().int().nonnegative(),
 });
 
 export const signalEnvelopeSchema = z.discriminatedUnion("messageType", [
