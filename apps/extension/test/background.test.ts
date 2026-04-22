@@ -1220,6 +1220,151 @@ describe("createHostMessageHandler", () => {
     );
   });
 
+  it("re-reads the active attachment owner after ICE refresh before forwarding", async () => {
+    const sendTabMessage = vi.fn().mockResolvedValue(undefined);
+    const refreshHostIce = vi.fn().mockResolvedValue({
+      iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+      turnCredentialExpiresAt: 200_000,
+    });
+    const getSnapshot = vi
+      .fn()
+      .mockReturnValueOnce({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        viewerCount: 1,
+        sourceLabel: "Primary source",
+        activeTabId: 42,
+        activeFrameId: 7,
+        recoverByTimestamp: null,
+        message: null,
+      })
+      .mockReturnValueOnce({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        viewerCount: 1,
+        sourceLabel: "Moved source",
+        activeTabId: 99,
+        activeFrameId: 3,
+        recoverByTimestamp: null,
+        message: null,
+      })
+      .mockReturnValueOnce({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        viewerCount: 1,
+        sourceLabel: "Moved source",
+        activeTabId: 99,
+        activeFrameId: 3,
+        recoverByTimestamp: null,
+        message: null,
+      });
+    const forwardInboundSignal = createForwardInboundSignalHandler({
+      runtime: {
+        getSnapshot,
+        shouldRefreshHostIce: vi.fn().mockReturnValue(true),
+        refreshHostIce,
+      } as never,
+      sendTabMessage,
+    });
+
+    const envelope = {
+      roomId: "room_123",
+      sessionId: "viewer_2",
+      role: "viewer" as const,
+      messageType: "viewer-joined" as const,
+      timestamp: 10,
+      payload: {
+        viewerSessionId: "viewer_2",
+      },
+    };
+
+    await forwardInboundSignal(envelope);
+
+    expect(sendTabMessage).toHaveBeenNthCalledWith(
+      1,
+      99,
+      {
+        type: "screenmate:update-ice-servers",
+        iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+      },
+      { frameId: 3 },
+    );
+    expect(sendTabMessage).toHaveBeenNthCalledWith(
+      2,
+      99,
+      {
+        type: "screenmate:signal-inbound",
+        envelope,
+      },
+      { frameId: 3 },
+    );
+  });
+
+  it("stops forwarding when the attachment disappears during ICE refresh", async () => {
+    const sendTabMessage = vi.fn().mockResolvedValue(undefined);
+    const forwardInboundSignal = createForwardInboundSignalHandler({
+      runtime: {
+        getSnapshot: vi
+          .fn()
+          .mockReturnValueOnce({
+            roomLifecycle: "open",
+            sourceState: "attached",
+            roomId: "room_123",
+            viewerCount: 1,
+            sourceLabel: "Primary source",
+            activeTabId: 42,
+            activeFrameId: 7,
+            recoverByTimestamp: null,
+            message: null,
+          })
+          .mockReturnValueOnce({
+            roomLifecycle: "open",
+            sourceState: "missing",
+            roomId: "room_123",
+            viewerCount: 1,
+            sourceLabel: null,
+            activeTabId: 42,
+            activeFrameId: 7,
+            recoverByTimestamp: null,
+            message: "No video attached.",
+          })
+          .mockReturnValueOnce({
+            roomLifecycle: "open",
+            sourceState: "missing",
+            roomId: "room_123",
+            viewerCount: 1,
+            sourceLabel: null,
+            activeTabId: 42,
+            activeFrameId: 7,
+            recoverByTimestamp: null,
+            message: "No video attached.",
+          }),
+        shouldRefreshHostIce: vi.fn().mockReturnValue(true),
+        refreshHostIce: vi.fn().mockResolvedValue({
+          iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+          turnCredentialExpiresAt: 200_000,
+        }),
+      } as never,
+      sendTabMessage,
+    });
+
+    await forwardInboundSignal({
+      roomId: "room_123",
+      sessionId: "viewer_2",
+      role: "viewer",
+      messageType: "viewer-joined",
+      timestamp: 10,
+      payload: {
+        viewerSessionId: "viewer_2",
+      },
+    });
+
+    expect(sendTabMessage).not.toHaveBeenCalled();
+  });
+
   it("forwards viewer lifecycle and negotiation envelopes to the content runtime", () => {
     expect(
       shouldForwardSignalToContentRuntime({

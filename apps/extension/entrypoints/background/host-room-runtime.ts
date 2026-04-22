@@ -62,16 +62,32 @@ export function createHostRoomRuntime(options: {
     await options.storage.remove(STORAGE_KEY);
   }
 
+  function isSameSession(
+    currentSession: PersistedHostRoomSession | null,
+    targetSession: PersistedHostRoomSession | null,
+  ) {
+    if (!currentSession || !targetSession) {
+      return false;
+    }
+
+    return (
+      currentSession.roomId === targetSession.roomId &&
+      currentSession.hostSessionId === targetSession.hostSessionId &&
+      currentSession.hostToken === targetSession.hostToken
+    );
+  }
+
   async function updateIceServers(
     iceServers: RTCIceServer[],
     turnCredentialExpiresAt: number | null,
+    targetSession: PersistedHostRoomSession | null = session,
   ) {
-    if (!session) {
+    if (!session || !targetSession || !isSameSession(session, targetSession)) {
       return null;
     }
 
     session = {
-      ...session,
+      ...targetSession,
       iceServers,
       turnCredentialExpiresAt,
     };
@@ -252,7 +268,7 @@ export function createHostRoomRuntime(options: {
       return session?.sourceFingerprint ?? null;
     },
     shouldRefreshHostIce() {
-      if (!session || session.turnCredentialExpiresAt === null) {
+      if (!session || session.turnCredentialExpiresAt == null) {
         return false;
       }
 
@@ -263,19 +279,25 @@ export function createHostRoomRuntime(options: {
         return null;
       }
 
+      const activeSession = session;
+
       const refreshed = await requestHostIceRefresh(
         fetchImpl,
         apiBaseUrl,
-        session.roomId,
-        session.hostToken,
+        activeSession.roomId,
+        activeSession.hostToken,
       );
       await updateIceServers(
         refreshed.iceServers,
         refreshed.turnCredentialExpiresAt,
+        activeSession,
       );
       return refreshed;
     },
-    async updateIceServers(iceServers: RTCIceServer[], turnCredentialExpiresAt) {
+    async updateIceServers(
+      iceServers: RTCIceServer[],
+      turnCredentialExpiresAt: number | null,
+    ) {
       return updateIceServers(iceServers, turnCredentialExpiresAt);
     },
     async setViewerCount(viewerCount: number) {

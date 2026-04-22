@@ -24,6 +24,17 @@ class MockHostSocket {
   }
 }
 
+function createDeferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 describe("createHostRoomRuntime", () => {
   it("restores an active recovery session without extending its deadline", async () => {
     const storage = {
@@ -358,6 +369,87 @@ describe("createHostRoomRuntime", () => {
       screenmateHostRoomSession: expect.objectContaining({
         iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
         turnCredentialExpiresAt: 500_000,
+      }),
+    });
+  });
+
+  it("ignores stale ICE refresh results after the room session changes", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const deferredRefresh = createDeferredPromise<{
+      ok: true;
+      json: () => Promise<{
+        iceServers: RTCIceServer[];
+        turnCredentialExpiresAt: number | null;
+      }>;
+    }>();
+    const fetchImpl = vi.fn().mockReturnValue(deferredRefresh.promise);
+
+    const runtime = createHostRoomRuntime({
+      storage,
+      now: () => 100_000,
+      apiBaseUrl: "http://localhost:8787",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [{ urls: ["turn:stale.screenmate.dev"] }],
+      turnCredentialExpiresAt: 100_500,
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    const refreshPromise = runtime.refreshHostIce();
+
+    await runtime.startRoom({
+      roomId: "room_456",
+      hostSessionId: "host_2",
+      hostToken: "next-host-token",
+      signalingUrl: "/rooms/room_456/ws",
+      iceServers: [{ urls: ["turn:replacement.screenmate.dev"] }],
+      turnCredentialExpiresAt: 900_000,
+      activeTabId: 84,
+      activeFrameId: 1,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    deferredRefresh.resolve({
+      ok: true,
+      json: async () => ({
+        iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+        turnCredentialExpiresAt: 500_000,
+      }),
+    });
+
+    await expect(refreshPromise).resolves.toEqual({
+      iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+      turnCredentialExpiresAt: 500_000,
+    });
+    expect(runtime.getAttachSession()).toEqual({
+      roomId: "room_456",
+      sessionId: "host_2",
+      viewerSessionIds: [],
+      iceServers: [{ urls: ["turn:replacement.screenmate.dev"] }],
+    });
+    expect(storage.set).toHaveBeenLastCalledWith({
+      screenmateHostRoomSession: expect.objectContaining({
+        roomId: "room_456",
+        hostSessionId: "host_2",
+        iceServers: [{ urls: ["turn:replacement.screenmate.dev"] }],
       }),
     });
   });

@@ -435,9 +435,26 @@ export function createForwardInboundSignalHandler(dependencies: {
     options?: { frameId?: number },
   ) => Promise<TabMessageResponse>;
 }) {
-  return async (envelope: SignalEnvelope) => {
+  function getActiveAttachmentTarget() {
     const snapshot = dependencies.runtime.getSnapshot();
-    if (snapshot.activeTabId === null || snapshot.activeFrameId === null) {
+
+    if (
+      snapshot.sourceState !== "attached" ||
+      snapshot.activeTabId === null ||
+      snapshot.activeFrameId === null
+    ) {
+      return null;
+    }
+
+    return {
+      tabId: snapshot.activeTabId,
+      frameId: snapshot.activeFrameId,
+    };
+  }
+
+  return async (envelope: SignalEnvelope) => {
+    const initialTarget = getActiveAttachmentTarget();
+    if (!initialTarget) {
       return;
     }
 
@@ -451,39 +468,45 @@ export function createForwardInboundSignalHandler(dependencies: {
     ) {
       try {
         const refreshed = await dependencies.runtime.refreshHostIce();
-        if (refreshed) {
+        const refreshedTarget = getActiveAttachmentTarget();
+        if (refreshed && refreshedTarget) {
           await dependencies.sendTabMessage(
-            snapshot.activeTabId,
+            refreshedTarget.tabId,
             {
               type: "screenmate:update-ice-servers",
               iceServers: refreshed.iceServers,
             },
-            { frameId: snapshot.activeFrameId },
+            { frameId: refreshedTarget.frameId },
           );
         }
       } catch (error) {
         backgroundLogger.warn("Could not refresh host ICE before forwarding.", {
-          activeFrameId: snapshot.activeFrameId,
-          activeTabId: snapshot.activeTabId,
+          activeFrameId: initialTarget.frameId,
+          activeTabId: initialTarget.tabId,
           error: toErrorMessage(error),
           messageType: envelope.messageType,
         });
       }
     }
 
+    const target = getActiveAttachmentTarget();
+    if (!target) {
+      return;
+    }
+
     try {
       await dependencies.sendTabMessage(
-        snapshot.activeTabId,
+        target.tabId,
         {
           type: "screenmate:signal-inbound",
           envelope,
         },
-        { frameId: snapshot.activeFrameId },
+        { frameId: target.frameId },
       );
     } catch (error) {
       backgroundLogger.warn("Could not forward inbound signal to content.", {
-        activeFrameId: snapshot.activeFrameId,
-        activeTabId: snapshot.activeTabId,
+        activeFrameId: target.frameId,
+        activeTabId: target.tabId,
         error: toErrorMessage(error),
         messageType: envelope.messageType,
       });

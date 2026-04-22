@@ -265,10 +265,7 @@ export function createSourceAttachmentRuntime(options: {
       return;
     }
 
-    attachment = {
-      ...attachment,
-      iceServers: normalizeIceServers(iceServers) as RTCIceServer[],
-    };
+    attachment.iceServers = normalizeIceServers(iceServers) as RTCIceServer[];
   }
 
   return {
