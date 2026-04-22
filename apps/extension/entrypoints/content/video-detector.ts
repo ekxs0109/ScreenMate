@@ -141,7 +141,7 @@ export function listVisibleVideoSources(): VideoSource[] {
 }
 
 export function listVisibleVideoCandidates(): VideoCandidate[] {
-  return collectPageVideos().map((video, index) => {
+  return collectVisibleVideos().map((video, index) => {
     const label = formatVideoLabel(video, index);
 
     return {

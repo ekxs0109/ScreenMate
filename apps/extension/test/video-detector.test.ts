@@ -166,6 +166,37 @@ describe("listVisibleVideoCandidates", () => {
       },
     });
   });
+
+  it("indexes candidates within the visible-video list when hidden videos exist", () => {
+    document.body.innerHTML = `
+      <video id="visible-large" src="https://example.com/large.mp4"></video>
+      <video id="hidden" src="https://example.com/hidden.mp4" hidden></video>
+      <video id="visible-small" src="https://example.com/small.mp4"></video>
+    `;
+
+    const visibleLarge = document.getElementById(
+      "visible-large",
+    ) as HTMLVideoElement;
+    const hidden = document.getElementById("hidden") as HTMLVideoElement;
+    const visibleSmall = document.getElementById(
+      "visible-small",
+    ) as HTMLVideoElement;
+
+    setVideoRect(visibleLarge, 640, 360);
+    setVideoRect(hidden, 1, 1);
+    setVideoRect(visibleSmall, 320, 180);
+
+    const candidates = listVisibleVideoCandidates();
+
+    expect(candidates).toHaveLength(2);
+    expect(candidates.map((candidate) => candidate.label)).toEqual([
+      "https://example.com/large.mp4",
+      "https://example.com/small.mp4",
+    ]);
+    expect(candidates.map((candidate) => candidate.fingerprint.visibleIndex)).toEqual(
+      [0, 1],
+    );
+  });
 });
 
 describe("findVisibleVideoByHandle", () => {
