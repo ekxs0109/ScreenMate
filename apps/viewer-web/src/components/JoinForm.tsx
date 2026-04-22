@@ -1,4 +1,8 @@
 import { FormEvent, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Loader2 } from "lucide-react";
 
 export function JoinForm({
   isBusy,
@@ -15,17 +19,35 @@ export function JoinForm({
   }
 
   return (
-    <form className="viewer-form" onSubmit={handleSubmit}>
-      <label htmlFor="roomCode">Room code</label>
-      <input
-        id="roomCode"
-        value={roomCode}
-        onChange={(event) => setRoomCode(event.target.value)}
-        placeholder="room_ab12cd34"
-      />
-      <button disabled={isBusy} type="submit">
-        {isBusy ? "Joining..." : "Join room"}
-      </button>
+    <form className="grid gap-4" onSubmit={handleSubmit}>
+      <div className="grid gap-2">
+        <Label htmlFor="roomCode" className="text-slate-600 dark:text-slate-300">
+          Room code
+        </Label>
+        <Input
+          id="roomCode"
+          value={roomCode}
+          onChange={(event) => setRoomCode(event.target.value)}
+          placeholder="room_ab12cd34"
+          className="bg-white/50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/50 focus-visible:ring-teal-500"
+          autoComplete="off"
+          disabled={isBusy}
+        />
+      </div>
+      <Button 
+        disabled={isBusy || !roomCode.trim()} 
+        type="submit" 
+        className="w-full bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white border-0"
+      >
+        {isBusy ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Joining...
+          </>
+        ) : (
+          "Join room"
+        )}
+      </Button>
     </form>
   );
 }

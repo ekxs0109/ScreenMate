@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RoomSourceState, RoomState } from "@screenmate/shared";
 import type { ViewerStatus } from "../lib/session-state";
+import { Badge } from "@/components/ui/badge";
+import { VolumeX } from "lucide-react";
 
 export function ViewerPlayer({
   roomId,
@@ -31,24 +33,17 @@ export function ViewerPlayer({
       return;
     }
 
-    // Start muted to guarantee autoplay succeeds (browser policy).
-    // Then try to unmute – if the browser blocks it, show a tap-to-unmute overlay.
     video.muted = true;
 
     const playPromise = video.play().catch(() => {
-      // Even muted play failed (very rare) – show interaction prompt.
       setNeedsInteraction(true);
     });
 
     void Promise.resolve(playPromise).then(() => {
-      // Attempt to unmute after muted playback started.
       video.muted = false;
 
-      // Some browsers will pause the video when we unmute without a gesture.
-      // Detect this by checking if the video is still playing after a tick.
       requestAnimationFrame(() => {
         if (video.paused && stream) {
-          // Unmuting caused a pause – revert to muted playback and prompt user.
           video.muted = true;
           void video.play().catch(() => {});
           setNeedsInteraction(true);
@@ -69,7 +64,6 @@ export function ViewerPlayer({
     void video.play().then(() => {
       setNeedsInteraction(false);
     }).catch(() => {
-      // Fallback: keep it muted but playing.
       video.muted = true;
       void video.play().catch(() => {});
       setNeedsInteraction(false);
@@ -77,32 +71,66 @@ export function ViewerPlayer({
   }, []);
 
   return (
-    <section className="viewer-player">
-      <div className="viewer-status">
-        {roomId ? `Room: ${roomId}` : "Waiting for a room code"}
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-sm text-slate-500 dark:text-slate-400">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-slate-700 dark:text-slate-300">Room:</span>
+          <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">{roomId || "Waiting..."}</span>
+        </div>
+        
+        <div className="flex items-center">
+          {roomState === "closed" ? (
+            <span className="text-red-500 dark:text-red-400">Host ended the room</span>
+          ) : sourceState === "recovering" ? (
+            <span className="text-amber-500">Host is reconnecting video...</span>
+          ) : sourceState === "missing" ? (
+            <span>Waiting for video source...</span>
+          ) : status === "connected" ? (
+            <span className="text-emerald-500 dark:text-emerald-400 flex items-center gap-1.5">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              Connected to host
+            </span>
+          ) : (
+            <span className="capitalize">{status}{roomState ? ` · ${roomState}` : ""}</span>
+          )}
+        </div>
       </div>
-      <div className="viewer-status">
-        {roomState === "closed"
-          ? "The host ended the room."
-          : sourceState === "recovering"
-            ? "Host is reconnecting the video source"
-            : sourceState === "missing"
-              ? "Waiting for host to attach a video"
-              : status === "connected"
-                ? "Connected to host stream"
-                : `Status: ${status}${roomState ? ` · ${roomState}` : ""}`}
-      </div>
-      <div className="viewer-video-container">
-        <video autoPlay playsInline ref={videoRef} />
-        {needsInteraction && stream ? (
+      
+      <div className="relative rounded-xl overflow-hidden bg-slate-900 shadow-inner border border-slate-200 dark:border-slate-800 group">
+        <video 
+          autoPlay 
+          playsInline 
+          ref={videoRef} 
+          className="w-full aspect-video bg-black object-contain transition-opacity duration-300"
+          style={{ opacity: stream ? 1 : 0.5 }}
+        />
+        
+        {!stream && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3 text-slate-400">
+              <div className="h-12 w-12 rounded-full bg-slate-800 flex items-center justify-center animate-pulse">
+                <span className="block w-2 h-2 rounded-full bg-slate-600"></span>
+              </div>
+              <p className="text-sm font-medium">Waiting for video stream</p>
+            </div>
+          </div>
+        )}
+
+        {needsInteraction && stream && (
           <button
-            className="viewer-unmute-overlay"
+            className="absolute inset-0 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm text-white transition-colors hover:bg-slate-900/70 cursor-pointer group"
             onClick={handleInteraction}
             type="button"
           >
-            🔇 Click to unmute
+            <div className="flex flex-col items-center gap-3 bg-slate-800/80 px-6 py-4 rounded-2xl shadow-xl transform transition-transform group-hover:scale-105 border border-slate-700">
+              <VolumeX className="h-8 w-8 text-amber-400" />
+              <span className="font-semibold text-lg">Click to unmute</span>
+            </div>
           </button>
-        ) : null}
+        )}
       </div>
     </section>
   );
