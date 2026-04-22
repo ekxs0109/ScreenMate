@@ -538,4 +538,148 @@ describe("createHostRoomRuntime", () => {
       vi.useRealTimers();
     }
   });
+
+  it("stops sending heartbeats after runtime close tears down signaling", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = {
+        get: vi.fn().mockResolvedValue({}),
+        set: vi.fn(),
+        remove: vi.fn(),
+      };
+      const sockets: MockHostSocket[] = [];
+      const runtime = createHostRoomRuntime({
+        storage,
+        now: () => 1_710_000_000_000,
+        WebSocketImpl: class {
+          constructor(_url: string) {
+            const socket = new MockHostSocket();
+            sockets.push(socket);
+            return socket as never;
+          }
+        } as never,
+      });
+
+      await runtime.startRoom({
+        roomId: "room_123",
+        hostSessionId: "host_1",
+        hostToken: "host-token",
+        signalingUrl: "/rooms/room_123/ws",
+        iceServers: [],
+        activeTabId: 42,
+        activeFrameId: 0,
+        viewerSessionIds: [],
+        viewerCount: 0,
+        sourceFingerprint: null,
+        recoverByTimestamp: null,
+      });
+
+      const connectPromise = runtime.connectSignaling(vi.fn());
+      sockets[0]!.readyState = 1;
+      sockets[0]?.emit("open");
+      await connectPromise;
+
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      const heartbeatsBeforeClose = sockets[0]!.send.mock.calls
+        .map(([payload]) => JSON.parse(payload as string))
+        .filter((payload) => payload.messageType === "heartbeat").length;
+
+      await runtime.close("Room closed.");
+      await vi.advanceTimersByTimeAsync(40_000);
+
+      const heartbeatsAfterClose = sockets[0]!.send.mock.calls
+        .map(([payload]) => JSON.parse(payload as string))
+        .filter((payload) => payload.messageType === "heartbeat").length;
+
+      expect(heartbeatsBeforeClose).toBe(1);
+      expect(heartbeatsAfterClose).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops heartbeats on socket close and restarts sequence from 1 after reconnect", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = {
+        get: vi.fn().mockResolvedValue({}),
+        set: vi.fn(),
+        remove: vi.fn(),
+      };
+      const sockets: MockHostSocket[] = [];
+      const runtime = createHostRoomRuntime({
+        storage,
+        now: () => 1_710_000_000_000,
+        WebSocketImpl: class {
+          constructor(_url: string) {
+            const socket = new MockHostSocket();
+            sockets.push(socket);
+            return socket as never;
+          }
+        } as never,
+      });
+
+      await runtime.startRoom({
+        roomId: "room_123",
+        hostSessionId: "host_1",
+        hostToken: "host-token",
+        signalingUrl: "/rooms/room_123/ws",
+        iceServers: [],
+        activeTabId: 42,
+        activeFrameId: 0,
+        viewerSessionIds: [],
+        viewerCount: 0,
+        sourceFingerprint: null,
+        recoverByTimestamp: null,
+      });
+
+      const connectPromise1 = runtime.connectSignaling(vi.fn());
+      sockets[0]!.readyState = 1;
+      sockets[0]?.emit("open");
+      await connectPromise1;
+
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      sockets[0]!.readyState = 3;
+      sockets[0]?.emit("close");
+      await vi.advanceTimersByTimeAsync(40_000);
+
+      const firstSocketHeartbeats = sockets[0]!.send.mock.calls
+        .map(([payload]) => JSON.parse(payload as string))
+        .filter((payload) => payload.messageType === "heartbeat");
+      expect(firstSocketHeartbeats).toHaveLength(1);
+      expect(firstSocketHeartbeats[0]).toEqual(
+        expect.objectContaining({
+          payload: {
+            sequence: 1,
+          },
+        }),
+      );
+
+      const connectPromise2 = runtime.connectSignaling(vi.fn());
+      sockets[1]!.readyState = 1;
+      sockets[1]?.emit("open");
+      await connectPromise2;
+
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      const secondSocketHeartbeats = sockets[1]!.send.mock.calls
+        .map(([payload]) => JSON.parse(payload as string))
+        .filter((payload) => payload.messageType === "heartbeat");
+      expect(secondSocketHeartbeats).toEqual([
+        expect.objectContaining({
+          roomId: "room_123",
+          sessionId: "host_1",
+          role: "host",
+          messageType: "heartbeat",
+          payload: {
+            sequence: 1,
+          },
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
