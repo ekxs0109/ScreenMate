@@ -88,7 +88,7 @@ describe("normalizeSnapshot", () => {
   });
 });
 
-describe("popup compatibility messages", () => {
+describe("popup room action messages", () => {
   it("builds room-start then attach requests when no room exists yet", () => {
     expect(
       buildStartSharingRequests(createHostRoomSnapshot(), {
@@ -130,5 +130,30 @@ describe("popup compatibility messages", () => {
     expect(buildStopSharingRequest()).toEqual({
       type: "screenmate:stop-room",
     });
+  });
+
+  it("restarts a closed room before attaching a source", () => {
+    expect(
+      buildStartSharingRequests(
+        createHostRoomSnapshot({
+          roomLifecycle: "closed",
+          roomId: "room_123",
+        }),
+        {
+          id: "screenmate-video-1",
+          frameId: 0,
+        },
+      ),
+    ).toEqual([
+      {
+        type: "screenmate:start-room",
+        frameId: 0,
+      },
+      {
+        type: "screenmate:attach-source",
+        videoId: "screenmate-video-1",
+        frameId: 0,
+      },
+    ]);
   });
 });

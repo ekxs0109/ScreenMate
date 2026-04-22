@@ -233,8 +233,9 @@ export function useHostControls() {
     const selectedVideo = videos.find(
       (video) => getVideoSelectionKey(video) === selectedVideoKey,
     );
-    const hasActiveRoom =
-      snapshot.roomId !== null && snapshot.roomLifecycle !== "closed";
+    const requests = selectedVideo
+      ? buildStartSharingRequests(snapshot, selectedVideo)
+      : [];
 
     popupLogger.info("Room action requested.", {
       selectedVideoKey,
@@ -268,30 +269,21 @@ export function useHostControls() {
     );
 
     try {
-      let nextSnapshot = snapshot;
+      for (const request of requests) {
+        const response = await browser.runtime.sendMessage(request);
+        const nextSnapshot = normalizeSnapshot(response);
 
-      if (!hasActiveRoom) {
-        const startedRoom = await browser.runtime.sendMessage({
-          type: "screenmate:start-room",
-          frameId: selectedVideo.frameId,
-        });
-        nextSnapshot = normalizeSnapshot(startedRoom);
-        reportRoomActionResult(popupLogger, nextSnapshot, startedRoom);
+        reportRoomActionResult(popupLogger, nextSnapshot, response);
         setSnapshot(nextSnapshot);
 
-        if (!nextSnapshot.roomId) {
+        if (
+          request.type === "screenmate:start-room" &&
+          (nextSnapshot.roomId === null ||
+            nextSnapshot.roomLifecycle === "closed")
+        ) {
           return;
         }
       }
-
-      const attachedSource = await browser.runtime.sendMessage({
-        type: "screenmate:attach-source",
-        frameId: selectedVideo.frameId,
-        videoId: selectedVideo.id,
-      });
-      nextSnapshot = normalizeSnapshot(attachedSource);
-      reportRoomActionResult(popupLogger, nextSnapshot, attachedSource);
-      setSnapshot(nextSnapshot);
     } catch (error) {
       popupLogger.error("Room action runtime request failed.", {
         error: error instanceof Error ? error.message : String(error),

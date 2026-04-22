@@ -9,15 +9,18 @@ export type PopupViewModel = {
 export function getPopupViewModel(
   snapshot: HostRoomSnapshot,
 ): PopupViewModel {
+  const hasOpenRoom =
+    snapshot.roomId !== null && snapshot.roomLifecycle !== "closed";
+
   return {
     primaryActionLabel: getPrimaryActionLabel(snapshot),
     statusText: getStatusText(snapshot),
-    canStop: snapshot.roomId !== null,
+    canStop: hasOpenRoom,
   };
 }
 
 function getPrimaryActionLabel(snapshot: HostRoomSnapshot): string {
-  if (snapshot.roomId === null) {
+  if (snapshot.roomId === null || snapshot.roomLifecycle === "closed") {
     return "Start room";
   }
 

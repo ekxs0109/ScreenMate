@@ -21,4 +21,24 @@ describe("getPopupViewModel", () => {
       canStop: true,
     });
   });
+
+  it("treats a closed room with a stale room id as restartable", () => {
+    expect(
+      getPopupViewModel({
+        roomLifecycle: "closed",
+        sourceState: "missing",
+        roomId: "room_123",
+        viewerCount: 0,
+        sourceLabel: null,
+        activeTabId: 42,
+        activeFrameId: 0,
+        recoverByTimestamp: null,
+        message: "Room closed.",
+      }),
+    ).toEqual({
+      primaryActionLabel: "Start room",
+      statusText: "Room closed · missing",
+      canStop: false,
+    });
+  });
 });
