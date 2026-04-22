@@ -142,6 +142,56 @@ describe("createHostRoomRuntime", () => {
     expect(storage.remove).toHaveBeenCalledTimes(1);
   });
 
+  it("updates the active owner when a new source is attached", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    const runtime = createHostRoomRuntime({
+      storage,
+      now: () => 1_000,
+    });
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    await runtime.setAttachedSource("Moved source", {
+      tabId: 99,
+      frameId: 7,
+      primaryUrl: "https://example.com/moved.mp4",
+      elementId: "moved",
+      label: "Moved source",
+      visibleIndex: 0,
+    });
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      roomLifecycle: "open",
+      sourceState: "attached",
+      activeTabId: 99,
+      activeFrameId: 7,
+      sourceLabel: "Moved source",
+    });
+    expect(storage.set).toHaveBeenLastCalledWith({
+      screenmateHostRoomSession: expect.objectContaining({
+        activeTabId: 99,
+        activeFrameId: 7,
+      }),
+    });
+  });
+
   it("queues outbound signals until the signaling socket opens", async () => {
     const storage = {
       get: vi.fn().mockResolvedValue({}),

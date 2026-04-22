@@ -41,6 +41,8 @@ export type HostMessage =
   | {
       type: "screenmate:signal-outbound";
       envelope: Record<string, unknown>;
+      frameId?: number | null;
+      tabId?: number | null;
     }
   | {
       type: "screenmate:signal-inbound";
@@ -138,10 +140,20 @@ export function createHostMessageHandler(
     }
 
     if (message.type === "screenmate:source-detached") {
+      const snapshot = dependencies.runtime.getSnapshot();
+      if (!isCurrentAttachmentOwner(snapshot, message)) {
+        return snapshot;
+      }
+
       return dependencies.runtime.markRecovering(message.reason);
     }
 
     if (message.type === "screenmate:signal-outbound") {
+      const snapshot = dependencies.runtime.getSnapshot();
+      if (!isCurrentAttachmentOwner(snapshot, message)) {
+        return { ok: true };
+      }
+
       dependencies.runtime.sendSignal(message.envelope);
       return { ok: true };
     }
@@ -681,7 +693,8 @@ function normalizeIncomingFrameMessage(
 
   if (
     message.type !== "screenmate:content-ready" &&
-    message.type !== "screenmate:source-detached"
+    message.type !== "screenmate:source-detached" &&
+    message.type !== "screenmate:signal-outbound"
   ) {
     return message;
   }
@@ -691,6 +704,32 @@ function normalizeIncomingFrameMessage(
     frameId: sender.frameId ?? 0,
     tabId: sender.tab?.id ?? null,
   } satisfies HostMessage;
+}
+
+function isCurrentAttachmentOwner(
+  snapshot: Pick<HostRoomSnapshot, "activeFrameId" | "activeTabId">,
+  message: {
+    frameId?: number | null;
+    tabId?: number | null;
+  },
+) {
+  if (
+    typeof snapshot.activeFrameId === "number" &&
+    typeof message.frameId === "number" &&
+    message.frameId !== snapshot.activeFrameId
+  ) {
+    return false;
+  }
+
+  if (
+    typeof snapshot.activeTabId === "number" &&
+    typeof message.tabId === "number" &&
+    message.tabId !== snapshot.activeTabId
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 export function shouldForwardSignalToContentRuntime(

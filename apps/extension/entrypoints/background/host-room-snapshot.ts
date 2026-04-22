@@ -83,12 +83,14 @@ export function createHostRoomStore(
       });
       return snapshot;
     },
-    setAttached(sourceLabel: string) {
+    setAttached(sourceLabel: string, owner: { tabId: number; frameId: number }) {
       snapshot = {
         ...snapshot,
         roomLifecycle: "open",
         sourceState: "attached",
         sourceLabel,
+        activeTabId: owner.tabId,
+        activeFrameId: owner.frameId,
         message: null,
         recoverByTimestamp: null,
       };

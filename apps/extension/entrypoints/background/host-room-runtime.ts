@@ -134,10 +134,15 @@ export function createHostRoomRuntime(options: {
 
       session = {
         ...session,
+        activeTabId: fingerprint.tabId,
+        activeFrameId: fingerprint.frameId,
         sourceFingerprint: fingerprint,
         recoverByTimestamp: null,
       };
-      store.setAttached(sourceLabel);
+      store.setAttached(sourceLabel, {
+        tabId: fingerprint.tabId,
+        frameId: fingerprint.frameId,
+      });
       await persist();
       return store.getSnapshot();
     },

@@ -194,7 +194,17 @@ describe("createHostMessageHandler", () => {
       queryFrameIds: vi.fn().mockResolvedValue([0]),
       sendTabMessage: vi.fn(),
       runtime: {
-        getSnapshot: vi.fn(),
+        getSnapshot: vi.fn().mockReturnValue({
+          roomLifecycle: "open",
+          sourceState: "attached",
+          roomId: "room_123",
+          viewerCount: 1,
+          sourceLabel: "https://example.com/hero.mp4",
+          activeTabId: 42,
+          activeFrameId: 0,
+          recoverByTimestamp: null,
+          message: null,
+        }),
         markRecovering,
       } as never,
     });
@@ -496,6 +506,73 @@ describe("createHostMessageHandler", () => {
     });
   });
 
+  it("transfers active attachment ownership when attaching a new source", async () => {
+    const setAttachedSource = vi.fn().mockResolvedValue({
+      roomLifecycle: "open",
+      sourceState: "attached",
+      roomId: "room_123",
+      viewerCount: 1,
+      sourceLabel: "https://example.com/next.mp4",
+      activeTabId: 99,
+      activeFrameId: 7,
+      recoverByTimestamp: null,
+      message: null,
+    });
+    const handler = createHostMessageHandler({
+      createRoom: vi.fn(),
+      forwardInboundSignal: vi.fn(),
+      queryActiveTabId: vi.fn().mockResolvedValue(99),
+      queryFrameIds: vi.fn().mockResolvedValue([7]),
+      sendTabMessage: vi.fn().mockResolvedValue({
+        sourceLabel: "https://example.com/next.mp4",
+        fingerprint: {
+          primaryUrl: "https://example.com/next.mp4",
+          elementId: "next",
+          label: "https://example.com/next.mp4",
+          visibleIndex: 0,
+        },
+      }),
+      runtime: {
+        getAttachSession: vi.fn().mockReturnValue({
+          roomId: "room_123",
+          sessionId: "host_1",
+          viewerSessionIds: ["viewer_1"],
+          iceServers: [],
+        }),
+        getSnapshot: vi.fn().mockReturnValue({
+          roomLifecycle: "open",
+          sourceState: "attached",
+          roomId: "room_123",
+          viewerCount: 1,
+          sourceLabel: "https://example.com/previous.mp4",
+          activeTabId: 42,
+          activeFrameId: 0,
+          recoverByTimestamp: null,
+          message: null,
+        }),
+        setAttachedSource,
+      } as never,
+    });
+
+    await handler({
+      type: "screenmate:attach-source",
+      videoId: "screenmate-video-2",
+      frameId: 7,
+    });
+
+    expect(setAttachedSource).toHaveBeenCalledWith(
+      "https://example.com/next.mp4",
+      {
+        tabId: 99,
+        frameId: 7,
+        primaryUrl: "https://example.com/next.mp4",
+        elementId: "next",
+        label: "https://example.com/next.mp4",
+        visibleIndex: 0,
+      },
+    );
+  });
+
   it("broadcasts preview updates to every reachable frame", async () => {
     const queryActiveTabId = vi.fn().mockResolvedValue(42);
     const queryFrameIds = vi.fn().mockResolvedValue([0, 7]);
@@ -690,6 +767,81 @@ describe("createHostMessageHandler", () => {
       tabId: 42,
       videos: [],
     });
+  });
+
+  it("uses the runtime sender identity for signal-outbound ownership checks", async () => {
+    const handler = vi.fn().mockResolvedValue({ ok: true });
+    const internalHandler = vi.fn().mockReturnValue(undefined);
+    const sendResponse = vi.fn();
+
+    const keepChannelOpen = createHostRuntimeMessageListener(
+      handler,
+      internalHandler,
+    )(
+      {
+        type: "screenmate:signal-outbound",
+        envelope: { messageType: "offer" },
+      },
+      { frameId: 7, tab: { id: 42 } } as never,
+      sendResponse,
+    );
+
+    expect(keepChannelOpen).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(handler).toHaveBeenCalledWith({
+      type: "screenmate:signal-outbound",
+      envelope: { messageType: "offer" },
+      frameId: 7,
+      tabId: 42,
+    });
+  });
+
+  it("ignores stale source-detached and signal-outbound messages after ownership moves", async () => {
+    const markRecovering = vi.fn();
+    const sendSignal = vi.fn();
+    const snapshot = {
+      roomLifecycle: "open",
+      sourceState: "attached",
+      roomId: "room_123",
+      viewerCount: 1,
+      sourceLabel: "https://example.com/current.mp4",
+      activeTabId: 99,
+      activeFrameId: 7,
+      recoverByTimestamp: null,
+      message: null,
+    };
+    const handler = createHostMessageHandler({
+      createRoom: vi.fn(),
+      forwardInboundSignal: vi.fn(),
+      queryActiveTabId: vi.fn(),
+      queryFrameIds: vi.fn(),
+      sendTabMessage: vi.fn(),
+      runtime: {
+        getSnapshot: vi.fn().mockReturnValue(snapshot),
+        markRecovering,
+        sendSignal,
+      } as never,
+    });
+
+    const detachResult = await handler({
+      type: "screenmate:source-detached",
+      frameId: 0,
+      tabId: 42,
+      reason: "track-ended",
+    } as HostMessage);
+    const signalResult = await handler({
+      type: "screenmate:signal-outbound",
+      frameId: 0,
+      tabId: 42,
+      envelope: { messageType: "ice-candidate" },
+    } as HostMessage);
+
+    expect(detachResult).toEqual(snapshot);
+    expect(signalResult).toEqual({ ok: true });
+    expect(markRecovering).not.toHaveBeenCalled();
+    expect(sendSignal).not.toHaveBeenCalled();
   });
 
   it("creates a room through the extension background network context", async () => {
