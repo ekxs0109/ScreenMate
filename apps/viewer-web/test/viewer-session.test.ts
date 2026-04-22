@@ -294,6 +294,86 @@ describe("ViewerSession", () => {
     });
   });
 
+  it("stays joined when the room is degraded and the host source is missing", async () => {
+    const socket = new FakeWebSocket();
+    const peer = new FakePeerConnection();
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+
+        if (url.endsWith("/rooms/room_demo") && !init?.method) {
+          return Response.json({
+            roomId: "room_demo",
+            state: "streaming",
+            sourceState: "attached",
+            hostConnected: true,
+            hostSessionId: "host_1",
+            viewerCount: 1,
+          });
+        }
+
+        return Response.json({
+          roomId: "room_demo",
+          sessionId: "viewer_1",
+          viewerToken: "viewer-token",
+          wsUrl: "ws://signal.example/rooms/room_demo/ws",
+          iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
+        });
+      },
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peer as never,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "offer",
+        timestamp: 10,
+        payload: {
+          targetSessionId: "viewer_1",
+          sdp: "host-offer",
+        },
+      }),
+    );
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    peer.emitTrack({ id: "stream_demo" } as never);
+
+    expect(session.getSnapshot()).toMatchObject({
+      status: "connected",
+      roomState: "streaming",
+      sourceState: "attached",
+    });
+
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "room-state",
+        timestamp: 11,
+        payload: {
+          state: "degraded",
+          sourceState: "missing",
+          viewerCount: 1,
+        },
+      }),
+    );
+
+    expect(session.getSnapshot()).toMatchObject({
+      status: "waiting",
+      roomState: "degraded",
+      sourceState: "missing",
+      endedReason: null,
+    });
+  });
+
   it("does not emit an ended state when replacing a peer during reoffer recovery", async () => {
     const socket = new FakeWebSocket();
     const firstPeer = new FakePeerConnection();
