@@ -1365,6 +1365,54 @@ describe("createHostMessageHandler", () => {
     expect(sendTabMessage).not.toHaveBeenCalled();
   });
 
+  it("drops late viewer forwarding when ICE refresh resolves stale for a replaced room", async () => {
+    const sendTabMessage = vi.fn().mockResolvedValue(undefined);
+    const forwardInboundSignal = createForwardInboundSignalHandler({
+      runtime: {
+        getSnapshot: vi
+          .fn()
+          .mockReturnValueOnce({
+            roomLifecycle: "open",
+            sourceState: "attached",
+            roomId: "room_123",
+            viewerCount: 1,
+            sourceLabel: "Primary source",
+            activeTabId: 42,
+            activeFrameId: 7,
+            recoverByTimestamp: null,
+            message: null,
+          })
+          .mockReturnValueOnce({
+            roomLifecycle: "open",
+            sourceState: "attached",
+            roomId: "room_456",
+            viewerCount: 1,
+            sourceLabel: "Replacement source",
+            activeTabId: 99,
+            activeFrameId: 3,
+            recoverByTimestamp: null,
+            message: null,
+          }),
+        shouldRefreshHostIce: vi.fn().mockReturnValue(true),
+        refreshHostIce: vi.fn().mockResolvedValue(null),
+      } as never,
+      sendTabMessage,
+    });
+
+    await forwardInboundSignal({
+      roomId: "room_123",
+      sessionId: "viewer_2",
+      role: "viewer",
+      messageType: "viewer-joined",
+      timestamp: 10,
+      payload: {
+        viewerSessionId: "viewer_2",
+      },
+    });
+
+    expect(sendTabMessage).not.toHaveBeenCalled();
+  });
+
   it("forwards viewer lifecycle and negotiation envelopes to the content runtime", () => {
     expect(
       shouldForwardSignalToContentRuntime({

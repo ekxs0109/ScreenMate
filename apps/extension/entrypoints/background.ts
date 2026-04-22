@@ -468,8 +468,11 @@ export function createForwardInboundSignalHandler(dependencies: {
     ) {
       try {
         const refreshed = await dependencies.runtime.refreshHostIce();
+        if (refreshed === null) {
+          return;
+        }
         const refreshedTarget = getActiveAttachmentTarget();
-        if (refreshed && refreshedTarget) {
+        if (refreshedTarget) {
           await dependencies.sendTabMessage(
             refreshedTarget.tabId,
             {

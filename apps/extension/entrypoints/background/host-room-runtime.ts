@@ -7,7 +7,10 @@ import {
   getScreenMateApiBaseUrl,
   toScreenMateWebSocketUrl,
 } from "../../lib/config";
-import { refreshHostIce as requestHostIceRefresh } from "../../lib/room-api";
+import {
+  refreshHostIce as requestHostIceRefresh,
+  type HostIceRefreshResponse,
+} from "../../lib/room-api";
 import {
   createHostRoomStore,
   type HostSourceState,
@@ -52,6 +55,12 @@ export function createHostRoomRuntime(options: {
   let pendingOutboundSignals: string[] = [];
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let heartbeatSequence = 0;
+  let pendingHostIceRefresh:
+    | {
+        session: PersistedHostRoomSession;
+        promise: Promise<HostIceRefreshResponse | null>;
+      }
+    | null = null;
 
   async function persist() {
     if (session) {
@@ -94,7 +103,7 @@ export function createHostRoomRuntime(options: {
     await persist();
     return {
       iceServers: session.iceServers,
-      turnCredentialExpiresAt: session.turnCredentialExpiresAt,
+      turnCredentialExpiresAt: session.turnCredentialExpiresAt ?? null,
     };
   }
 
@@ -280,19 +289,40 @@ export function createHostRoomRuntime(options: {
       }
 
       const activeSession = session;
+      if (
+        pendingHostIceRefresh &&
+        isSameSession(pendingHostIceRefresh.session, activeSession)
+      ) {
+        return pendingHostIceRefresh.promise;
+      }
 
-      const refreshed = await requestHostIceRefresh(
-        fetchImpl,
-        apiBaseUrl,
-        activeSession.roomId,
-        activeSession.hostToken,
-      );
-      await updateIceServers(
-        refreshed.iceServers,
-        refreshed.turnCredentialExpiresAt,
-        activeSession,
-      );
-      return refreshed;
+      const refreshPromise = (async () => {
+        const refreshed = await requestHostIceRefresh(
+          fetchImpl,
+          apiBaseUrl,
+          activeSession.roomId,
+          activeSession.hostToken,
+        );
+
+        return updateIceServers(
+          refreshed.iceServers,
+          refreshed.turnCredentialExpiresAt,
+          activeSession,
+        );
+      })();
+
+      pendingHostIceRefresh = {
+        session: activeSession,
+        promise: refreshPromise,
+      };
+
+      try {
+        return await refreshPromise;
+      } finally {
+        if (pendingHostIceRefresh?.promise === refreshPromise) {
+          pendingHostIceRefresh = null;
+        }
+      }
     },
     async updateIceServers(
       iceServers: RTCIceServer[],
