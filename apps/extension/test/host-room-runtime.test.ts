@@ -463,4 +463,79 @@ describe("createHostRoomRuntime", () => {
       },
     ]);
   });
+
+  it("sends host heartbeats every 20 seconds while signaling remains open", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = {
+        get: vi.fn().mockResolvedValue({}),
+        set: vi.fn(),
+        remove: vi.fn(),
+      };
+      const sockets: MockHostSocket[] = [];
+      const now = vi.fn(() => 1_710_000_000_000);
+      const runtime = createHostRoomRuntime({
+        storage,
+        now,
+        WebSocketImpl: class {
+          constructor(_url: string) {
+            const socket = new MockHostSocket();
+            sockets.push(socket);
+            return socket as never;
+          }
+        } as never,
+      });
+
+      await runtime.startRoom({
+        roomId: "room_123",
+        hostSessionId: "host_1",
+        hostToken: "host-token",
+        signalingUrl: "/rooms/room_123/ws",
+        iceServers: [],
+        activeTabId: 42,
+        activeFrameId: 0,
+        viewerSessionIds: [],
+        viewerCount: 0,
+        sourceFingerprint: null,
+        recoverByTimestamp: null,
+      });
+
+      const connectPromise = runtime.connectSignaling(vi.fn());
+      sockets[0]!.readyState = 1;
+      sockets[0]?.emit("open");
+      await connectPromise;
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      const sentPayloads = sockets[0]!.send.mock.calls
+        .map(([payload]) => JSON.parse(payload as string))
+        .filter((payload) => payload.messageType === "heartbeat");
+
+      expect(sentPayloads).toEqual([
+        {
+          roomId: "room_123",
+          sessionId: "host_1",
+          role: "host",
+          messageType: "heartbeat",
+          timestamp: 1_710_000_000_000,
+          payload: {
+            sequence: 1,
+          },
+        },
+        {
+          roomId: "room_123",
+          sessionId: "host_1",
+          role: "host",
+          messageType: "heartbeat",
+          timestamp: 1_710_000_000_000,
+          payload: {
+            sequence: 2,
+          },
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

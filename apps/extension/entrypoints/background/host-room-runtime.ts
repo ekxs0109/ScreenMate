@@ -17,6 +17,7 @@ import {
 
 const STORAGE_KEY = "screenmateHostRoomSession";
 const OPEN_SOCKET_READY_STATE = 1;
+const HEARTBEAT_INTERVAL_MS = 20_000;
 
 type SessionStorageLike = {
   get: (key: string) => Promise<Record<string, PersistedHostRoomSession | undefined>>;
@@ -45,6 +46,8 @@ export function createHostRoomRuntime(options: {
   let session: PersistedHostRoomSession | null = null;
   let socket: HostSocket | null = null;
   let pendingOutboundSignals: string[] = [];
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let heartbeatSequence = 0;
 
   async function persist() {
     if (session) {
@@ -55,7 +58,45 @@ export function createHostRoomRuntime(options: {
     await options.storage.remove(STORAGE_KEY);
   }
 
+  function stopHeartbeat() {
+    if (!heartbeatTimer) {
+      return;
+    }
+
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+
+  function sendHeartbeat() {
+    if (!session) {
+      return false;
+    }
+
+    heartbeatSequence += 1;
+    return sendSignal(
+      signalEnvelopeSchema.parse({
+        roomId: session.roomId,
+        sessionId: session.hostSessionId,
+        role: "host",
+        messageType: "heartbeat",
+        timestamp: now(),
+        payload: {
+          sequence: heartbeatSequence,
+        },
+      }),
+    );
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      sendHeartbeat();
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
   function closeSocket() {
+    stopHeartbeat();
+
     if (!socket) {
       pendingOutboundSignals = [];
       return;
@@ -290,6 +331,8 @@ export function createHostRoomRuntime(options: {
           nextSocket.send(payload);
         }
         publishRoomState(store.getSnapshot());
+        heartbeatSequence = 0;
+        startHeartbeat();
       });
 
       nextSocket.addEventListener("message", (event) => {
@@ -362,6 +405,7 @@ export function createHostRoomRuntime(options: {
 
       nextSocket.addEventListener("close", () => {
         if (socket === nextSocket) {
+          stopHeartbeat();
           socket = null;
         }
       });
