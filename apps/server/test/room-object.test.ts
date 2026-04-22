@@ -222,6 +222,46 @@ describe("RoomObject", () => {
       vi.useRealTimers();
     }
   });
+
+  it("marks expired rooms closed when internal state is read", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(200_000);
+      const { state, storage } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+
+      await roomObject.fetch(
+        new Request("https://room.internal/internal/initialize", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            roomId: "room_demo",
+            hostSessionId: "host_1",
+            createdAt: 0,
+            expiresAt: 100_000,
+            maxExpiresAt: 5_000_000,
+          }),
+        }),
+      );
+
+      const response = await roomObject.fetch(
+        new Request("https://room.internal/internal/state", { method: "GET" }),
+      );
+      const body = (await response.json()) as {
+        state: string;
+        sourceState: string;
+      };
+      const stored = await storage.get<{
+        closedReason: string | null;
+      }>("room-record");
+
+      expect(body.state).toBe("closed");
+      expect(body.sourceState).toBe("missing");
+      expect(stored?.closedReason).toBe("expired");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("RoomState", () => {

@@ -560,7 +560,7 @@ async function attachSourceInFrame(
   tabId: number,
   message: Extract<HostMessage, { type: "screenmate:attach-source" }>,
 ) {
-  const roomSession = dependencies.runtime.getAttachSession();
+  const roomSession = await getAttachSessionForNegotiation(dependencies);
   if (!roomSession) {
     return dependencies.runtime.getSnapshot();
   }
@@ -649,7 +649,7 @@ async function maybeReattachSource(
   }
 
   const sourceFingerprint = dependencies.runtime.getSourceFingerprint();
-  const roomSession = dependencies.runtime.getAttachSession();
+  const roomSession = await getAttachSessionForNegotiation(dependencies);
   if (
     !sourceFingerprint ||
     !roomSession ||
@@ -712,6 +712,33 @@ async function maybeReattachSource(
     });
     return dependencies.runtime.markMissing("No video attached.");
   }
+}
+
+async function getAttachSessionForNegotiation(
+  dependencies: HostMessageHandlerDependencies,
+) {
+  const roomSession = dependencies.runtime.getAttachSession();
+  if (!roomSession) {
+    return null;
+  }
+
+  if (!dependencies.runtime.shouldRefreshHostIce?.()) {
+    return roomSession;
+  }
+
+  try {
+    const refreshed = await dependencies.runtime.refreshHostIce?.();
+    if (refreshed === null) {
+      return null;
+    }
+  } catch (error) {
+    backgroundLogger.warn("Could not refresh host ICE before attaching.", {
+      error: toErrorMessage(error),
+      roomId: roomSession.roomId,
+    });
+  }
+
+  return dependencies.runtime.getAttachSession();
 }
 
 async function broadcastPreviewToTab(

@@ -244,6 +244,15 @@ export class RoomState {
     };
   }
 
+  async expireIfNeeded() {
+    if (!this.isExpired()) {
+      return false;
+    }
+
+    await this.closeRoom("expired");
+    return true;
+  }
+
   handleSocketMessage(connection: RoomConnection, rawData: unknown) {
     if (typeof rawData !== "string") {
       connection.socket.close(1003, "unsupported-message");
@@ -544,6 +553,7 @@ export class RoomObject {
     }
 
     if (url.pathname === "/internal/state" && request.method === "GET") {
+      await roomState.expireIfNeeded();
       return Response.json(roomState.getStateSnapshot());
     }
 

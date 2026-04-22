@@ -513,7 +513,13 @@ export function createHostRoomRuntime(options: {
         }
       });
 
-      return openPromise;
+      const connected = await openPromise;
+
+      if (!connected && isSameSession(session, activeSession)) {
+        await closeRoom("Room expired or unavailable.");
+      }
+
+      return connected;
     },
     sendSignal,
     async restoreFromStorage() {

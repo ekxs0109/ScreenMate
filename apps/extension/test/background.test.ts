@@ -7,6 +7,7 @@ import {
   shouldForwardSignalToContentRuntime,
   type HostMessage,
 } from "../entrypoints/background";
+import { createHostRoomSnapshot } from "../entrypoints/background/host-room-snapshot";
 
 function createHandlerDependencies(
   overrides: Partial<Parameters<typeof createHostMessageHandler>[0]> = {},
@@ -285,6 +286,94 @@ describe("createHostMessageHandler", () => {
       expect.objectContaining({
         type: "screenmate:attach-source",
         videoId: "screenmate-video-1",
+      }),
+      { frameId: 0 },
+    );
+  });
+
+  it("refreshes host ICE before recovery reattach uses persisted viewer sessions", async () => {
+    const refreshedSession = {
+      roomId: "room_123",
+      sessionId: "host_1",
+      viewerSessionIds: ["viewer_1"],
+      iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+    };
+    const sendTabMessage = vi.fn().mockResolvedValue({
+      sourceLabel: "https://example.com/hero.mp4",
+      fingerprint: {
+        primaryUrl: "https://example.com/hero.mp4",
+        elementId: "hero",
+        label: "https://example.com/hero.mp4",
+        visibleIndex: 0,
+      },
+    });
+    const handler = createHostMessageHandler({
+      createRoom: vi.fn(),
+      forwardInboundSignal: vi.fn(),
+      queryActiveTabId: vi.fn().mockResolvedValue(42),
+      queryFrameIds: vi.fn().mockResolvedValue([0]),
+      sendTabMessage,
+      runtime: {
+        getAttachSession: vi
+          .fn()
+          .mockReturnValueOnce({
+            roomId: "room_123",
+            sessionId: "host_1",
+            viewerSessionIds: ["viewer_1"],
+            iceServers: [{ urls: ["turn:stale.screenmate.dev"] }],
+          })
+          .mockReturnValueOnce(refreshedSession),
+        getSnapshot: vi.fn().mockReturnValue({
+          roomLifecycle: "degraded",
+          sourceState: "recovering",
+          roomId: "room_123",
+          viewerCount: 1,
+          activeTabId: 42,
+          activeFrameId: 0,
+          recoverByTimestamp: 5_000,
+          message: "Page refreshed.",
+        }),
+        getSourceFingerprint: vi.fn().mockReturnValue({
+          tabId: 42,
+          frameId: 0,
+          primaryUrl: "https://example.com/hero.mp4",
+          elementId: "hero",
+          label: "https://example.com/hero.mp4",
+          visibleIndex: 0,
+        }),
+        markMissing: vi.fn().mockResolvedValue(createHostRoomSnapshot()),
+        refreshHostIce: vi.fn().mockResolvedValue({
+          iceServers: refreshedSession.iceServers,
+          turnCredentialExpiresAt: 200_000,
+        }),
+        setAttachedSource: vi.fn().mockResolvedValue(createHostRoomSnapshot()),
+        shouldRefreshHostIce: vi.fn().mockReturnValue(true),
+      } as never,
+    });
+
+    await handler({
+      type: "screenmate:content-ready",
+      frameId: 0,
+      videos: [
+        {
+          id: "screenmate-video-1",
+          label: "https://example.com/hero.mp4",
+          frameId: 0,
+          fingerprint: {
+            primaryUrl: "https://example.com/hero.mp4",
+            elementId: "hero",
+            label: "https://example.com/hero.mp4",
+            visibleIndex: 0,
+          },
+        },
+      ],
+    });
+
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        type: "screenmate:attach-source",
+        roomSession: refreshedSession,
       }),
       { frameId: 0 },
     );
@@ -717,6 +806,74 @@ describe("createHostMessageHandler", () => {
         label: "https://example.com/next.mp4",
         visibleIndex: 0,
       },
+    );
+  });
+
+  it("refreshes host ICE before attaching a source when the cached lease is stale", async () => {
+    const refreshedSession = {
+      roomId: "room_123",
+      sessionId: "host_1",
+      viewerSessionIds: ["viewer_1"],
+      iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+    };
+    const sendTabMessage = vi.fn().mockResolvedValue({
+      sourceLabel: "https://example.com/next.mp4",
+      fingerprint: {
+        primaryUrl: "https://example.com/next.mp4",
+        elementId: "next",
+        label: "https://example.com/next.mp4",
+        visibleIndex: 0,
+      },
+    });
+    const handler = createHostMessageHandler({
+      createRoom: vi.fn(),
+      forwardInboundSignal: vi.fn(),
+      queryActiveTabId: vi.fn().mockResolvedValue(42),
+      queryFrameIds: vi.fn().mockResolvedValue([0]),
+      sendTabMessage,
+      runtime: {
+        getAttachSession: vi
+          .fn()
+          .mockReturnValueOnce({
+            roomId: "room_123",
+            sessionId: "host_1",
+            viewerSessionIds: ["viewer_1"],
+            iceServers: [{ urls: ["turn:stale.screenmate.dev"] }],
+          })
+          .mockReturnValueOnce(refreshedSession),
+        getSnapshot: vi.fn().mockReturnValue({
+          roomLifecycle: "open",
+          sourceState: "attached",
+          roomId: "room_123",
+          viewerCount: 1,
+          sourceLabel: "https://example.com/previous.mp4",
+          activeTabId: 42,
+          activeFrameId: 0,
+          recoverByTimestamp: null,
+          message: null,
+        }),
+        refreshHostIce: vi.fn().mockResolvedValue({
+          iceServers: refreshedSession.iceServers,
+          turnCredentialExpiresAt: 200_000,
+        }),
+        setAttachedSource: vi.fn().mockResolvedValue(createHostRoomSnapshot()),
+        shouldRefreshHostIce: vi.fn().mockReturnValue(true),
+      } as never,
+    });
+
+    await handler({
+      type: "screenmate:attach-source",
+      frameId: 0,
+      videoId: "screenmate-video-2",
+    });
+
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        type: "screenmate:attach-source",
+        roomSession: refreshedSession,
+      }),
+      { frameId: 0 },
     );
   });
 

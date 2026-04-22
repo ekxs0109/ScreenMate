@@ -510,6 +510,52 @@ describe("createHostRoomRuntime", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("closes the persisted room when signaling closes before opening", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const sockets: MockHostSocket[] = [];
+    const runtime = createHostRoomRuntime({
+      storage,
+      now: () => 1_000,
+      WebSocketImpl: class {
+        constructor(_url: string) {
+          const socket = new MockHostSocket();
+          sockets.push(socket);
+          return socket as never;
+        }
+      } as never,
+    });
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    const connectPromise = runtime.connectSignaling(vi.fn());
+    sockets[0]?.emit("close");
+
+    expect(await connectPromise).toBe(false);
+    expect(runtime.getSnapshot()).toMatchObject({
+      roomLifecycle: "closed",
+      sourceState: "missing",
+      roomId: "room_123",
+      message: "Room expired or unavailable.",
+    });
+    expect(storage.remove).toHaveBeenCalledTimes(1);
+  });
+
   it("forwards viewer lifecycle events after updating runtime viewer sessions", async () => {
     const storage = {
       get: vi.fn().mockResolvedValue({}),
