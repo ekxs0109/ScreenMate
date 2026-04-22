@@ -7,7 +7,7 @@ type TurnCredentialInput = {
 };
 
 type TurnCredentialOptions = {
-  now: number;
+  nowSeconds: number;
   secret: string;
   ttlSeconds: number;
   urls: string[];
@@ -22,7 +22,7 @@ export async function issueTurnCredentials(
   input: TurnCredentialInput,
   options: TurnCredentialOptions,
 ) {
-  const expiresAtSeconds = options.now + options.ttlSeconds;
+  const expiresAtSeconds = options.nowSeconds + options.ttlSeconds;
   const username =
     `${expiresAtSeconds}:${input.roomId}:${input.sessionId}:${input.role}`;
   const credential = await hmacSha1Base64(username, options.secret);
