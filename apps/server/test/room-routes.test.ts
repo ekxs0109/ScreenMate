@@ -243,16 +243,20 @@ describe("room routes", () => {
   });
 
   it("refreshes host turn credentials when presented with a valid host bearer token", async () => {
-    const roomNamespace = createRoomNamespace(() =>
-      Response.json({
+    const roomNamespace = createRoomNamespace((roomId, request) => {
+      expect(roomId).toBe("room_demo");
+      expect(new URL(request.url).pathname).toBe("/internal/state");
+      expect(request.method).toBe("GET");
+
+      return Response.json({
         roomId: "room_demo",
         hostSessionId: "host_123",
         hostConnected: true,
         viewerCount: 0,
         state: "hosting",
         sourceState: "attached",
-      }),
-    );
+      });
+    });
     const token = await issueScopedToken(
       { roomId: "room_demo", role: "host", sessionId: "host_123" },
       {
@@ -283,10 +287,95 @@ describe("room routes", () => {
     };
 
     expect(response.status).toBe(200);
+    expect(roomNamespace.calls).toHaveLength(1);
     expect(body.iceServers[2]).toMatchObject({
       username: "1700000600:room_demo:host_123:host",
     });
     expect(body.turnCredentialExpiresAt).toBe(TEST_NOW + 10 * 60 * 1_000);
+  });
+
+  it("rejects host ice refresh when the room is closed", async () => {
+    const roomNamespace = createRoomNamespace(() =>
+      Response.json({
+        roomId: "room_demo",
+        hostSessionId: "host_123",
+        hostConnected: false,
+        viewerCount: 0,
+        state: "closed",
+        sourceState: "detached",
+      }),
+    );
+    const token = await issueScopedToken(
+      { roomId: "room_demo", role: "host", sessionId: "host_123" },
+      {
+        secret: TEST_SECRET,
+        now: Math.floor(TEST_NOW / 1_000),
+        ttlSeconds: 2 * 60 * 60,
+      },
+    );
+
+    const response = await app.request(
+      "/rooms/room_demo/host/ice",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        TURN_AUTH_SECRET: "turn-secret",
+        TURN_URLS:
+          "turn:turn.screenmate.local:3478?transport=udp,turn:turn.screenmate.local:3478?transport=tcp,turns:turn.screenmate.local:5349?transport=tcp",
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("ROOM_NOT_FOUND");
+    expect(roomNamespace.calls).toHaveLength(1);
+  });
+
+  it("rejects host ice refresh when the bearer token host session is stale", async () => {
+    const roomNamespace = createRoomNamespace(() =>
+      Response.json({
+        roomId: "room_demo",
+        hostSessionId: "host_current",
+        hostConnected: true,
+        viewerCount: 0,
+        state: "hosting",
+        sourceState: "attached",
+      }),
+    );
+    const token = await issueScopedToken(
+      { roomId: "room_demo", role: "host", sessionId: "host_stale" },
+      {
+        secret: TEST_SECRET,
+        now: Math.floor(TEST_NOW / 1_000),
+        ttlSeconds: 2 * 60 * 60,
+      },
+    );
+
+    const response = await app.request(
+      "/rooms/room_demo/host/ice",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        TURN_AUTH_SECRET: "turn-secret",
+        TURN_URLS:
+          "turn:turn.screenmate.local:3478?transport=udp,turn:turn.screenmate.local:3478?transport=tcp,turns:turn.screenmate.local:5349?transport=tcp",
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("ROOM_NOT_FOUND");
+    expect(roomNamespace.calls).toHaveLength(1);
   });
 
   it("rejects host ice refresh without a valid host bearer token", async () => {

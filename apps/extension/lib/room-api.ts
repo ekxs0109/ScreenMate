@@ -54,7 +54,20 @@ export async function refreshHostIce(
     );
   }
 
-  return response.json() as Promise<HostIceRefreshResponse>;
+  const payload = (await response.json()) as HostIceRefreshResponse;
+
+  if (
+    !Array.isArray(payload.iceServers) ||
+    !("turnCredentialExpiresAt" in payload) ||
+    (
+      payload.turnCredentialExpiresAt !== null &&
+      typeof payload.turnCredentialExpiresAt !== "number"
+    )
+  ) {
+    throw new Error("Host ICE refresh returned an incomplete response.");
+  }
+
+  return payload;
 }
 
 async function readResponseErrorDetails(response: Response): Promise<string> {

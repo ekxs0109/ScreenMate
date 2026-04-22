@@ -147,6 +147,27 @@ app.post("/rooms/:roomId/host/ice", async (c) => {
     return c.json({ error: errorCodes.ROOM_NOT_FOUND }, 401);
   }
 
+  const roomObject = getRoomObject(c.env, roomId);
+  const roomStateResponse = await roomObject.fetch(
+    buildInternalRequest("/internal/state"),
+  );
+
+  if (!roomStateResponse.ok) {
+    return c.json({ error: errorCodes.ROOM_NOT_FOUND }, 401);
+  }
+
+  const roomState = (await roomStateResponse.json()) as {
+    hostSessionId?: unknown;
+    state?: unknown;
+  };
+
+  if (
+    roomState.state === "closed" ||
+    roomState.hostSessionId !== claims.sessionId
+  ) {
+    return c.json({ error: errorCodes.ROOM_NOT_FOUND }, 401);
+  }
+
   const ice = await buildIceResponse(c.env, {
     roomId,
     sessionId: claims.sessionId,
