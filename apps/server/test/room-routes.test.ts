@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import app from "../src/index";
-import { verifyScopedToken } from "../src/lib/token";
+import { issueScopedToken, verifyScopedToken } from "../src/lib/token";
 
 const TEST_SECRET = "screenmate-dev-secret";
 const TEST_NOW = 1_700_000_000_000;
@@ -48,7 +48,7 @@ describe("room routes", () => {
     expect(body.iceServers[0].urls[0]).toContain("stun:");
   });
 
-  it("creates a room token from POST /rooms and initializes the durable object", async () => {
+  it("returns session-scoped turn credentials from POST /rooms", async () => {
     const roomNamespace = createRoomNamespace(async (roomId, request) => {
       expect(roomId).toMatch(/^room_/);
       expect(new URL(request.url).pathname).toBe("/internal/initialize");
@@ -59,12 +59,14 @@ describe("room routes", () => {
         hostSessionId: string;
         createdAt: number;
         expiresAt: number;
+        maxExpiresAt: number;
       };
 
       expect(body.roomId).toBe(roomId);
       expect(body.hostSessionId).toMatch(/^host_/);
       expect(body.createdAt).toBe(TEST_NOW);
       expect(body.expiresAt).toBe(TEST_NOW + 2 * 60 * 60 * 1_000);
+      expect(body.maxExpiresAt).toBe(TEST_NOW + 12 * 60 * 60 * 1_000);
 
       return Response.json({
         roomId,
@@ -79,6 +81,9 @@ describe("room routes", () => {
       {
         ROOM_OBJECT: roomNamespace,
         ROOM_TOKEN_SECRET: TEST_SECRET,
+        TURN_AUTH_SECRET: "turn-secret",
+        TURN_URLS:
+          "turn:turn.screenmate.local:3478?transport=udp,turn:turn.screenmate.local:3478?transport=tcp,turns:turn.screenmate.local:5349?transport=tcp",
         SCREENMATE_NOW: TEST_NOW,
       } as never,
     );
@@ -87,7 +92,8 @@ describe("room routes", () => {
       hostToken: string;
       signalingUrl: string;
       wsUrl: string;
-      iceServers: Array<{ urls: string[] }>;
+      iceServers: RTCIceServer[];
+      turnCredentialExpiresAt: number;
     };
 
     expect(response.status).toBe(201);
@@ -95,12 +101,22 @@ describe("room routes", () => {
     expect(body.hostToken.length).toBeGreaterThan(10);
     expect(body.signalingUrl).toBe(`/rooms/${body.roomId}/ws`);
     expect(body.wsUrl).toBe(`ws://localhost/rooms/${body.roomId}/ws`);
-    expect(body.iceServers).toHaveLength(4);
+    expect(body.iceServers).toHaveLength(3);
+    expect(body.iceServers[2]).toMatchObject({
+      urls: [
+        "turn:turn.screenmate.local:3478?transport=udp",
+        "turn:turn.screenmate.local:3478?transport=tcp",
+        "turns:turn.screenmate.local:5349?transport=tcp",
+      ],
+      username: expect.stringMatching(/^1700000600:room_/),
+      credential: expect.any(String),
+    });
+    expect(body.turnCredentialExpiresAt).toBe(TEST_NOW + 10 * 60 * 1_000);
     expect(roomNamespace.calls).toHaveLength(1);
 
     const payload = await verifyScopedToken(body.hostToken, {
       secret: TEST_SECRET,
-      now: Math.floor(TEST_NOW / 1_000),
+      now: Math.floor(TEST_NOW / 1_000) + 60 * 60,
     });
 
     expect(payload?.roomId).toBe(body.roomId);
@@ -188,6 +204,9 @@ describe("room routes", () => {
       {
         ROOM_OBJECT: roomNamespace,
         ROOM_TOKEN_SECRET: TEST_SECRET,
+        TURN_AUTH_SECRET: "turn-secret",
+        TURN_URLS:
+          "turn:turn.screenmate.local:3478?transport=udp,turn:turn.screenmate.local:3478?transport=tcp,turns:turn.screenmate.local:5349?transport=tcp",
         SCREENMATE_NOW: TEST_NOW,
       } as never,
     );
@@ -196,14 +215,15 @@ describe("room routes", () => {
       sessionId: string;
       viewerToken: string;
       wsUrl: string;
-      iceServers: Array<{ urls: string[] }>;
+      iceServers: RTCIceServer[];
+      turnCredentialExpiresAt: number;
     };
 
     expect(response.status).toBe(200);
     expect(body.roomId).toBe("room_demo");
     expect(body.sessionId).toMatch(/^viewer_/);
     expect(body.wsUrl).toBe("ws://localhost/rooms/room_demo/ws");
-    expect(body.iceServers).toHaveLength(4);
+    expect(body.iceServers).toHaveLength(3);
 
     const payload = await verifyScopedToken(body.viewerToken, {
       secret: TEST_SECRET,
@@ -214,7 +234,54 @@ describe("room routes", () => {
       roomId: "room_demo",
       role: "viewer",
       sessionId: body.sessionId,
-      exp: Math.floor(TEST_NOW / 1_000) + 300,
+      exp: Math.floor(TEST_NOW / 1_000) + 12 * 60 * 60,
+    });
+    expect(body.turnCredentialExpiresAt).toBe(TEST_NOW + 10 * 60 * 1_000);
+  });
+
+  it("refreshes host turn credentials when presented with a valid host bearer token", async () => {
+    const roomNamespace = createRoomNamespace(() =>
+      Response.json({
+        roomId: "room_demo",
+        hostSessionId: "host_123",
+        hostConnected: true,
+        viewerCount: 0,
+        state: "hosting",
+        sourceState: "attached",
+      }),
+    );
+    const token = await issueScopedToken(
+      { roomId: "room_demo", role: "host", sessionId: "host_123" },
+      {
+        secret: TEST_SECRET,
+        now: Math.floor(TEST_NOW / 1_000),
+        ttlSeconds: 2 * 60 * 60,
+      },
+    );
+
+    const response = await app.request(
+      "/rooms/room_demo/host/ice",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        TURN_AUTH_SECRET: "turn-secret",
+        TURN_URLS:
+          "turn:turn.screenmate.local:3478?transport=udp,turn:turn.screenmate.local:3478?transport=tcp,turns:turn.screenmate.local:5349?transport=tcp",
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+    const body = (await response.json()) as {
+      iceServers: RTCIceServer[];
+      turnCredentialExpiresAt: number;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.iceServers[2]).toMatchObject({
+      username: "1700000600:room_demo:host_123:host",
     });
   });
 
@@ -250,7 +317,6 @@ describe("room routes", () => {
       return new Response(null, { status: 204 });
     });
 
-    const { issueScopedToken } = await import("../src/lib/token");
     const token = await issueScopedToken(
       {
         roomId: "room_demo",

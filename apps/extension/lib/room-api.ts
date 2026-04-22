@@ -4,6 +4,12 @@ export type RoomCreateResponse = {
   hostToken: string;
   signalingUrl: string;
   iceServers?: RTCIceServer[];
+  turnCredentialExpiresAt?: number | null;
+};
+
+export type HostIceRefreshResponse = {
+  iceServers: RTCIceServer[];
+  turnCredentialExpiresAt: number | null;
 };
 
 export async function requestRoomCreation(
@@ -26,6 +32,29 @@ export async function requestRoomCreation(
   }
 
   return payload;
+}
+
+export async function refreshHostIce(
+  fetchImpl: typeof fetch,
+  apiBaseUrl: string,
+  roomId: string,
+  hostToken: string,
+): Promise<HostIceRefreshResponse> {
+  const response = await fetchImpl(`${apiBaseUrl}/rooms/${roomId}/host/ice`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${hostToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorDetails = await readResponseErrorDetails(response);
+    throw new Error(
+      `Failed to refresh host ICE (${response.status}): ${errorDetails}`,
+    );
+  }
+
+  return response.json() as Promise<HostIceRefreshResponse>;
 }
 
 async function readResponseErrorDetails(response: Response): Promise<string> {

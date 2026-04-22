@@ -6,13 +6,18 @@ import {
   type CloudflareBindings,
   getNow,
   getRoomTokenSecret,
+  getTurnAuthSecret,
+  getTurnTtlSeconds,
+  getTurnUrls,
 } from "./env.js";
 export { RoomObject } from "./do/room-object.js";
-import { getDefaultIcePool } from "./lib/ice-pool.js";
+import { buildSessionIceServers } from "./lib/turn-credentials.js";
 import { issueScopedToken, verifyScopedToken } from "./lib/token.js";
 
 const app = new Hono<{ Bindings: CloudflareBindings }>();
-const ROOM_TTL_MS = 2 * 60 * 60 * 1_000;
+const ROOM_INITIAL_TTL_MS = 2 * 60 * 60 * 1_000;
+const ROOM_MAX_TTL_MS = 12 * 60 * 60 * 1_000;
+const ROOM_TOKEN_TTL_SECONDS = ROOM_MAX_TTL_MS / 1_000;
 
 app.use(
   "*",
@@ -25,7 +30,11 @@ app.use(
 );
 
 app.get("/config/ice", (c) => {
-  return c.json({ iceServers: getDefaultIcePool() });
+  return buildIceResponse(c.env, {
+    roomId: "config",
+    sessionId: "anonymous",
+    role: "viewer",
+  }).then((ice) => c.json({ iceServers: ice.iceServers }));
 });
 
 app.post("/rooms", async (c) => {
@@ -41,8 +50,14 @@ app.post("/rooms", async (c) => {
     {
       secret: getRoomTokenSecret(c.env),
       now: Math.floor(now / 1_000),
+      ttlSeconds: ROOM_TOKEN_TTL_SECONDS,
     },
   );
+  const ice = await buildIceResponse(c.env, {
+    roomId,
+    sessionId: hostSessionId,
+    role: "host",
+  });
   const roomObject = getRoomObject(c.env, roomId);
 
   await roomObject.fetch(
@@ -53,7 +68,8 @@ app.post("/rooms", async (c) => {
         roomId,
         hostSessionId,
         createdAt: now,
-        expiresAt: now + ROOM_TTL_MS,
+        expiresAt: now + ROOM_INITIAL_TTL_MS,
+        maxExpiresAt: now + ROOM_MAX_TTL_MS,
       }),
     }),
   );
@@ -65,7 +81,8 @@ app.post("/rooms", async (c) => {
       hostToken,
       signalingUrl: `/rooms/${roomId}/ws`,
       wsUrl: buildWebSocketUrl(c.req.url, roomId),
-      iceServers: getDefaultIcePool(),
+      iceServers: ice.iceServers,
+      turnCredentialExpiresAt: ice.turnCredentialExpiresAt,
     },
     201,
   );
@@ -99,8 +116,14 @@ app.post("/rooms/:roomId/join", async (c) => {
     {
       secret: getRoomTokenSecret(c.env),
       now: Math.floor(now / 1_000),
+      ttlSeconds: ROOM_TOKEN_TTL_SECONDS,
     },
   );
+  const ice = await buildIceResponse(c.env, {
+    roomId,
+    sessionId: viewerSessionId,
+    role: "viewer",
+  });
 
   return c.json({
     roomId,
@@ -109,8 +132,31 @@ app.post("/rooms/:roomId/join", async (c) => {
     viewerToken,
     signalingUrl: `/rooms/${roomId}/ws`,
     wsUrl: buildWebSocketUrl(c.req.url, roomId),
-    iceServers: getDefaultIcePool(),
+    iceServers: ice.iceServers,
+    turnCredentialExpiresAt: ice.turnCredentialExpiresAt,
   });
+});
+
+app.post("/rooms/:roomId/host/ice", async (c) => {
+  const roomId = c.req.param("roomId");
+  const authHeader = c.req.header("authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const claims = await verifyScopedToken(token, {
+    secret: getRoomTokenSecret(c.env),
+    now: Math.floor(getNow(c.env) / 1_000),
+  });
+
+  if (!claims || claims.roomId !== roomId || claims.role !== "host") {
+    return c.json({ error: errorCodes.ROOM_NOT_FOUND }, 401);
+  }
+
+  const ice = await buildIceResponse(c.env, {
+    roomId,
+    sessionId: claims.sessionId,
+    role: "host",
+  });
+
+  return c.json(ice);
 });
 
 app.get("/rooms/:roomId/ws", async (c) => {
@@ -169,4 +215,27 @@ function buildWebSocketUrl(requestUrl: string, roomId: string): string {
   url.search = "";
 
   return url.toString();
+}
+
+async function buildIceResponse(
+  env: CloudflareBindings,
+  input: { roomId: string; sessionId: string; role: "host" | "viewer" },
+) {
+  const urls = getTurnUrls(env);
+
+  if (urls.length === 0) {
+    return buildSessionIceServers(input, {
+      nowSeconds: Math.floor(getNow(env) / 1_000),
+      secret: "",
+      ttlSeconds: getTurnTtlSeconds(env),
+      urls,
+    });
+  }
+
+  return buildSessionIceServers(input, {
+    nowSeconds: Math.floor(getNow(env) / 1_000),
+    secret: getTurnAuthSecret(env),
+    ttlSeconds: getTurnTtlSeconds(env),
+    urls,
+  });
 }
