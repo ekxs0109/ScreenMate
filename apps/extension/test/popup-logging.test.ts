@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createHostSnapshot,
   reportStartSharingResult,
+  type HostSnapshot,
   type PopupLogger,
 } from "../entrypoints/popup/useHostControls";
-import {
-  createHostSnapshot,
-  type HostSnapshot,
-} from "../entrypoints/content/host-session";
 
 function createLoggerDouble(): PopupLogger {
   return {

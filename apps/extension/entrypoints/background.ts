@@ -1,21 +1,50 @@
 import { browser, type Browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
+import { getScreenMateApiBaseUrl } from "../lib/config";
 import { createLogger } from "../lib/logger";
 import {
   requestRoomCreation,
   type RoomCreateResponse,
 } from "../lib/room-api";
 import {
-  createHostSnapshot,
-  type HostSnapshot,
-} from "./content/host-session";
+  createHostRoomRuntime,
+  type HostRoomRuntime,
+  type SignalEnvelope,
+} from "./background/host-room-runtime";
+import {
+  createHostRoomSnapshot,
+  type HostRoomSnapshot,
+  type SourceFingerprint,
+} from "./background/host-room-snapshot";
 import type { VideoSource as LocalVideoSource } from "./content/video-detector";
 
+type SourceFingerprintMatch = Omit<SourceFingerprint, "frameId" | "tabId">;
+
 export type HostMessage =
+  | { type: "screenmate:get-room-session" }
   | { type: "screenmate:list-videos" }
-  | { type: "screenmate:get-host-state" }
-  | { type: "screenmate:start-sharing"; videoId: string; frameId: number }
-  | { type: "screenmate:stop-sharing" }
+  | { type: "screenmate:start-room"; frameId: number }
+  | { type: "screenmate:attach-source"; videoId: string; frameId: number }
+  | { type: "screenmate:stop-room" }
+  | {
+      type: "screenmate:content-ready";
+      frameId: number;
+      videos: TabVideoSource[];
+    }
+  | {
+      type: "screenmate:source-detached";
+      frameId: number;
+      reason: "track-ended" | "content-invalidated" | "manual-detach";
+    }
+  | {
+      type: "screenmate:signal-outbound";
+      envelope: Record<string, unknown>;
+    }
+  | {
+      type: "screenmate:signal-inbound";
+      envelope: Record<string, unknown>;
+      frameId: number;
+    }
   | {
       type: "screenmate:preview-video";
       videoId: string;
@@ -27,6 +56,7 @@ export type HostMessage =
 
 export type TabVideoSource = LocalVideoSource & {
   frameId: number;
+  fingerprint?: SourceFingerprintMatch;
 };
 
 export type PreviewAck = { ok: true };
@@ -37,51 +67,50 @@ export type InternalHostNetworkMessage = {
 export type InternalHostNetworkErrorResponse = {
   error: string;
 };
-type TabMessageResponse = HostSnapshot | LocalVideoSource[] | PreviewAck;
+
+type AttachSourceResponse = {
+  sourceLabel: string;
+  fingerprint: SourceFingerprintMatch;
+};
+
+type TabContentMessage =
+  | Extract<HostMessage, { type: "screenmate:list-videos" }>
+  | Extract<HostMessage, { type: "screenmate:preview-video" }>
+  | Extract<HostMessage, { type: "screenmate:clear-preview" }>
+  | {
+      type: "screenmate:attach-source";
+      videoId: string;
+      roomSession: NonNullable<ReturnType<HostRoomRuntime["getAttachSession"]>>;
+    }
+  | {
+      type: "screenmate:signal-inbound";
+      envelope: SignalEnvelope;
+    };
+
+type HandlerResponse = HostRoomSnapshot | TabVideoSource[] | PreviewAck;
+type TabMessageResponse =
+  | LocalVideoSource[]
+  | AttachSourceResponse
+  | PreviewAck
+  | undefined;
 type InternalHostNetworkResponse =
   | RoomCreateResponse
   | InternalHostNetworkErrorResponse;
+
 const backgroundLogger = createLogger("background");
 
-function isHostMessage(message: unknown): message is HostMessage {
-  if (typeof message !== "object" || message === null) {
-    return false;
-  }
-
-  const candidate = message as Partial<HostMessage> & { type?: unknown };
-  const { type } = candidate;
-
-  if (type === "screenmate:start-sharing") {
-    return (
-      typeof candidate.videoId === "string" &&
-      typeof candidate.frameId === "number"
-    );
-  }
-
-  if (type === "screenmate:preview-video") {
-    return (
-      typeof candidate.videoId === "string" &&
-      typeof candidate.frameId === "number" &&
-      typeof candidate.label === "string"
-    );
-  }
-
-  return (
-    type === "screenmate:list-videos" ||
-    type === "screenmate:get-host-state" ||
-    type === "screenmate:stop-sharing" ||
-    type === "screenmate:clear-preview"
-  );
-}
-
 type HostMessageHandlerDependencies = {
+  apiBaseUrl?: string;
+  createRoom: (apiBaseUrl: string) => Promise<InternalHostNetworkResponse>;
   queryActiveTabId: () => Promise<number | null>;
   queryFrameIds: (tabId: number) => Promise<number[]>;
+  runtime: HostRoomRuntime;
   sendTabMessage: (
     tabId: number,
-    message: HostMessage,
+    message: TabContentMessage,
     options?: { frameId?: number },
   ) => Promise<TabMessageResponse>;
+  forwardInboundSignal: (envelope: SignalEnvelope) => void;
 };
 
 type InternalHostNetworkHandlerDependencies = {
@@ -91,9 +120,28 @@ type InternalHostNetworkHandlerDependencies = {
 export function createHostMessageHandler(
   dependencies: HostMessageHandlerDependencies,
 ) {
-  return async (message: unknown) => {
+  const apiBaseUrl = dependencies.apiBaseUrl ?? getScreenMateApiBaseUrl();
+
+  return async (message: unknown): Promise<HandlerResponse | undefined> => {
     if (!isHostMessage(message)) {
       return undefined;
+    }
+
+    if (message.type === "screenmate:get-room-session") {
+      return dependencies.runtime.getSnapshot();
+    }
+
+    if (message.type === "screenmate:stop-room") {
+      return dependencies.runtime.close("Room closed.");
+    }
+
+    if (message.type === "screenmate:source-detached") {
+      return dependencies.runtime.markRecovering(message.reason);
+    }
+
+    if (message.type === "screenmate:signal-outbound") {
+      dependencies.runtime.sendSignal(message.envelope);
+      return { ok: true };
     }
 
     const tabId = await dependencies.queryActiveTabId();
@@ -102,24 +150,21 @@ export function createHostMessageHandler(
         return [];
       }
 
-      return createHostSnapshot({
-        errorMessage:
-          message.type === "screenmate:get-host-state"
-            ? null
-            : "Could not find an active tab to start sharing from.",
+      if (
+        message.type === "screenmate:preview-video" ||
+        message.type === "screenmate:clear-preview" ||
+        message.type === "screenmate:signal-inbound"
+      ) {
+        return { ok: true };
+      }
+
+      return createHostRoomSnapshot({
+        message: "Could not find an active tab to continue.",
       });
     }
 
     if (message.type === "screenmate:list-videos") {
       return listVideosForTab(dependencies, tabId);
-    }
-
-    if (message.type === "screenmate:get-host-state") {
-      return getHostStateForTab(dependencies, tabId);
-    }
-
-    if (message.type === "screenmate:stop-sharing") {
-      return stopSharingInTab(dependencies, tabId);
     }
 
     if (message.type === "screenmate:preview-video") {
@@ -130,7 +175,52 @@ export function createHostMessageHandler(
       return broadcastMessageToTab(dependencies, tabId, message);
     }
 
-    return sendMessageToFrame(dependencies, tabId, message.frameId, message);
+    if (message.type === "screenmate:start-room") {
+      const roomResponse = await dependencies.createRoom(apiBaseUrl);
+      if (!isRoomCreateResponse(roomResponse)) {
+        return createHostRoomSnapshot({
+          message: roomResponse.error,
+        });
+      }
+
+      const snapshot = await dependencies.runtime.startRoom({
+        roomId: roomResponse.roomId,
+        hostSessionId: roomResponse.hostSessionId ?? "host",
+        hostToken: roomResponse.hostToken,
+        signalingUrl: roomResponse.signalingUrl,
+        iceServers: roomResponse.iceServers ?? [],
+        activeTabId: tabId,
+        activeFrameId: message.frameId,
+        viewerSessionIds: [],
+        viewerCount: 0,
+        sourceFingerprint: null,
+        recoverByTimestamp: null,
+      });
+      await dependencies.runtime.connectSignaling(dependencies.forwardInboundSignal);
+      return snapshot;
+    }
+
+    if (message.type === "screenmate:attach-source") {
+      return attachSourceInFrame(dependencies, tabId, message);
+    }
+
+    if (message.type === "screenmate:content-ready") {
+      return maybeReattachSource(dependencies, tabId, message);
+    }
+
+    if (message.type === "screenmate:signal-inbound") {
+      await dependencies.sendTabMessage(
+        tabId,
+        {
+          type: "screenmate:signal-inbound",
+          envelope: message.envelope as SignalEnvelope,
+        },
+        { frameId: message.frameId },
+      );
+      return { ok: true };
+    }
+
+    return undefined;
   };
 }
 
@@ -140,13 +230,12 @@ export function createHostRuntimeMessageListener(
 ) {
   return (
     message: unknown,
-    _sender: Browser.runtime.MessageSender,
+    sender: Browser.runtime.MessageSender,
     sendResponse: (
       response?:
-        | TabMessageResponse
-        | HostSnapshot
-        | TabVideoSource[]
-        | InternalHostNetworkResponse,
+        | HandlerResponse
+        | InternalHostNetworkResponse
+        | HostRoomSnapshot,
     ) => void,
   ) => {
     const internalResult = internalHandler(message);
@@ -169,7 +258,8 @@ export function createHostRuntimeMessageListener(
       return true;
     }
 
-    const result = handler(message);
+    const normalizedMessage = normalizeIncomingFrameMessage(message, sender);
+    const result = handler(normalizedMessage);
 
     if (result === undefined) {
       return undefined;
@@ -182,11 +272,11 @@ export function createHostRuntimeMessageListener(
       .catch((error) => {
         backgroundLogger.error("Runtime message handler failed.", {
           error: toErrorMessage(error),
-          message,
+          message: normalizedMessage,
         });
         sendResponse(
-          createHostSnapshot({
-            errorMessage: `Background handler failed: ${toErrorMessage(error)}`,
+          createHostRoomSnapshot({
+            message: `Background handler failed: ${toErrorMessage(error)}`,
           }),
         );
       });
@@ -196,8 +286,58 @@ export function createHostRuntimeMessageListener(
 }
 
 export default defineBackground(() => {
+  const apiBaseUrl = getScreenMateApiBaseUrl();
+  const runtime = createHostRoomRuntime({
+    apiBaseUrl,
+    storage: browser.storage.session,
+  });
+  const internalHandler = createInternalHostNetworkHandler({
+    fetchImpl: fetch,
+  });
+  const forwardInboundSignal = (envelope: SignalEnvelope) => {
+    const snapshot = runtime.getSnapshot();
+    if (snapshot.activeTabId === null || snapshot.activeFrameId === null) {
+      return;
+    }
+
+    if (
+      envelope.messageType !== "answer" &&
+      envelope.messageType !== "ice-candidate"
+    ) {
+      return;
+    }
+
+    void browser.tabs
+      .sendMessage(
+        snapshot.activeTabId,
+        {
+          type: "screenmate:signal-inbound",
+          envelope,
+        } satisfies TabContentMessage,
+        { frameId: snapshot.activeFrameId },
+      )
+      .catch((error) => {
+        backgroundLogger.warn("Could not forward inbound signal to content.", {
+          activeFrameId: snapshot.activeFrameId,
+          activeTabId: snapshot.activeTabId,
+          error: toErrorMessage(error),
+          messageType: envelope.messageType,
+        });
+      });
+  };
   const handler = createHostMessageHandler({
-    async queryActiveTabId() {
+    apiBaseUrl,
+    createRoom: async (requestedApiBaseUrl) => {
+      return (
+        (await internalHandler({
+          type: "screenmate:create-room",
+          apiBaseUrl: requestedApiBaseUrl,
+        })) ?? {
+          error: "Background room creation handler was unavailable.",
+        }
+      );
+    },
+    queryActiveTabId: async () => {
       const [tab] = await browser.tabs.query({
         active: true,
         currentWindow: true,
@@ -205,7 +345,7 @@ export default defineBackground(() => {
 
       return tab?.id ?? null;
     },
-    async queryFrameIds(tabId) {
+    queryFrameIds: async (tabId) => {
       const frames = (await browser.webNavigation.getAllFrames({ tabId })) ?? [];
       const frameIds = frames
         .map((frame) => frame.frameId)
@@ -213,6 +353,7 @@ export default defineBackground(() => {
 
       return frameIds.length > 0 ? frameIds : [0];
     },
+    runtime,
     sendTabMessage(tabId, message, options) {
       return browser.tabs.sendMessage(
         tabId,
@@ -220,10 +361,23 @@ export default defineBackground(() => {
         options,
       ) as Promise<TabMessageResponse>;
     },
+    forwardInboundSignal,
   });
-  const internalHandler = createInternalHostNetworkHandler({
-    fetchImpl: fetch,
-  });
+
+  void runtime
+    .restoreFromStorage()
+    .then(() => {
+      if (!runtime.getAttachSession()) {
+        return;
+      }
+
+      return runtime.connectSignaling(forwardInboundSignal);
+    })
+    .catch((error) => {
+      backgroundLogger.error("Could not restore persisted room session.", {
+        error: toErrorMessage(error),
+      });
+    });
 
   browser.runtime.onMessage.addListener(
     createHostRuntimeMessageListener(handler, internalHandler),
@@ -302,102 +456,109 @@ async function listVideosForTab(
     }
   }
 
-  results.forEach((result, index) => {
-    const frameId = frameIds[index] ?? 0;
-
-    if (result.status === "fulfilled") {
-      backgroundLogger.info("Frame video scan response.", {
-        frameId,
-        responseKind: Array.isArray(result.value)
-          ? "video-list"
-          : "ok" in result.value
-            ? "ack"
-            : "snapshot",
-        videoCount: Array.isArray(result.value) ? result.value.length : null,
-        firstVideo: Array.isArray(result.value) ? result.value[0] ?? null : null,
-      });
-      return;
-    }
-
-    backgroundLogger.warn("Frame video scan failed.", {
-      error: toErrorMessage(result.reason),
-      frameId,
-    });
-  });
-
-  backgroundLogger.info("Video scan finished.", {
-    tabId,
-    totalFrames: frameIds.length,
-    totalVideos: videos.length,
-  });
-
   return videos;
 }
 
-async function getHostStateForTab(
+async function attachSourceInFrame(
   dependencies: HostMessageHandlerDependencies,
   tabId: number,
-): Promise<HostSnapshot> {
-  const frameIds = await resolveFrameIds(dependencies, tabId);
-  backgroundLogger.debug("Collecting host state from frames.", {
-    frameIds,
-    tabId,
-  });
-  const results = await Promise.allSettled(
-    frameIds.map((frameId) =>
-      dependencies.sendTabMessage(
-        tabId,
-        { type: "screenmate:get-host-state" },
-        { frameId },
-      ),
-    ),
-  );
-
-  const snapshots = results
-    .filter(isFulfilledSnapshot)
-    .map((result) => result.value);
-
-  if (snapshots.length === 0) {
-    return createHostSnapshot({
-      errorMessage:
-        "Could not reach the ScreenMate content script in the active tab: Receiving end does not exist.",
-    });
+  message: Extract<HostMessage, { type: "screenmate:attach-source" }>,
+) {
+  const roomSession = dependencies.runtime.getAttachSession();
+  if (!roomSession) {
+    return dependencies.runtime.getSnapshot();
   }
 
-  return selectMostRelevantSnapshot(snapshots);
+  try {
+    const response = await dependencies.sendTabMessage(
+      tabId,
+      {
+        type: "screenmate:attach-source",
+        roomSession,
+        videoId: message.videoId,
+      },
+      { frameId: message.frameId },
+    );
+
+    if (!isAttachSourceResponse(response)) {
+      return dependencies.runtime.markMissing("No video attached.");
+    }
+
+    return dependencies.runtime.setAttachedSource(response.sourceLabel, {
+      ...response.fingerprint,
+      frameId: message.frameId,
+      tabId,
+    });
+  } catch (error) {
+    backgroundLogger.warn("Could not attach source in frame.", {
+      error: toErrorMessage(error),
+      frameId: message.frameId,
+      tabId,
+      videoId: message.videoId,
+    });
+    return dependencies.runtime.markMissing("No video attached.");
+  }
 }
 
-async function stopSharingInTab(
+async function maybeReattachSource(
   dependencies: HostMessageHandlerDependencies,
   tabId: number,
-): Promise<HostSnapshot> {
-  const frameIds = await resolveFrameIds(dependencies, tabId);
-  backgroundLogger.info("Stopping any active share in tab.", {
-    frameIds,
-    tabId,
-  });
-  const results = await Promise.allSettled(
-    frameIds.map((frameId) =>
-      dependencies.sendTabMessage(
-        tabId,
-        { type: "screenmate:stop-sharing" },
-        { frameId },
-      ),
-    ),
-  );
-
-  const snapshots = results
-    .filter(isFulfilledSnapshot)
-    .map((result) => result.value);
-
-  if (snapshots.length === 0) {
-    return createHostSnapshot({
-      errorMessage:
-        "Could not reach the ScreenMate content script in the active tab: Receiving end does not exist.",
-    });
+  message: Extract<HostMessage, { type: "screenmate:content-ready" }>,
+) {
+  const snapshot = dependencies.runtime.getSnapshot();
+  if (snapshot.sourceState !== "recovering") {
+    return snapshot;
   }
 
-  return selectMostRelevantSnapshot(snapshots);
+  const sourceFingerprint = dependencies.runtime.getSourceFingerprint();
+  const roomSession = dependencies.runtime.getAttachSession();
+  if (
+    !sourceFingerprint ||
+    !roomSession ||
+    sourceFingerprint.tabId !== tabId ||
+    sourceFingerprint.frameId !== message.frameId
+  ) {
+    return dependencies.runtime.markMissing("No video attached.");
+  }
+
+  const matchingVideo = message.videos.find(
+    (video) =>
+      video.fingerprint &&
+      isExactFingerprintMatch(sourceFingerprint, video.fingerprint),
+  );
+  if (!matchingVideo?.fingerprint) {
+    return dependencies.runtime.markMissing("No video attached.");
+  }
+
+  try {
+    const response = await dependencies.sendTabMessage(
+      tabId,
+      {
+        type: "screenmate:attach-source",
+        roomSession,
+        videoId: matchingVideo.id,
+      },
+      { frameId: message.frameId },
+    );
+
+    if (!isAttachSourceResponse(response)) {
+      return dependencies.runtime.markMissing("No video attached.");
+    }
+
+    return dependencies.runtime.setAttachedSource(response.sourceLabel, {
+      ...response.fingerprint,
+      frameId: message.frameId,
+      tabId,
+    });
+  } catch (error) {
+    backgroundLogger.warn("Automatic source reattach failed.", {
+      error: toErrorMessage(error),
+      frameId: message.frameId,
+      roomId: snapshot.roomId,
+      tabId,
+    });
+    return dependencies.runtime.markMissing("No video attached.");
+  }
 }
 
 async function broadcastPreviewToTab(
@@ -406,12 +567,6 @@ async function broadcastPreviewToTab(
   message: Extract<HostMessage, { type: "screenmate:preview-video" }>,
 ): Promise<PreviewAck> {
   const frameIds = await resolveFrameIds(dependencies, tabId);
-  backgroundLogger.info("Broadcasting preview selection.", {
-    frameIds,
-    selectedFrameId: message.frameId,
-    selectedVideoId: message.videoId,
-    tabId,
-  });
 
   await Promise.allSettled(
     frameIds.map((frameId) =>
@@ -435,10 +590,6 @@ async function broadcastMessageToTab(
   message: Extract<HostMessage, { type: "screenmate:clear-preview" }>,
 ): Promise<PreviewAck> {
   const frameIds = await resolveFrameIds(dependencies, tabId);
-  backgroundLogger.info("Broadcasting preview clear.", {
-    frameIds,
-    tabId,
-  });
 
   await Promise.allSettled(
     frameIds.map((frameId) =>
@@ -447,59 +598,6 @@ async function broadcastMessageToTab(
   );
 
   return { ok: true };
-}
-
-async function sendMessageToFrame(
-  dependencies: HostMessageHandlerDependencies,
-  tabId: number,
-  frameId: number,
-  message: HostMessage,
-): Promise<HostSnapshot> {
-  try {
-    backgroundLogger.info("Sending frame-targeted message.", {
-      frameId,
-      tabId,
-      type: message.type,
-    });
-    const response = await dependencies.sendTabMessage(
-      tabId,
-      message,
-      { frameId },
-    );
-
-    if (Array.isArray(response)) {
-      return createHostSnapshot({
-        errorMessage: "Unexpected response received from the active tab.",
-      });
-    }
-
-    if ("ok" in response) {
-      return createHostSnapshot({
-        errorMessage: "Unexpected acknowledgement received from the active tab.",
-      });
-    }
-
-    backgroundLogger.info("Frame-targeted message returned snapshot.", {
-      errorMessage: response.errorMessage,
-      frameId,
-      roomId: response.roomId,
-      status: response.status,
-      tabId,
-      type: message.type,
-    });
-
-    return response;
-  } catch (error) {
-    backgroundLogger.error("Frame-targeted message failed.", {
-      error: toErrorMessage(error),
-      frameId,
-      tabId,
-      type: message.type,
-    });
-    return createHostSnapshot({
-      errorMessage: `Could not reach the ScreenMate content script in the active tab: ${toErrorMessage(error)}`,
-    });
-  }
 }
 
 async function resolveFrameIds(
@@ -515,14 +613,73 @@ async function resolveFrameIds(
   }
 }
 
-function isFulfilledSnapshot(
-  result: PromiseSettledResult<TabMessageResponse>,
-): result is PromiseFulfilledResult<HostSnapshot> {
-  return (
-    result.status === "fulfilled" &&
-    !Array.isArray(result.value) &&
-    !("ok" in result.value)
-  );
+function isHostMessage(message: unknown): message is HostMessage {
+  if (!isRecord(message) || typeof message.type !== "string") {
+    return false;
+  }
+
+  switch (message.type) {
+    case "screenmate:get-room-session":
+    case "screenmate:list-videos":
+    case "screenmate:stop-room":
+    case "screenmate:clear-preview":
+      return true;
+    case "screenmate:start-room":
+      return typeof message.frameId === "number";
+    case "screenmate:attach-source":
+      return (
+        typeof message.videoId === "string" &&
+        typeof message.frameId === "number"
+      );
+    case "screenmate:content-ready":
+      return (
+        typeof message.frameId === "number" &&
+        Array.isArray(message.videos)
+      );
+    case "screenmate:source-detached":
+      return (
+        typeof message.frameId === "number" &&
+        (message.reason === "track-ended" ||
+          message.reason === "content-invalidated" ||
+          message.reason === "manual-detach")
+      );
+    case "screenmate:signal-outbound":
+      return isRecord(message.envelope);
+    case "screenmate:signal-inbound":
+      return (
+        typeof message.frameId === "number" &&
+        isRecord(message.envelope)
+      );
+    case "screenmate:preview-video":
+      return (
+        typeof message.videoId === "string" &&
+        typeof message.frameId === "number" &&
+        typeof message.label === "string"
+      );
+    default:
+      return false;
+  }
+}
+
+function normalizeIncomingFrameMessage(
+  message: unknown,
+  sender: Browser.runtime.MessageSender,
+): unknown {
+  if (!isHostMessage(message)) {
+    return message;
+  }
+
+  if (
+    message.type !== "screenmate:content-ready" &&
+    message.type !== "screenmate:source-detached"
+  ) {
+    return message;
+  }
+
+  return {
+    ...message,
+    frameId: sender.frameId ?? 0,
+  } satisfies HostMessage;
 }
 
 function isFulfilledVideoList(
@@ -531,45 +688,57 @@ function isFulfilledVideoList(
   return result.status === "fulfilled" && Array.isArray(result.value);
 }
 
-function selectMostRelevantSnapshot(snapshots: HostSnapshot[]): HostSnapshot {
-  return [...snapshots].sort((left, right) => {
-    return getSnapshotPriority(right) - getSnapshotPriority(left);
-  })[0] ?? createHostSnapshot();
+function isAttachSourceResponse(
+  value: TabMessageResponse,
+): value is AttachSourceResponse {
+  return (
+    !!value &&
+    !Array.isArray(value) &&
+    !("ok" in value) &&
+    typeof value.sourceLabel === "string" &&
+    isRecord(value.fingerprint)
+  );
 }
 
-function getSnapshotPriority(snapshot: HostSnapshot): number {
-  switch (snapshot.status) {
-    case "streaming":
-      return 5;
-    case "hosting":
-      return 4;
-    case "starting":
-      return 3;
-    case "degraded":
-      return 2;
-    case "closed":
-      return 1;
-    case "idle":
-    default:
-      return 0;
-  }
-}
-
-function formatFrameScopedLabel(label: string, frameId: number): string {
-  return frameId === 0 ? label : `${label} [iframe #${frameId}]`;
+function isRoomCreateResponse(
+  response: InternalHostNetworkResponse,
+): response is RoomCreateResponse {
+  return (
+    "roomId" in response &&
+    typeof response.roomId === "string" &&
+    typeof response.hostToken === "string" &&
+    typeof response.signalingUrl === "string"
+  );
 }
 
 function isInternalHostNetworkMessage(
   message: unknown,
 ): message is InternalHostNetworkMessage {
-  if (typeof message !== "object" || message === null) {
-    return false;
-  }
-
   return (
-    (message as InternalHostNetworkMessage).type === "screenmate:create-room" &&
-    typeof (message as InternalHostNetworkMessage).apiBaseUrl === "string"
+    isRecord(message) &&
+    message.type === "screenmate:create-room" &&
+    typeof message.apiBaseUrl === "string"
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isExactFingerprintMatch(
+  stored: SourceFingerprint,
+  candidate: SourceFingerprintMatch,
+) {
+  return (
+    stored.primaryUrl === candidate.primaryUrl &&
+    stored.elementId === candidate.elementId &&
+    stored.label === candidate.label &&
+    stored.visibleIndex === candidate.visibleIndex
+  );
+}
+
+function formatFrameScopedLabel(label: string, frameId: number): string {
+  return frameId === 0 ? label : `${label} [iframe #${frameId}]`;
 }
 
 function toErrorMessage(error: unknown): string {

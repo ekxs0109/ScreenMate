@@ -2,10 +2,35 @@ import { browser } from "wxt/browser";
 import { useEffect, useState } from "react";
 import type { TabVideoSource } from "../background";
 import { createLogger } from "../../lib/logger";
-import {
-  createHostSnapshot,
-  type HostSnapshot,
-} from "../content/host-session";
+
+export type HostStatus =
+  | "idle"
+  | "starting"
+  | "hosting"
+  | "streaming"
+  | "degraded"
+  | "closed";
+
+export type HostSnapshot = {
+  status: HostStatus;
+  roomId: string | null;
+  viewerCount: number;
+  errorMessage: string | null;
+  sourceLabel: string | null;
+};
+
+export function createHostSnapshot(
+  overrides: Partial<HostSnapshot> = {},
+): HostSnapshot {
+  return {
+    status: "idle",
+    roomId: null,
+    viewerCount: 0,
+    errorMessage: null,
+    sourceLabel: null,
+    ...overrides,
+  };
+}
 
 const POLL_INTERVAL_MS = 2_000;
 const popupLogger = createLogger("popup");
