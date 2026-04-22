@@ -49,7 +49,7 @@ ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 
 ## Local TURN
 
-Local TURN for ScreenMate runs through Docker for same-machine smoke testing on a single development machine. The checked-in profile is intentionally limited to plain UDP TURN on `127.0.0.1:3478` and does not enable local TCP or TLS listeners.
+Local TURN for ScreenMate runs through Docker for same-machine smoke testing on a single development machine. The checked-in profile is intentionally limited to loopback-bound plain UDP TURN on `127.0.0.1:3478` and does not enable local TCP or TLS listeners.
 
 ```bash
 docker compose -f docker-compose.turn.yml up -d
