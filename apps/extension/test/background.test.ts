@@ -229,6 +229,8 @@ describe("createHostMessageHandler", () => {
           sourceState: "recovering",
           roomId: "room_123",
           viewerCount: 1,
+          activeTabId: 42,
+          activeFrameId: 0,
         }),
         getAttachSession: vi.fn().mockReturnValue({
           roomId: "room_123",
@@ -274,6 +276,84 @@ describe("createHostMessageHandler", () => {
       }),
       { frameId: 0 },
     );
+  });
+
+  it("auto-reattaches against the persisted host tab when a different tab is active", async () => {
+    const sendTabMessage = vi.fn().mockResolvedValue({
+      sourceLabel: "https://example.com/hero.mp4",
+      fingerprint: {
+        primaryUrl: "https://example.com/hero.mp4",
+        elementId: "hero",
+        label: "https://example.com/hero.mp4",
+        visibleIndex: 0,
+      },
+    });
+    const markMissing = vi.fn().mockResolvedValue({
+      roomLifecycle: "open",
+      sourceState: "missing",
+      roomId: "room_123",
+    });
+    const handler = createHostMessageHandler({
+      createRoom: vi.fn(),
+      forwardInboundSignal: vi.fn(),
+      queryActiveTabId: vi.fn().mockResolvedValue(7),
+      queryFrameIds: vi.fn().mockResolvedValue([0]),
+      sendTabMessage,
+      runtime: {
+        getSnapshot: vi.fn().mockReturnValue({
+          roomLifecycle: "degraded",
+          sourceState: "recovering",
+          roomId: "room_123",
+          viewerCount: 1,
+          activeTabId: 42,
+          activeFrameId: 0,
+        }),
+        getAttachSession: vi.fn().mockReturnValue({
+          roomId: "room_123",
+          sessionId: "host_1",
+          viewerSessionIds: ["viewer_1"],
+          iceServers: [],
+        }),
+        getSourceFingerprint: vi.fn().mockReturnValue({
+          tabId: 42,
+          frameId: 0,
+          primaryUrl: "https://example.com/hero.mp4",
+          elementId: "hero",
+          label: "https://example.com/hero.mp4",
+          visibleIndex: 0,
+        }),
+        markMissing,
+        setAttachedSource: vi.fn().mockResolvedValue(undefined),
+      } as never,
+    });
+
+    await handler({
+      type: "screenmate:content-ready",
+      frameId: 0,
+      videos: [
+        {
+          id: "screenmate-video-1",
+          label: "https://example.com/hero.mp4",
+          frameId: 0,
+          fingerprint: {
+            primaryUrl: "https://example.com/hero.mp4",
+            elementId: "hero",
+            label: "https://example.com/hero.mp4",
+            visibleIndex: 0,
+          },
+        },
+      ],
+    });
+
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        type: "screenmate:attach-source",
+        videoId: "screenmate-video-1",
+      }),
+      { frameId: 0 },
+    );
+    expect(markMissing).not.toHaveBeenCalled();
   });
 
   it("returns an explicit room message when there is no active tab to start from", async () => {

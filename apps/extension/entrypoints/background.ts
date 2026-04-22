@@ -144,7 +144,10 @@ export function createHostMessageHandler(
       return { ok: true };
     }
 
-    const tabId = await dependencies.queryActiveTabId();
+    const tabId =
+      message.type === "screenmate:content-ready"
+        ? dependencies.runtime.getSnapshot().activeTabId
+        : await dependencies.queryActiveTabId();
     if (tabId === null) {
       if (message.type === "screenmate:list-videos") {
         return [];
