@@ -49,7 +49,7 @@ ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 
 ## Local TURN
 
-Local TURN for ScreenMate runs through Docker for same-machine smoke testing on a single development machine. The checked-in profile is intentionally limited to loopback-bound plain UDP TURN on `127.0.0.1:3478` and does not enable local TCP or TLS listeners.
+Local TURN for ScreenMate runs through Docker for same-machine smoke testing on a single development machine. The checked-in profile is intentionally limited to loopback-bound plain UDP TURN on `127.0.0.1:3478`, with UDP relay allocations on `127.0.0.1:49160-49200`, and does not enable local TCP or TLS listeners.
 
 ```bash
 docker compose -f docker-compose.turn.yml up -d
@@ -63,7 +63,7 @@ pnpm --filter @screenmate/cloudflare dev
 2. Set `TURN_AUTH_SECRET`, `TURN_REALM`, and UDP-only `TURN_URLS` for `apps/server`
 3. Keep `TURN_AUTH_SECRET` and `TURN_REALM` aligned with `static-auth-secret` and `realm` in `docker/coturn/turnserver.local.conf`
 4. Treat this profile as same-machine smoke test coverage only, not a general multi-host coturn setup
-5. If you need Docker Desktop or multi-device testing, set `listening-ip`, `relay-ip`, and `external-ip` in `docker/coturn/turnserver.local.conf` to a reachable host address
+5. If you need Docker Desktop or multi-device testing, update the loopback-bound port publishing in `docker-compose.turn.yml` and set `listening-ip`, `relay-ip`, and `external-ip` in `docker/coturn/turnserver.local.conf` to a reachable host address
 6. Run `pnpm --filter @screenmate/cloudflare dev`
 
 ## Commands
