@@ -176,6 +176,87 @@ describe("signalEnvelopeSchema", () => {
 
     expect(result.success).toBe(true);
   });
+
+  it("rejects room-state envelopes missing sourceState", () => {
+    const result = signalEnvelopeSchema.safeParse({
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "room-state",
+      timestamp: 11,
+      payload: {
+        state: "degraded",
+        viewerCount: 2,
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects room-state envelopes missing viewerCount", () => {
+    const result = signalEnvelopeSchema.safeParse({
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "room-state",
+      timestamp: 11,
+      payload: {
+        state: "degraded",
+        sourceState: "recovering",
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid room-state viewer counts", () => {
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "room-state",
+        timestamp: 11,
+        payload: {
+          state: "degraded",
+          sourceState: "recovering",
+          viewerCount: -1,
+        },
+      }).success,
+    ).toBe(false);
+
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "room-state",
+        timestamp: 11,
+        payload: {
+          state: "degraded",
+          sourceState: "recovering",
+          viewerCount: 1.5,
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects invalid room source states in room-state envelopes", () => {
+    const result = signalEnvelopeSchema.safeParse({
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "room-state",
+      timestamp: 11,
+      payload: {
+        state: "degraded",
+        sourceState: "reattaching",
+        viewerCount: 2,
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("roomStateSchema", () => {
