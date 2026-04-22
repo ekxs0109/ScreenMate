@@ -101,17 +101,55 @@ export function createSourceAttachmentRuntime(options: {
     }
 
     const activeAttachment = attachment;
-    const connection = new RTCPeerConnectionImpl({
-      iceServers: activeAttachment.iceServers,
-    });
-    peers.begin(viewerSessionId, connection);
 
-    for (const track of activeAttachment.stream.getTracks()) {
-      connection.addTrack(track, activeAttachment.stream);
-    }
+    try {
+      const connection = new RTCPeerConnectionImpl({
+        iceServers: activeAttachment.iceServers,
+      });
+      peers.begin(viewerSessionId, connection);
 
-    connection.addEventListener("icecandidate", (event) => {
-      if (attachment !== activeAttachment || !event.candidate) {
+      for (const track of activeAttachment.stream.getTracks()) {
+        connection.addTrack(track, activeAttachment.stream);
+      }
+
+      connection.addEventListener("icecandidate", (event) => {
+        if (attachment !== activeAttachment || !event.candidate) {
+          return;
+        }
+
+        options.onSignal({
+          roomId: activeAttachment.roomId,
+          sessionId: activeAttachment.sessionId,
+          role: "host",
+          messageType: "ice-candidate",
+          timestamp: now(),
+          payload: {
+            targetSessionId: viewerSessionId,
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid ?? null,
+            sdpMLineIndex: event.candidate.sdpMLineIndex ?? null,
+          },
+        });
+      });
+
+      const offer = await connection.createOffer();
+      await connection.setLocalDescription(offer);
+      options.onSignal({
+        roomId: activeAttachment.roomId,
+        sessionId: activeAttachment.sessionId,
+        role: "host",
+        messageType: "offer",
+        timestamp: now(),
+        payload: {
+          targetSessionId: viewerSessionId,
+          sdp: offer.sdp ?? "",
+        },
+      });
+    } catch {
+      peers.failed(viewerSessionId);
+      peers.remove(viewerSessionId);
+
+      if (attachment !== activeAttachment) {
         return;
       }
 
@@ -119,30 +157,14 @@ export function createSourceAttachmentRuntime(options: {
         roomId: activeAttachment.roomId,
         sessionId: activeAttachment.sessionId,
         role: "host",
-        messageType: "ice-candidate",
+        messageType: "negotiation-failed",
         timestamp: now(),
         payload: {
           targetSessionId: viewerSessionId,
-          candidate: event.candidate.candidate,
-          sdpMid: event.candidate.sdpMid ?? null,
-          sdpMLineIndex: event.candidate.sdpMLineIndex ?? null,
+          code: errorCodes.NEGOTIATION_FAILED,
         },
       });
-    });
-
-    const offer = await connection.createOffer();
-    await connection.setLocalDescription(offer);
-    options.onSignal({
-      roomId: activeAttachment.roomId,
-      sessionId: activeAttachment.sessionId,
-      role: "host",
-      messageType: "offer",
-      timestamp: now(),
-      payload: {
-        targetSessionId: viewerSessionId,
-        sdp: offer.sdp ?? "",
-      },
-    });
+    }
   }
 
   async function handleSignal(envelope: {

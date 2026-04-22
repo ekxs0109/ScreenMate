@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest";
+import { errorCodes } from "@screenmate/shared";
 import { createSourceAttachmentRuntime } from "../entrypoints/content/source-attachment";
 import { getVideoHandle } from "../entrypoints/content/video-detector";
 
@@ -36,6 +37,8 @@ function createMockTrack(kind = "video") {
 
 class MockRTCPeerConnection {
   static instances: MockRTCPeerConnection[] = [];
+  static createOfferErrors: Error[] = [];
+  static setLocalDescriptionErrors: Error[] = [];
 
   public readonly listeners = new Map<
     string,
@@ -62,10 +65,20 @@ class MockRTCPeerConnection {
   }
 
   async createOffer() {
+    const error = MockRTCPeerConnection.createOfferErrors.shift();
+    if (error) {
+      throw error;
+    }
+
     return { sdp: `offer-sdp-${MockRTCPeerConnection.instances.length}` };
   }
 
-  async setLocalDescription() {}
+  async setLocalDescription() {
+    const error = MockRTCPeerConnection.setLocalDescriptionErrors.shift();
+    if (error) {
+      throw error;
+    }
+  }
 
   async setRemoteDescription() {}
 
@@ -300,6 +313,85 @@ describe("createSourceAttachmentRuntime", () => {
       role: "host",
       messageType: "offer",
       timestamp: 50,
+      payload: {
+        targetSessionId: "viewer_1",
+        sdp: "offer-sdp-2",
+      },
+    });
+  });
+
+  it("signals negotiation failures and allows retrying the same viewer", async () => {
+    document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
+    const video = document.getElementById("host") as HTMLVideoElement;
+    setVideoRect(video, 640, 360);
+    const track = createMockTrack() as unknown as MediaStreamTrack;
+
+    Object.defineProperty(video, "captureStream", {
+      configurable: true,
+      value: vi.fn(() => ({ getTracks: () => [track] })),
+    });
+
+    MockRTCPeerConnection.instances = [];
+    MockRTCPeerConnection.createOfferErrors = [new Error("offer failed")];
+    MockRTCPeerConnection.setLocalDescriptionErrors = [];
+
+    const onSignal = vi.fn();
+    const runtime = createSourceAttachmentRuntime({
+      now: () => 80,
+      onSignal,
+      onSourceDetached: vi.fn(),
+      RTCPeerConnectionImpl: MockRTCPeerConnection as never,
+    });
+
+    await expect(
+      runtime.attachSource({
+        roomId: "room_123",
+        sessionId: "host_1",
+        videoId: getVideoHandle(video),
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [],
+      }),
+    ).resolves.toMatchObject({
+      sourceLabel: "https://example.com/host.mp4",
+    });
+
+    expect(MockRTCPeerConnection.instances[0]?.closed).toBe(true);
+    expect(onSignal).toHaveBeenCalledWith({
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "negotiation-failed",
+      timestamp: 80,
+      payload: {
+        targetSessionId: "viewer_1",
+        code: errorCodes.NEGOTIATION_FAILED,
+      },
+    });
+
+    await runtime.handleSignal({
+      messageType: "viewer-joined",
+      sessionId: "viewer_1",
+      payload: {
+        viewerSessionId: "viewer_1",
+      },
+    });
+
+    const offerSignals = onSignal.mock.calls
+      .map(([envelope]) => envelope)
+      .filter(
+        (envelope) =>
+          typeof envelope === "object" &&
+          envelope !== null &&
+          (envelope as { messageType?: string }).messageType === "offer",
+      );
+
+    expect(offerSignals).toHaveLength(1);
+    expect(offerSignals[0]).toMatchObject({
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "offer",
+      timestamp: 80,
       payload: {
         targetSessionId: "viewer_1",
         sdp: "offer-sdp-2",
