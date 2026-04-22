@@ -573,6 +573,146 @@ describe("createHostMessageHandler", () => {
     );
   });
 
+  it("best-effort detaches the current attachment owner before stopping the room", async () => {
+    const sendTabMessage = vi.fn().mockRejectedValue(new Error("frame gone"));
+    const close = vi.fn().mockResolvedValue({
+      roomLifecycle: "closed",
+      sourceState: "missing",
+      roomId: "room_123",
+      viewerCount: 0,
+      sourceLabel: null,
+      activeTabId: 42,
+      activeFrameId: 7,
+      recoverByTimestamp: null,
+      message: "Room closed.",
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      runtime: {
+        close,
+        getSnapshot: vi.fn().mockReturnValue({
+          roomLifecycle: "open",
+          sourceState: "attached",
+          roomId: "room_123",
+          viewerCount: 1,
+          sourceLabel: "https://example.com/previous.mp4",
+          activeTabId: 42,
+          activeFrameId: 7,
+          recoverByTimestamp: null,
+          message: null,
+        }),
+      } as never,
+      sendTabMessage,
+    }));
+
+    const result = await handler({ type: "screenmate:stop-room" });
+
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      42,
+      { type: "screenmate:detach-source" },
+      { frameId: 7 },
+    );
+    expect(close).toHaveBeenCalledWith("Room closed.");
+    expect(result).toMatchObject({
+      roomLifecycle: "closed",
+      roomId: "room_123",
+    });
+  });
+
+  it("best-effort detaches the previous owner before attaching in a different frame", async () => {
+    const sendTabMessage = vi.fn().mockImplementation(
+      async (
+        _tabId: number,
+        tabMessage: HostMessage | { type: "screenmate:detach-source" },
+      ) => {
+        if (tabMessage.type === "screenmate:detach-source") {
+          throw new Error("old frame gone");
+        }
+
+        return {
+          sourceLabel: "https://example.com/next.mp4",
+          fingerprint: {
+            primaryUrl: "https://example.com/next.mp4",
+            elementId: "next",
+            label: "https://example.com/next.mp4",
+            visibleIndex: 0,
+          },
+        };
+      },
+    );
+    const setAttachedSource = vi.fn().mockResolvedValue({
+      roomLifecycle: "open",
+      sourceState: "attached",
+      roomId: "room_123",
+      viewerCount: 1,
+      sourceLabel: "https://example.com/next.mp4",
+      activeTabId: 42,
+      activeFrameId: 7,
+      recoverByTimestamp: null,
+      message: null,
+    });
+    const handler = createHostMessageHandler({
+      createRoom: vi.fn(),
+      forwardInboundSignal: vi.fn(),
+      queryActiveTabId: vi.fn().mockResolvedValue(42),
+      queryFrameIds: vi.fn().mockResolvedValue([0, 7]),
+      sendTabMessage,
+      runtime: {
+        getAttachSession: vi.fn().mockReturnValue({
+          roomId: "room_123",
+          sessionId: "host_1",
+          viewerSessionIds: ["viewer_1"],
+          iceServers: [],
+        }),
+        getSnapshot: vi.fn().mockReturnValue({
+          roomLifecycle: "open",
+          sourceState: "attached",
+          roomId: "room_123",
+          viewerCount: 1,
+          sourceLabel: "https://example.com/previous.mp4",
+          activeTabId: 42,
+          activeFrameId: 0,
+          recoverByTimestamp: null,
+          message: null,
+        }),
+        markMissing: vi.fn(),
+        setAttachedSource,
+      } as never,
+    });
+
+    await handler({
+      type: "screenmate:attach-source",
+      videoId: "screenmate-video-2",
+      frameId: 7,
+    });
+
+    expect(sendTabMessage).toHaveBeenNthCalledWith(
+      1,
+      42,
+      { type: "screenmate:detach-source" },
+      { frameId: 0 },
+    );
+    expect(sendTabMessage).toHaveBeenNthCalledWith(
+      2,
+      42,
+      expect.objectContaining({
+        type: "screenmate:attach-source",
+        videoId: "screenmate-video-2",
+      }),
+      { frameId: 7 },
+    );
+    expect(setAttachedSource).toHaveBeenCalledWith(
+      "https://example.com/next.mp4",
+      {
+        tabId: 42,
+        frameId: 7,
+        primaryUrl: "https://example.com/next.mp4",
+        elementId: "next",
+        label: "https://example.com/next.mp4",
+        visibleIndex: 0,
+      },
+    );
+  });
+
   it("broadcasts preview updates to every reachable frame", async () => {
     const queryActiveTabId = vi.fn().mockResolvedValue(42);
     const queryFrameIds = vi.fn().mockResolvedValue([0, 7]);

@@ -23,6 +23,9 @@ export type ListVideosMessage = {
 
 export type ContentControlMessage =
   | {
+      type: "screenmate:detach-source";
+    }
+  | {
       type: "screenmate:attach-source";
       videoId: string;
       roomSession: RoomSession;
@@ -117,6 +120,21 @@ export function createVideoMessageListener(
           .then(() => {
             sendResponse({ ok: true });
           });
+      });
+
+      return true;
+    }
+
+    if (
+      message.type === "screenmate:detach-source" &&
+      sourceAttachmentRuntime
+    ) {
+      queueMicrotask(() => {
+        contentLogger.info("Detaching source for active room.", {
+          href: window.location.href,
+        });
+        sourceAttachmentRuntime.destroy("manual-detach");
+        sendResponse({ ok: true });
       });
 
       return true;

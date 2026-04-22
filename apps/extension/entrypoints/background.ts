@@ -81,6 +81,7 @@ type TabContentMessage =
   | Extract<HostMessage, { type: "screenmate:list-videos" }>
   | Extract<HostMessage, { type: "screenmate:preview-video" }>
   | Extract<HostMessage, { type: "screenmate:clear-preview" }>
+  | { type: "screenmate:detach-source" }
   | {
       type: "screenmate:attach-source";
       videoId: string;
@@ -136,6 +137,7 @@ export function createHostMessageHandler(
     }
 
     if (message.type === "screenmate:stop-room") {
+      await detachCurrentAttachmentOwner(dependencies);
       return dependencies.runtime.close("Room closed.");
     }
 
@@ -483,6 +485,14 @@ async function attachSourceInFrame(
     return dependencies.runtime.getSnapshot();
   }
 
+  const snapshot = dependencies.runtime.getSnapshot();
+  if (
+    snapshot.activeTabId !== tabId ||
+    snapshot.activeFrameId !== message.frameId
+  ) {
+    await detachCurrentAttachmentOwner(dependencies, snapshot);
+  }
+
   try {
     const response = await dependencies.sendTabMessage(
       tabId,
@@ -511,6 +521,32 @@ async function attachSourceInFrame(
       videoId: message.videoId,
     });
     return dependencies.runtime.markMissing("No video attached.");
+  }
+}
+
+async function detachCurrentAttachmentOwner(
+  dependencies: HostMessageHandlerDependencies,
+  snapshot = dependencies.runtime.getSnapshot(),
+) {
+  if (
+    typeof snapshot.activeTabId !== "number" ||
+    typeof snapshot.activeFrameId !== "number"
+  ) {
+    return;
+  }
+
+  try {
+    await dependencies.sendTabMessage(
+      snapshot.activeTabId,
+      { type: "screenmate:detach-source" },
+      { frameId: snapshot.activeFrameId },
+    );
+  } catch (error) {
+    backgroundLogger.warn("Could not detach source in previous owner frame.", {
+      activeFrameId: snapshot.activeFrameId,
+      activeTabId: snapshot.activeTabId,
+      error: toErrorMessage(error),
+    });
   }
 }
 

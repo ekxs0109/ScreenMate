@@ -274,4 +274,30 @@ describe("createVideoMessageListener", () => {
     });
     expect(sendResponse).toHaveBeenCalledWith({ ok: true });
   });
+
+  it("tears down the active attachment on explicit detach control messages", async () => {
+    const sourceAttachmentRuntime = {
+      attachSource: vi.fn(),
+      beginViewerNegotiation: vi.fn(),
+      destroy: vi.fn(),
+      handleSignal: vi.fn(),
+    };
+    const listener = createVideoMessageListener(
+      sourceAttachmentRuntime as never,
+    );
+    const sendResponse = vi.fn();
+
+    const shouldKeepOpen = listener(
+      { type: "screenmate:detach-source" },
+      {} as never,
+      sendResponse,
+    );
+
+    expect(shouldKeepOpen).toBe(true);
+
+    await Promise.resolve();
+
+    expect(sourceAttachmentRuntime.destroy).toHaveBeenCalledWith("manual-detach");
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+  });
 });
