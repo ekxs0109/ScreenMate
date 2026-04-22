@@ -18,6 +18,15 @@ type HostPeerConnection = Pick<
   | "close"
 >;
 
+type Attachment = {
+  roomId: string;
+  sessionId: string;
+  sourceLabel: string;
+  stream: MediaStream;
+  iceServers: RTCIceServer[];
+  detachNotified: boolean;
+};
+
 export function createSourceAttachmentRuntime(options: {
   onSignal: (envelope: Record<string, unknown>) => void;
   onSourceDetached: (event: {
@@ -33,13 +42,7 @@ export function createSourceAttachmentRuntime(options: {
   const RTCPeerConnectionImpl =
     options.RTCPeerConnectionImpl ?? globalThis.RTCPeerConnection;
   const peers = createPeerRegistry<HostPeerConnection>();
-  let attachment: {
-    roomId: string;
-    sessionId: string;
-    sourceLabel: string;
-    stream: MediaStream;
-    iceServers: RTCIceServer[];
-  } | null = null;
+  let attachment: Attachment | null = null;
 
   async function attachSource(input: {
     roomId: string;
@@ -54,22 +57,26 @@ export function createSourceAttachmentRuntime(options: {
     }
 
     const stream = captureVideoStream(video);
-    for (const track of stream.getTracks()) {
-      track.addEventListener("ended", () => {
-        options.onSourceDetached({
-          roomId: input.roomId,
-          reason: "track-ended",
-        });
-      });
-    }
-
-    attachment = {
+    const nextAttachment: Attachment = {
       roomId: input.roomId,
       sessionId: input.sessionId,
       sourceLabel: video.currentSrc || video.src || "Visible video",
       stream,
       iceServers: normalizeIceServers(input.iceServers) as RTCIceServer[],
+      detachNotified: false,
     };
+    teardownAttachment();
+    attachment = nextAttachment;
+
+    for (const track of stream.getTracks()) {
+      track.addEventListener("ended", () => {
+        if (attachment !== nextAttachment) {
+          return;
+        }
+
+        notifyDetached(nextAttachment, "track-ended");
+      });
+    }
 
     for (const viewerSessionId of input.viewerSessionIds) {
       await beginViewerNegotiation(viewerSessionId);
@@ -93,20 +100,41 @@ export function createSourceAttachmentRuntime(options: {
       return;
     }
 
+    const activeAttachment = attachment;
     const connection = new RTCPeerConnectionImpl({
-      iceServers: attachment.iceServers,
+      iceServers: activeAttachment.iceServers,
     });
     peers.begin(viewerSessionId, connection);
 
-    for (const track of attachment.stream.getTracks()) {
-      connection.addTrack(track, attachment.stream);
+    for (const track of activeAttachment.stream.getTracks()) {
+      connection.addTrack(track, activeAttachment.stream);
     }
+
+    connection.addEventListener("icecandidate", (event) => {
+      if (attachment !== activeAttachment || !event.candidate) {
+        return;
+      }
+
+      options.onSignal({
+        roomId: activeAttachment.roomId,
+        sessionId: activeAttachment.sessionId,
+        role: "host",
+        messageType: "ice-candidate",
+        timestamp: now(),
+        payload: {
+          targetSessionId: viewerSessionId,
+          candidate: event.candidate.candidate,
+          sdpMid: event.candidate.sdpMid ?? null,
+          sdpMLineIndex: event.candidate.sdpMLineIndex ?? null,
+        },
+      });
+    });
 
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
     options.onSignal({
-      roomId: attachment.roomId,
-      sessionId: attachment.sessionId,
+      roomId: activeAttachment.roomId,
+      sessionId: activeAttachment.sessionId,
       role: "host",
       messageType: "offer",
       timestamp: now(),
@@ -159,20 +187,46 @@ export function createSourceAttachmentRuntime(options: {
     }
   }
 
+  function notifyDetached(
+    currentAttachment: Attachment,
+    reason: "track-ended" | "content-invalidated" | "manual-detach",
+  ) {
+    if (currentAttachment.detachNotified) {
+      return;
+    }
+
+    currentAttachment.detachNotified = true;
+    options.onSourceDetached({
+      roomId: currentAttachment.roomId,
+      reason,
+    });
+  }
+
+  function teardownAttachment(
+    reason?: "content-invalidated" | "manual-detach",
+  ) {
+    const currentAttachment = attachment;
+    if (!currentAttachment) {
+      peers.closeAll();
+      return;
+    }
+
+    attachment = null;
+    peers.closeAll();
+
+    for (const track of currentAttachment.stream.getTracks()) {
+      track.stop();
+    }
+
+    if (reason) {
+      notifyDetached(currentAttachment, reason);
+    }
+  }
+
   function destroy(
     reason: "content-invalidated" | "manual-detach" = "content-invalidated",
   ) {
-    peers.closeAll();
-    for (const track of attachment?.stream.getTracks() ?? []) {
-      track.stop();
-    }
-    if (attachment) {
-      options.onSourceDetached({
-        roomId: attachment.roomId,
-        reason,
-      });
-    }
-    attachment = null;
+    teardownAttachment(reason);
   }
 
   return {
