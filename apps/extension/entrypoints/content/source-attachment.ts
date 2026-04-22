@@ -186,6 +186,14 @@ export function createSourceAttachmentRuntime(options: {
       return;
     }
 
+    if (
+      envelope.messageType === "viewer-left" &&
+      envelope.payload.viewerSessionId
+    ) {
+      peers.remove(envelope.payload.viewerSessionId);
+      return;
+    }
+
     const peer = peers.get(envelope.sessionId);
     if (!peer) {
       return;

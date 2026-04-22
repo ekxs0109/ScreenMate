@@ -3,6 +3,7 @@ import {
   createHostMessageHandler,
   createInternalHostNetworkHandler,
   createHostRuntimeMessageListener,
+  shouldForwardSignalToContentRuntime,
   type HostMessage,
 } from "../entrypoints/background";
 
@@ -356,6 +357,68 @@ describe("createHostMessageHandler", () => {
     expect(markMissing).not.toHaveBeenCalled();
   });
 
+  it("ignores content-ready recovery payloads from the wrong sender tab", async () => {
+    const sendTabMessage = vi.fn();
+    const markMissing = vi.fn();
+    const snapshot = {
+      roomLifecycle: "degraded",
+      sourceState: "recovering",
+      roomId: "room_123",
+      viewerCount: 1,
+      activeTabId: 42,
+      activeFrameId: 0,
+    };
+    const handler = createHostMessageHandler({
+      createRoom: vi.fn(),
+      forwardInboundSignal: vi.fn(),
+      queryActiveTabId: vi.fn().mockResolvedValue(7),
+      queryFrameIds: vi.fn().mockResolvedValue([0]),
+      sendTabMessage,
+      runtime: {
+        getSnapshot: vi.fn().mockReturnValue(snapshot),
+        getAttachSession: vi.fn().mockReturnValue({
+          roomId: "room_123",
+          sessionId: "host_1",
+          viewerSessionIds: ["viewer_1"],
+          iceServers: [],
+        }),
+        getSourceFingerprint: vi.fn().mockReturnValue({
+          tabId: 42,
+          frameId: 0,
+          primaryUrl: "https://example.com/hero.mp4",
+          elementId: "hero",
+          label: "https://example.com/hero.mp4",
+          visibleIndex: 0,
+        }),
+        markMissing,
+        setAttachedSource: vi.fn(),
+      } as never,
+    });
+
+    const result = await handler({
+      type: "screenmate:content-ready",
+      frameId: 0,
+      tabId: 7,
+      videos: [
+        {
+          id: "screenmate-video-1",
+          label: "https://example.com/hero.mp4",
+          frameId: 0,
+          fingerprint: {
+            primaryUrl: "https://example.com/hero.mp4",
+            elementId: "hero",
+            label: "https://example.com/hero.mp4",
+            visibleIndex: 0,
+          },
+        },
+      ],
+    } as HostMessage);
+
+    expect(result).toEqual(snapshot);
+    expect(sendTabMessage).not.toHaveBeenCalled();
+    expect(markMissing).not.toHaveBeenCalled();
+  });
+
   it("returns an explicit room message when there is no active tab to start from", async () => {
     const handler = createHostMessageHandler(createHandlerDependencies({
       queryActiveTabId: vi.fn().mockResolvedValue(null),
@@ -595,6 +658,37 @@ describe("createHostMessageHandler", () => {
       type: "screenmate:source-detached",
       frameId: 7,
       reason: "track-ended",
+      tabId: null,
+    });
+  });
+
+  it("uses the runtime sender tab id for content-ready trust decisions", async () => {
+    const handler = vi.fn().mockResolvedValue({ ok: true });
+    const internalHandler = vi.fn().mockReturnValue(undefined);
+    const sendResponse = vi.fn();
+
+    const keepChannelOpen = createHostRuntimeMessageListener(
+      handler,
+      internalHandler,
+    )(
+      {
+        type: "screenmate:content-ready",
+        frameId: 99,
+        videos: [],
+      },
+      { frameId: 7, tab: { id: 42 } } as never,
+      sendResponse,
+    );
+
+    expect(keepChannelOpen).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(handler).toHaveBeenCalledWith({
+      type: "screenmate:content-ready",
+      frameId: 7,
+      tabId: 42,
+      videos: [],
     });
   });
 
@@ -626,5 +720,45 @@ describe("createHostMessageHandler", () => {
       signalingUrl: "/rooms/room_123/ws",
       iceServers: [{ urls: ["stun:stun.screenmate.dev"] }],
     });
+  });
+
+  it("forwards viewer lifecycle and negotiation envelopes to the content runtime", () => {
+    expect(
+      shouldForwardSignalToContentRuntime({
+        roomId: "room_123",
+        sessionId: "viewer_1",
+        role: "viewer",
+        messageType: "viewer-joined",
+        timestamp: 10,
+        payload: {
+          viewerSessionId: "viewer_1",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldForwardSignalToContentRuntime({
+        roomId: "room_123",
+        sessionId: "viewer_1",
+        role: "viewer",
+        messageType: "viewer-left",
+        timestamp: 11,
+        payload: {
+          viewerSessionId: "viewer_1",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldForwardSignalToContentRuntime({
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "offer",
+        timestamp: 12,
+        payload: {
+          targetSessionId: "viewer_1",
+          sdp: "offer-sdp",
+        },
+      }),
+    ).toBe(false);
   });
 });

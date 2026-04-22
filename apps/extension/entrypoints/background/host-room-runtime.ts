@@ -39,6 +39,7 @@ export function createHostRoomRuntime(options: {
   const WebSocketImpl = options.WebSocketImpl ?? globalThis.WebSocket;
   let session: PersistedHostRoomSession | null = null;
   let socket: HostSocket | null = null;
+  let pendingOutboundSignals: string[] = [];
 
   async function persist() {
     if (session) {
@@ -51,6 +52,7 @@ export function createHostRoomRuntime(options: {
 
   function closeSocket() {
     if (!socket) {
+      pendingOutboundSignals = [];
       return;
     }
 
@@ -61,6 +63,7 @@ export function createHostRoomRuntime(options: {
     }
 
     socket = null;
+    pendingOutboundSignals = [];
   }
 
   async function applyViewerSessions(viewerSessionIds: string[]) {
@@ -178,6 +181,37 @@ export function createHostRoomRuntime(options: {
       );
       socket = nextSocket;
 
+      const openPromise = new Promise<boolean>((resolve) => {
+        let settled = false;
+        const settle = (value: boolean) => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          resolve(value);
+        };
+
+        nextSocket.addEventListener("open", () => {
+          settle(true);
+        });
+        nextSocket.addEventListener("close", () => {
+          settle(false);
+        });
+      });
+
+      nextSocket.addEventListener("open", () => {
+        if (socket !== nextSocket) {
+          return;
+        }
+
+        const queuedSignals = pendingOutboundSignals;
+        pendingOutboundSignals = [];
+        for (const payload of queuedSignals) {
+          nextSocket.send(payload);
+        }
+      });
+
       nextSocket.addEventListener("message", (event) => {
         void (async () => {
           const rawMessage = event as MessageEvent;
@@ -210,6 +244,7 @@ export function createHostRoomRuntime(options: {
               ...session.viewerSessionIds,
               envelope.payload.viewerSessionId,
             ]);
+            onInboundSignal(envelope);
             return;
           }
 
@@ -220,6 +255,7 @@ export function createHostRoomRuntime(options: {
                   viewerSessionId !== envelope.payload.viewerSessionId,
               ),
             );
+            onInboundSignal(envelope);
             return;
           }
 
@@ -250,14 +286,21 @@ export function createHostRoomRuntime(options: {
         }
       });
 
-      return true;
+      return openPromise;
     },
     sendSignal(envelope: Record<string, unknown>) {
-      if (!socket || socket.readyState !== OPEN_SOCKET_READY_STATE) {
+      const payload = JSON.stringify(envelope);
+
+      if (!socket) {
         return false;
       }
 
-      socket.send(JSON.stringify(envelope));
+      if (socket.readyState !== OPEN_SOCKET_READY_STATE) {
+        pendingOutboundSignals.push(payload);
+        return true;
+      }
+
+      socket.send(payload);
       return true;
     },
     async restoreFromStorage() {

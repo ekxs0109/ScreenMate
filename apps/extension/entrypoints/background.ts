@@ -29,11 +29,13 @@ export type HostMessage =
   | {
       type: "screenmate:content-ready";
       frameId: number;
+      tabId?: number | null;
       videos: TabVideoSource[];
     }
   | {
       type: "screenmate:source-detached";
       frameId: number;
+      tabId?: number | null;
       reason: "track-ended" | "content-invalidated" | "manual-detach";
     }
   | {
@@ -303,10 +305,7 @@ export default defineBackground(() => {
       return;
     }
 
-    if (
-      envelope.messageType !== "answer" &&
-      envelope.messageType !== "ice-candidate"
-    ) {
+    if (!shouldForwardSignalToContentRuntime(envelope)) {
       return;
     }
 
@@ -513,6 +512,14 @@ async function maybeReattachSource(
     return snapshot;
   }
 
+  if (
+    typeof message.tabId === "number" &&
+    snapshot.activeTabId !== null &&
+    message.tabId !== snapshot.activeTabId
+  ) {
+    return snapshot;
+  }
+
   const sourceFingerprint = dependencies.runtime.getSourceFingerprint();
   const roomSession = dependencies.runtime.getAttachSession();
   if (
@@ -682,7 +689,19 @@ function normalizeIncomingFrameMessage(
   return {
     ...message,
     frameId: sender.frameId ?? 0,
+    tabId: sender.tab?.id ?? null,
   } satisfies HostMessage;
+}
+
+export function shouldForwardSignalToContentRuntime(
+  envelope: SignalEnvelope,
+) {
+  return (
+    envelope.messageType === "answer" ||
+    envelope.messageType === "ice-candidate" ||
+    envelope.messageType === "viewer-joined" ||
+    envelope.messageType === "viewer-left"
+  );
 }
 
 function isFulfilledVideoList(

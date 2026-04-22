@@ -320,6 +320,73 @@ describe("createSourceAttachmentRuntime", () => {
     });
   });
 
+  it("removes departed viewer peers and renegotiates when they rejoin", async () => {
+    document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
+    const video = document.getElementById("host") as HTMLVideoElement;
+    setVideoRect(video, 640, 360);
+    const track = createMockTrack() as unknown as MediaStreamTrack;
+
+    Object.defineProperty(video, "captureStream", {
+      configurable: true,
+      value: vi.fn(() => ({ getTracks: () => [track] })),
+    });
+
+    MockRTCPeerConnection.instances = [];
+    const onSignal = vi.fn();
+    const runtime = createSourceAttachmentRuntime({
+      now: () => 75,
+      onSignal,
+      onSourceDetached: vi.fn(),
+      RTCPeerConnectionImpl: MockRTCPeerConnection as never,
+    });
+
+    await runtime.attachSource({
+      roomId: "room_123",
+      sessionId: "host_1",
+      videoId: getVideoHandle(video),
+      viewerSessionIds: ["viewer_1"],
+      iceServers: [],
+    });
+
+    const firstPeer = MockRTCPeerConnection.instances[0];
+
+    await runtime.handleSignal({
+      messageType: "viewer-left",
+      sessionId: "viewer_1",
+      payload: {
+        viewerSessionId: "viewer_1",
+      },
+    });
+
+    expect(firstPeer?.closed).toBe(true);
+
+    await runtime.handleSignal({
+      messageType: "viewer-joined",
+      sessionId: "viewer_1",
+      payload: {
+        viewerSessionId: "viewer_1",
+      },
+    });
+
+    const offerSignals = onSignal.mock.calls
+      .map(([envelope]) => envelope)
+      .filter(
+        (envelope) =>
+          typeof envelope === "object" &&
+          envelope !== null &&
+          (envelope as { messageType?: string }).messageType === "offer",
+      );
+
+    expect(MockRTCPeerConnection.instances).toHaveLength(2);
+    expect(offerSignals).toHaveLength(2);
+    expect(offerSignals.at(-1)).toMatchObject({
+      payload: {
+        targetSessionId: "viewer_1",
+        sdp: "offer-sdp-2",
+      },
+    });
+  });
+
   it("signals negotiation failures and allows retrying the same viewer", async () => {
     document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
     const video = document.getElementById("host") as HTMLVideoElement;

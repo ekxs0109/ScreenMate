@@ -1,6 +1,6 @@
 import { browser } from "wxt/browser";
 import { useEffect, useState } from "react";
-import type { TabVideoSource } from "../background";
+import type { HostMessage, TabVideoSource } from "../background";
 import { createLogger } from "../../lib/logger";
 
 export type HostStatus =
@@ -17,6 +17,20 @@ export type HostSnapshot = {
   viewerCount: number;
   errorMessage: string | null;
   sourceLabel: string | null;
+};
+
+type RoomSessionSnapshot = {
+  roomLifecycle?: "idle" | "opening" | "open" | "degraded" | "closed";
+  sourceState?:
+    | "unattached"
+    | "attaching"
+    | "attached"
+    | "recovering"
+    | "missing";
+  roomId?: string | null;
+  viewerCount?: number;
+  sourceLabel?: string | null;
+  message?: string | null;
 };
 
 export function createHostSnapshot(
@@ -40,6 +54,46 @@ export type PopupLogger = Pick<
   "error" | "info" | "warn"
 >;
 
+export function buildSnapshotRequest(): Extract<
+  HostMessage,
+  { type: "screenmate:get-room-session" }
+> {
+  return { type: "screenmate:get-room-session" };
+}
+
+export function buildStartSharingRequests(
+  snapshot: HostSnapshot,
+  selectedVideo: Pick<TabVideoSource, "frameId" | "id">,
+): Array<
+  | Extract<HostMessage, { type: "screenmate:start-room" }>
+  | Extract<HostMessage, { type: "screenmate:attach-source" }>
+> {
+  const attachRequest: Extract<HostMessage, { type: "screenmate:attach-source" }> = {
+    type: "screenmate:attach-source",
+    frameId: selectedVideo.frameId,
+    videoId: selectedVideo.id,
+  };
+
+  if (snapshot.roomId && snapshot.status !== "closed") {
+    return [attachRequest];
+  }
+
+  return [
+    {
+      type: "screenmate:start-room",
+      frameId: selectedVideo.frameId,
+    },
+    attachRequest,
+  ];
+}
+
+export function buildStopSharingRequest(): Extract<
+  HostMessage,
+  { type: "screenmate:stop-room" }
+> {
+  return { type: "screenmate:stop-room" };
+}
+
 export function useHostControls() {
   const [snapshot, setSnapshot] = useState<HostSnapshot>(createHostSnapshot());
   const [videos, setVideos] = useState<TabVideoSource[]>([]);
@@ -50,12 +104,12 @@ export function useHostControls() {
 
     const syncSnapshot = () =>
       browser.runtime
-        .sendMessage({ type: "screenmate:get-host-state" })
+        .sendMessage(buildSnapshotRequest())
         .then((nextSnapshot) => {
           if (!isCancelled) {
             const normalizedSnapshot = normalizeSnapshot(nextSnapshot);
             popupLogger.debug("Synced host snapshot.", normalizedSnapshot);
-            setSnapshot(normalizeSnapshot(nextSnapshot));
+            setSnapshot(normalizedSnapshot);
           }
         })
         .catch(() => {
@@ -195,44 +249,67 @@ export function useHostControls() {
       popupLogger.info("Start sharing requested.", {
         selectedVideoKey,
       });
-      return !selectedVideo
-        ? setSnapshot(
-            createHostSnapshot({
-              errorMessage: "No video elements found on this page.",
+      if (!selectedVideo) {
+        setSnapshot(
+          createHostSnapshot({
+            errorMessage: "No video elements found on this page.",
+          }),
+        );
+        return;
+      }
+
+      setSnapshot((current) =>
+        createHostSnapshot({
+          ...current,
+          status: "starting",
+          errorMessage: null,
+        }),
+      );
+
+      return buildStartSharingRequests(snapshot, selectedVideo)
+        .reduce<Promise<unknown>>(
+          (chain, message) =>
+            chain.then((previousResponse) => {
+              if (
+                message.type === "screenmate:attach-source" &&
+                previousResponse &&
+                typeof previousResponse === "object" &&
+                "roomId" in (previousResponse as Record<string, unknown>) &&
+                typeof (previousResponse as { roomId?: unknown }).roomId !== "string"
+              ) {
+                return previousResponse;
+              }
+
+              return browser.runtime.sendMessage(message);
             }),
-          )
-        : browser.runtime
-            .sendMessage({
-              type: "screenmate:start-sharing",
-              videoId: selectedVideo.id,
-              frameId: selectedVideo.frameId,
-            })
-            .then((nextSnapshot) => {
-              const normalizedSnapshot = normalizeSnapshot(nextSnapshot);
-              reportStartSharingResult(
-                popupLogger,
-                normalizedSnapshot,
-                nextSnapshot,
-              );
-              setSnapshot(normalizedSnapshot);
-            })
-            .catch((error) => {
-              popupLogger.error("Start sharing runtime request failed.", {
-                error: error instanceof Error ? error.message : String(error),
-              });
-              setSnapshot(
-                createHostSnapshot({
-                  errorMessage:
-                    error instanceof Error && error.message
-                      ? error.message
-                      : "Could not start sharing in the active tab.",
-                }),
-              );
-            });
+          Promise.resolve(undefined),
+        )
+        .then((nextSnapshot) => {
+          const normalizedSnapshot = normalizeSnapshot(nextSnapshot);
+          reportStartSharingResult(
+            popupLogger,
+            normalizedSnapshot,
+            nextSnapshot,
+          );
+          setSnapshot(normalizedSnapshot);
+        })
+        .catch((error) => {
+          popupLogger.error("Start sharing runtime request failed.", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          setSnapshot(
+            createHostSnapshot({
+              errorMessage:
+                error instanceof Error && error.message
+                  ? error.message
+                  : "Could not start sharing in the active tab.",
+            }),
+          );
+        });
     },
     stopSharing: () =>
       browser.runtime
-        .sendMessage({ type: "screenmate:stop-sharing" })
+        .sendMessage(buildStopSharingRequest())
         .then((nextSnapshot) => {
           const normalizedSnapshot = normalizeSnapshot(nextSnapshot);
           popupLogger.info("Stop sharing returned a snapshot.", {
@@ -252,12 +329,29 @@ export function useHostControls() {
   };
 }
 
-function normalizeSnapshot(value: unknown): HostSnapshot {
+export function normalizeSnapshot(value: unknown): HostSnapshot {
   if (!value || typeof value !== "object") {
     return createHostSnapshot();
   }
 
-  const candidate = value as Partial<HostSnapshot>;
+  const candidate = value as Partial<HostSnapshot> & RoomSessionSnapshot;
+
+  if (
+    typeof candidate.roomLifecycle === "string" ||
+    typeof candidate.sourceState === "string"
+  ) {
+    const viewerCount =
+      typeof candidate.viewerCount === "number" ? candidate.viewerCount : 0;
+    return createHostSnapshot({
+      status: normalizeStatus(candidate),
+      roomId: typeof candidate.roomId === "string" ? candidate.roomId : null,
+      viewerCount,
+      errorMessage:
+        typeof candidate.message === "string" ? candidate.message : null,
+      sourceLabel:
+        typeof candidate.sourceLabel === "string" ? candidate.sourceLabel : null,
+    });
+  }
 
   return createHostSnapshot({
     status: candidate.status,
@@ -269,6 +363,35 @@ function normalizeSnapshot(value: unknown): HostSnapshot {
     sourceLabel:
       typeof candidate.sourceLabel === "string" ? candidate.sourceLabel : null,
   });
+}
+
+function normalizeStatus(
+  snapshot: Partial<HostSnapshot> & RoomSessionSnapshot,
+): HostStatus {
+  switch (snapshot.roomLifecycle) {
+    case "opening":
+      return "starting";
+    case "closed":
+      return "closed";
+    case "degraded":
+      return "degraded";
+    case "open":
+      if (snapshot.sourceState === "attached") {
+        return (snapshot.viewerCount ?? 0) > 0 ? "streaming" : "hosting";
+      }
+
+      if (
+        snapshot.sourceState === "recovering" ||
+        snapshot.sourceState === "missing"
+      ) {
+        return "degraded";
+      }
+
+      return "hosting";
+    case "idle":
+    default:
+      return "idle";
+  }
 }
 
 function normalizeVideos(value: unknown): TabVideoSource[] {
