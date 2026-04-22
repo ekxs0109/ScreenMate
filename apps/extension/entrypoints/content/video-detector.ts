@@ -7,6 +7,17 @@ export type VideoSource = {
   label: string;
 };
 
+export type VideoCandidate = {
+  id: string;
+  label: string;
+  fingerprint: {
+    primaryUrl: string | null;
+    elementId: string | null;
+    label: string;
+    visibleIndex: number;
+  };
+};
+
 export type VideoDetectionDiagnostics = {
   collectedVideoCount: number;
   directVideoCount: number;
@@ -127,6 +138,23 @@ export function listVisibleVideoSources(): VideoSource[] {
     id: getVideoHandle(video),
     label: formatVideoLabel(video, index),
   }));
+}
+
+export function listVisibleVideoCandidates(): VideoCandidate[] {
+  return collectPageVideos().map((video, index) => {
+    const label = formatVideoLabel(video, index);
+
+    return {
+      id: getVideoHandle(video),
+      label,
+      fingerprint: {
+        primaryUrl: video.currentSrc || video.src || video.getAttribute("poster"),
+        elementId: video.id || null,
+        label,
+        visibleIndex: index,
+      },
+    };
+  });
 }
 
 export function getVideoDetectionDiagnostics(): VideoDetectionDiagnostics {

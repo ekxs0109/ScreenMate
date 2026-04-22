@@ -6,6 +6,7 @@ import {
   collectVisibleVideos,
   findVisibleVideoByHandle,
   getVideoHandle,
+  listVisibleVideoCandidates,
   listVisibleVideoSources,
 } from "../entrypoints/content/video-detector";
 import { createVideoMessageListener } from "../entrypoints/content";
@@ -142,6 +143,27 @@ describe("listVisibleVideoSources", () => {
     expect(firstPass[1]).toEqual({
       id: getVideoHandle(hidden),
       label: "hidden (not visible)",
+    });
+  });
+});
+
+describe("listVisibleVideoCandidates", () => {
+  it("returns a recovery fingerprint for each visible video candidate", () => {
+    document.body.innerHTML = `<video id="hero" src="https://example.com/hero.mp4"></video>`;
+    const video = document.getElementById("hero") as HTMLVideoElement;
+    setVideoRect(video, 640, 360);
+
+    const [candidate] = listVisibleVideoCandidates();
+
+    expect(candidate).toMatchObject({
+      id: expect.stringMatching(/^screenmate-video-/),
+      label: "https://example.com/hero.mp4",
+      fingerprint: {
+        primaryUrl: "https://example.com/hero.mp4",
+        elementId: "hero",
+        label: "https://example.com/hero.mp4",
+        visibleIndex: 0,
+      },
     });
   });
 });
