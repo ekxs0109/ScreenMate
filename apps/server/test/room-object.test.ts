@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { RoomState } from "../src/do/room-object";
+import { describe, expect, it, vi } from "vitest";
+import { RoomObject, RoomState } from "../src/do/room-object";
 
 class TestSocket {
   private peer: TestSocket | null = null;
@@ -60,6 +60,169 @@ function createSocketPair() {
 
   return { client, server };
 }
+
+class MemoryStorage {
+  private readonly records = new Map<string, unknown>();
+
+  async get<T>(key: string): Promise<T | null> {
+    return (this.records.get(key) as T | undefined) ?? null;
+  }
+
+  async put<T>(key: string, value: T): Promise<void> {
+    this.records.set(key, value);
+  }
+}
+
+function createDurableObjectState(storage = new MemoryStorage()): {
+  state: DurableObjectState;
+  storage: MemoryStorage;
+} {
+  return {
+    state: { storage } as unknown as DurableObjectState,
+    storage,
+  };
+}
+
+async function sendHostHeartbeat(roomObject: RoomObject, sessionId = "host_1") {
+  const roomState = (roomObject as unknown as { roomState: RoomState }).roomState;
+  const socket = createSocketPair().server;
+
+  roomState.handleSocketMessage(
+    {
+      roomId: "room_demo",
+      role: "host",
+      sessionId,
+      socket,
+    },
+    JSON.stringify({
+      roomId: "room_demo",
+      sessionId,
+      role: "host",
+      messageType: "heartbeat",
+      timestamp: Date.now(),
+      payload: { sequence: 1 },
+    }),
+  );
+  await Promise.resolve();
+}
+
+describe("RoomObject", () => {
+  it("persists host-heartbeat renewal in DO storage and survives reload", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(100_000);
+      const { state, storage } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+
+      await roomObject.fetch(
+        new Request("https://room.internal/internal/initialize", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            roomId: "room_demo",
+            hostSessionId: "host_1",
+            createdAt: 0,
+            expiresAt: 100_500,
+            maxExpiresAt: 5_000_000,
+          }),
+        }),
+      );
+      await sendHostHeartbeat(roomObject);
+
+      const storedAfterHeartbeat = await storage.get<{
+        expiresAt: number;
+        maxExpiresAt: number;
+      }>("room-record");
+
+      expect(storedAfterHeartbeat?.expiresAt).toBe(1_900_000);
+      expect(storedAfterHeartbeat?.maxExpiresAt).toBe(5_000_000);
+
+      const freshRoomObject = new RoomObject(state, {} as never);
+      await freshRoomObject.fetch(
+        new Request("https://room.internal/internal/state", { method: "GET" }),
+      );
+
+      const loadedRecord = (freshRoomObject as unknown as {
+        record: { expiresAt: number; maxExpiresAt: number };
+      }).record;
+
+      expect(loadedRecord.expiresAt).toBe(storedAfterHeartbeat?.expiresAt);
+      expect(loadedRecord.maxExpiresAt).toBe(storedAfterHeartbeat?.maxExpiresAt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("normalizes legacy records without maxExpiresAt and keeps heartbeat expiry finite", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(60_000);
+      const { state, storage } = createDurableObjectState();
+      await storage.put("room-record", {
+        roomId: "room_demo",
+        hostSessionId: "host_1",
+        createdAt: 0,
+        expiresAt: 120_000,
+        closedAt: null,
+        closedReason: null,
+      });
+      const roomObject = new RoomObject(state, {} as never);
+
+      await roomObject.fetch(
+        new Request("https://room.internal/internal/state", { method: "GET" }),
+      );
+      await sendHostHeartbeat(roomObject);
+
+      const normalized = await storage.get<{
+        expiresAt: number;
+        maxExpiresAt: number;
+      }>("room-record");
+
+      expect(Number.isFinite(normalized?.maxExpiresAt)).toBe(true);
+      expect(Number.isFinite(normalized?.expiresAt)).toBe(true);
+      expect(normalized?.maxExpiresAt).toBeGreaterThanOrEqual(
+        normalized?.expiresAt ?? 0,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clamps renewal to maxExpiresAt when host heartbeat exceeds hard limit", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(100_000);
+      const { state, storage } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+
+      await roomObject.fetch(
+        new Request("https://room.internal/internal/initialize", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            roomId: "room_demo",
+            hostSessionId: "host_1",
+            createdAt: 0,
+            expiresAt: 100_500,
+            maxExpiresAt: 101_000,
+          }),
+        }),
+      );
+      await sendHostHeartbeat(roomObject);
+
+      const stored = await storage.get<{ expiresAt: number; maxExpiresAt: number }>(
+        "room-record",
+      );
+
+      expect(stored).toMatchObject({
+        expiresAt: 101_000,
+        maxExpiresAt: 101_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("RoomState", () => {
   it("persists renewal records with maxExpiresAt", () => {

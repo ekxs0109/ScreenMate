@@ -26,6 +26,9 @@ type PersistedRoomRecord = RoomInitialization & {
   closedAt: number | null;
   closedReason: CloseReason | null;
 };
+type StoredRoomRecord = Omit<PersistedRoomRecord, "maxExpiresAt"> & {
+  maxExpiresAt?: number;
+};
 
 type RoomStateSnapshot = {
   roomId: string;
@@ -59,6 +62,7 @@ type JoinValidation =
 
 const ROOM_RECORD_KEY = "room-record";
 const ROOM_RENEWAL_WINDOW_MS = 30 * 60 * 1_000;
+const ROOM_MAX_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 
 export class RoomState {
   private readonly roomId: string;
@@ -566,9 +570,20 @@ export class RoomObject {
     }
 
     if (!this.loaded) {
-      this.record =
-        (await this.state.storage.get<PersistedRoomRecord>(ROOM_RECORD_KEY)) ?? null;
+      const storedRecord =
+        (await this.state.storage.get<StoredRoomRecord>(ROOM_RECORD_KEY)) ?? null;
+      this.record = storedRecord
+        ? this.normalizePersistedRecord(storedRecord)
+        : null;
       this.loaded = true;
+
+      if (
+        storedRecord &&
+        this.record &&
+        storedRecord.maxExpiresAt !== this.record.maxExpiresAt
+      ) {
+        await this.state.storage.put(ROOM_RECORD_KEY, this.record);
+      }
     }
 
     if (!this.record) {
@@ -587,6 +602,21 @@ export class RoomObject {
         await this.state.storage.put(ROOM_RECORD_KEY, nextRecord);
       },
     });
+  }
+
+  private normalizePersistedRecord(record: StoredRoomRecord): PersistedRoomRecord {
+    const fallbackMaxExpiresAt = Math.max(
+      record.expiresAt,
+      record.createdAt + ROOM_MAX_LIFETIME_MS,
+    );
+    const maxExpiresAt = Number.isFinite(record.maxExpiresAt)
+      ? Math.max(record.maxExpiresAt, record.expiresAt)
+      : fallbackMaxExpiresAt;
+
+    return {
+      ...record,
+      maxExpiresAt,
+    };
   }
 
   private handleWebSocket(request: Request, roomState: RoomState): Response {
