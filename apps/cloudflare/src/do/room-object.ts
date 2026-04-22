@@ -65,7 +65,6 @@ export class RoomState {
   private readonly expiresAt: number;
   private closedAt: number | null;
   private closedReason: CloseReason | null;
-  private degraded = false;
   private sourceState: RoomSourceState = "missing";
   private hostConnection: RoomConnection | null = null;
   private readonly viewers = new Map<string, RoomConnection>();
@@ -217,11 +216,13 @@ export class RoomState {
 
     if (this.isClosed()) {
       state = "closed";
-    } else if (this.degraded) {
+    } else if (!this.hostConnection) {
+      state = "idle";
+    } else if (this.sourceState !== "attached") {
       state = "degraded";
-    } else if (this.hostConnection && viewerCount > 0) {
+    } else if (viewerCount > 0) {
       state = "streaming";
-    } else if (this.hostConnection) {
+    } else {
       state = "hosting";
     }
 
@@ -275,7 +276,7 @@ export class RoomState {
         this.relayToTarget(envelope, envelope.payload.targetSessionId);
         break;
       case "negotiation-failed":
-        this.degraded = true;
+        this.sourceState = "recovering";
         this.relayToTarget(envelope, envelope.payload.targetSessionId);
         this.broadcast(this.roomStateEnvelope());
         break;
@@ -285,7 +286,6 @@ export class RoomState {
           return;
         }
         this.sourceState = envelope.payload.sourceState;
-        this.degraded = envelope.payload.state === "degraded";
         this.broadcast(this.roomStateEnvelope());
         break;
       case "heartbeat":
@@ -333,7 +333,6 @@ export class RoomState {
 
     this.closedAt = this.now();
     this.closedReason = reason;
-    this.degraded = false;
     this.sourceState = "missing";
 
     if (reason === "host-left" || reason === "closed") {

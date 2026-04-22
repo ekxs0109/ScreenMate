@@ -112,11 +112,11 @@ export function createHostRoomRuntime(options: {
       return "closed";
     }
 
-    if (snapshot.sourceState === "recovering") {
+    if (toRoomSourceState(snapshot.sourceState) !== "attached") {
       return "degraded";
     }
 
-    if (snapshot.sourceState === "attached" && snapshot.viewerCount > 0) {
+    if (snapshot.viewerCount > 0) {
       return "streaming";
     }
 

@@ -80,7 +80,7 @@ describe("RoomState", () => {
       hostSessionId: "host_1",
       hostConnected: true,
       viewerCount: 1,
-      state: "streaming",
+      state: "degraded",
       sourceState: "missing",
     });
   });

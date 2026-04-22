@@ -417,7 +417,7 @@ describe("createHostRoomRuntime", () => {
         messageType: "room-state",
         timestamp: expect.any(Number),
         payload: {
-          state: "hosting",
+          state: "degraded",
           sourceState: "missing",
           viewerCount: 1,
         },
@@ -453,7 +453,7 @@ describe("createHostRoomRuntime", () => {
         messageType: "room-state",
         timestamp: expect.any(Number),
         payload: {
-          state: "hosting",
+          state: "degraded",
           sourceState: "missing",
           viewerCount: 1,
         },

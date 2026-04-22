@@ -249,14 +249,10 @@ export class ViewerSession {
           });
         }
 
-        if (state === "closed" && this.snapshot.status !== "ended") {
+        if (state === "closed") {
           viewerSessionLogger.warn("Viewer peer connection closed.", {
             roomId: joined.roomId,
             sessionId: joined.sessionId,
-          });
-          this.update({
-            status: "ended",
-            endedReason: "The stream ended.",
           });
         }
       },

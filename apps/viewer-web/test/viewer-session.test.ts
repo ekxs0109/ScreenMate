@@ -74,7 +74,6 @@ class FakePeerConnection {
 
   close() {
     this.connectionState = "closed";
-    this.onconnectionstatechange?.();
   }
 
   emitTrack(stream: MediaStream) {
