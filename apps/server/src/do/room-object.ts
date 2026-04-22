@@ -609,8 +609,13 @@ export class RoomObject {
       record.expiresAt,
       record.createdAt + ROOM_MAX_LIFETIME_MS,
     );
-    const maxExpiresAt = Number.isFinite(record.maxExpiresAt)
-      ? Math.max(record.maxExpiresAt, record.expiresAt)
+    const persistedMaxExpiresAt =
+      typeof record.maxExpiresAt === "number" &&
+      Number.isFinite(record.maxExpiresAt)
+        ? record.maxExpiresAt
+        : null;
+    const maxExpiresAt = persistedMaxExpiresAt !== null
+      ? Math.max(persistedMaxExpiresAt, record.expiresAt)
       : fallbackMaxExpiresAt;
 
     return {
