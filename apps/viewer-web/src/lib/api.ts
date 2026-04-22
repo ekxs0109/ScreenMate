@@ -1,4 +1,8 @@
-import { errorCodes } from "@screenmate/shared";
+import {
+  errorCodes,
+  type RoomSourceState,
+  type RoomState,
+} from "@screenmate/shared";
 
 export type JoinRoomResponse = {
   roomId: string;
@@ -15,7 +19,8 @@ export type RoomStateResponse = {
   hostSessionId: string | null;
   hostConnected: boolean;
   viewerCount: number;
-  state: "idle" | "hosting" | "streaming" | "degraded" | "closed";
+  state: RoomState;
+  sourceState: RoomSourceState;
 };
 
 export type RoomApiError = Error & {

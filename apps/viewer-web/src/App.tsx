@@ -64,6 +64,7 @@ export default function App() {
         <ViewerPlayer
           roomId={session.roomId}
           roomState={session.roomState}
+          sourceState={session.sourceState}
           status={session.status}
           stream={session.remoteStream}
         />

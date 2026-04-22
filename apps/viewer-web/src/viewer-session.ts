@@ -1,5 +1,10 @@
 import { errorCodes } from "@screenmate/shared";
-import { getRoomState, joinRoom, type RoomApiError } from "./lib/api";
+import {
+  getRoomState,
+  joinRoom,
+  type JoinRoomResponse,
+  type RoomApiError,
+} from "./lib/api";
 import { createLogger } from "./lib/logger";
 import {
   createViewerPeerConnection,
@@ -30,6 +35,7 @@ export class ViewerSession {
   private readonly listeners = new Set<(snapshot: ViewerSessionState) => void>();
   private socketClient: ReturnType<typeof createSocketClient> | null = null;
   private peerClient: ReturnType<typeof createViewerPeerConnection> | null = null;
+  private joinResponse: JoinRoomResponse | null = null;
 
   constructor(private readonly options: ViewerSessionOptions) {}
 
@@ -80,6 +86,7 @@ export class ViewerSession {
           ...initialViewerSessionState,
           roomId,
           roomState: roomState.state,
+          sourceState: roomState.sourceState,
           status: "ended",
           endedReason: "The host has already ended this room.",
         });
@@ -104,68 +111,15 @@ export class ViewerSession {
         viewerToken: joined.viewerToken,
         hostSessionId: roomState.hostSessionId,
         roomState: roomState.state,
+        sourceState: roomState.sourceState,
         status: "waiting",
         error: null,
         endedReason: null,
         remoteStream: null,
       });
 
-      this.peerClient = createViewerPeerConnection({
-        iceServers: joined.iceServers,
-        sessionId: joined.sessionId,
-        roomId: joined.roomId,
-        getTargetSessionId: () => this.snapshot.hostSessionId,
-        sendSignal: (message) => this.socketClient?.send(message),
-        onRemoteStream: (stream) => {
-          viewerSessionLogger.info("Viewer received a remote stream.", {
-            roomId: joined.roomId,
-            sessionId: joined.sessionId,
-            streamId: typeof stream.id === "string" ? stream.id : null,
-          });
-          this.update({
-            remoteStream: stream,
-            status: "connected",
-            error: null,
-            endedReason: null,
-          });
-        },
-        onConnectionStateChange: (state) => {
-          viewerSessionLogger.info("Viewer peer connection state changed.", {
-            roomId: joined.roomId,
-            sessionId: joined.sessionId,
-            state,
-          });
-          if (state === "failed") {
-            viewerSessionLogger.error("Viewer peer connectivity failed.", {
-              roomId: joined.roomId,
-              sessionId: joined.sessionId,
-              state,
-            });
-            this.update({
-              status: "error",
-              error: "Direct peer connectivity failed.",
-            });
-          }
-          if (state === "disconnected") {
-            viewerSessionLogger.warn("Viewer peer connection disconnected.", {
-              roomId: joined.roomId,
-              sessionId: joined.sessionId,
-              state,
-            });
-          }
-          if (state === "closed" && this.snapshot.status !== "ended") {
-            viewerSessionLogger.warn("Viewer peer connection closed.", {
-              roomId: joined.roomId,
-              sessionId: joined.sessionId,
-            });
-            this.update({
-              status: "ended",
-              endedReason: "The stream ended.",
-            });
-          }
-        },
-        createPeerConnection: this.options.createPeerConnection,
-      });
+      this.joinResponse = joined;
+      this.peerClient = this.createPeerClient(joined);
 
       this.socketClient = createSocketClient(joined.wsUrl, joined.viewerToken, {
         createWebSocket: this.options.createWebSocket,
@@ -238,6 +192,80 @@ export class ViewerSession {
     this.teardown(true);
   }
 
+  private createPeerClient(joined: JoinRoomResponse) {
+    const peerClient = createViewerPeerConnection({
+      iceServers: joined.iceServers,
+      sessionId: joined.sessionId,
+      roomId: joined.roomId,
+      getTargetSessionId: () => this.snapshot.hostSessionId,
+      sendSignal: (message) => this.socketClient?.send(message),
+      onRemoteStream: (stream) => {
+        viewerSessionLogger.info("Viewer received a remote stream.", {
+          roomId: joined.roomId,
+          sessionId: joined.sessionId,
+          streamId: typeof stream.id === "string" ? stream.id : null,
+        });
+
+        if (this.peerClient !== peerClient) {
+          return;
+        }
+
+        this.update({
+          remoteStream: stream,
+          sourceState: "attached",
+          status: "connected",
+          error: null,
+          endedReason: null,
+        });
+      },
+      onConnectionStateChange: (state) => {
+        viewerSessionLogger.info("Viewer peer connection state changed.", {
+          roomId: joined.roomId,
+          sessionId: joined.sessionId,
+          state,
+        });
+
+        if (this.peerClient !== peerClient) {
+          return;
+        }
+
+        if (state === "failed") {
+          viewerSessionLogger.error("Viewer peer connectivity failed.", {
+            roomId: joined.roomId,
+            sessionId: joined.sessionId,
+            state,
+          });
+          this.update({
+            status: "error",
+            error: "Direct peer connectivity failed.",
+          });
+        }
+
+        if (state === "disconnected") {
+          viewerSessionLogger.warn("Viewer peer connection disconnected.", {
+            roomId: joined.roomId,
+            sessionId: joined.sessionId,
+            state,
+          });
+        }
+
+        if (state === "closed" && this.snapshot.status !== "ended") {
+          viewerSessionLogger.warn("Viewer peer connection closed.", {
+            roomId: joined.roomId,
+            sessionId: joined.sessionId,
+          });
+          this.update({
+            status: "ended",
+            endedReason: "The stream ended.",
+          });
+        }
+      },
+      createPeerConnection: this.options.createPeerConnection,
+    });
+
+    return peerClient;
+  }
+
   private async handleSignal(message: SignalEnvelope) {
     viewerSessionLogger.debug("Viewer received a signaling message.", {
       messageType: message.messageType,
@@ -258,10 +286,23 @@ export class ViewerSession {
           roomId: message.roomId,
           targetSessionId: message.payload.targetSessionId,
         });
+        this.peerClient?.close();
+        if (!this.joinResponse) {
+          viewerSessionLogger.warn("Viewer ignored an offer before join state was ready.", {
+            hostSessionId: message.sessionId,
+            roomId: message.roomId,
+          });
+          this.peerClient = null;
+          break;
+        }
+        this.peerClient = this.createPeerClient(this.joinResponse);
         this.update({
           hostSessionId: message.sessionId,
+          sourceState: "attached",
           status: "connecting",
           roomState: "streaming",
+          error: null,
+          endedReason: null,
         });
         await this.peerClient?.acceptOffer(message.sessionId, message.payload.sdp);
         break;
@@ -283,13 +324,25 @@ export class ViewerSession {
         viewerSessionLogger.info("Viewer received a room state update.", {
           roomId: message.roomId,
           roomState: message.payload.state,
+          sourceState: message.payload.sourceState,
+          viewerCount: message.payload.viewerCount,
         });
-        this.update({ roomState: message.payload.state });
+        this.update({
+          roomState: message.payload.state,
+          sourceState: message.payload.sourceState,
+          status:
+            message.payload.state === "closed"
+              ? "ended"
+              : message.payload.sourceState === "attached" &&
+                  this.snapshot.remoteStream
+                ? "connected"
+                : "waiting",
+        });
         if (message.payload.state === "closed") {
           this.update({
-            status: "ended",
             endedReason: "The host ended the room.",
           });
+          this.teardown(false);
         }
         break;
       case "host-left":
@@ -336,6 +389,7 @@ export class ViewerSession {
     this.socketClient = null;
     this.peerClient?.close();
     this.peerClient = null;
+    this.joinResponse = null;
 
     if (resetSnapshot) {
       this.snapshot = initialViewerSessionState;

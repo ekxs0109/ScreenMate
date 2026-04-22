@@ -94,7 +94,9 @@ describe("ViewerSession", () => {
         return Response.json({
           roomId: "room_demo",
           state: "hosting",
+          sourceState: "missing",
           hostConnected: true,
+          hostSessionId: null,
           viewerCount: 0,
         });
       }
@@ -175,7 +177,9 @@ describe("ViewerSession", () => {
           return Response.json({
             roomId: "room_demo",
             state: "hosting",
+            sourceState: "missing",
             hostConnected: true,
+            hostSessionId: null,
             viewerCount: 0,
           });
         }
@@ -208,6 +212,85 @@ describe("ViewerSession", () => {
     expect(session.getSnapshot()).toMatchObject({
       status: "ended",
       endedReason: "The host ended the room.",
+    });
+  });
+
+  it("stays joined while the host source is recovering and reconnects on a new offer", async () => {
+    const socket = new FakeWebSocket();
+    const firstPeer = new FakePeerConnection();
+    const secondPeer = new FakePeerConnection();
+    const peers = [firstPeer, secondPeer];
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+
+        if (url.endsWith("/rooms/room_demo") && !init?.method) {
+          return Response.json({
+            roomId: "room_demo",
+            state: "streaming",
+            sourceState: "attached",
+            hostConnected: true,
+            hostSessionId: "host_1",
+            viewerCount: 1,
+          });
+        }
+
+        return Response.json({
+          roomId: "room_demo",
+          sessionId: "viewer_1",
+          viewerToken: "viewer-token",
+          wsUrl: "ws://signal.example/rooms/room_demo/ws",
+          iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
+        });
+      },
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peers.shift() as never,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "room-state",
+        timestamp: 10,
+        payload: {
+          state: "degraded",
+          sourceState: "recovering",
+          viewerCount: 1,
+        },
+      }),
+    );
+
+    expect(session.getSnapshot()).toMatchObject({
+      roomState: "degraded",
+      sourceState: "recovering",
+      status: "waiting",
+      endedReason: null,
+    });
+
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_2",
+        role: "host",
+        messageType: "offer",
+        timestamp: 11,
+        payload: {
+          targetSessionId: "viewer_1",
+          sdp: "reattach-offer",
+        },
+      }),
+    );
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(secondPeer.remoteDescription).toEqual({
+      type: "offer",
+      sdp: "reattach-offer",
     });
   });
 });
