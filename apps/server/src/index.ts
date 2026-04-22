@@ -11,6 +11,7 @@ import {
   getTurnUrls,
 } from "./env.js";
 export { RoomObject } from "./do/room-object.js";
+import { getDefaultIcePool } from "./lib/ice-pool.js";
 import { buildSessionIceServers } from "./lib/turn-credentials.js";
 import { issueScopedToken, verifyScopedToken } from "./lib/token.js";
 
@@ -30,11 +31,7 @@ app.use(
 );
 
 app.get("/config/ice", (c) => {
-  return buildIceResponse(c.env, {
-    roomId: "config",
-    sessionId: "anonymous",
-    role: "viewer",
-  }).then((ice) => c.json({ iceServers: ice.iceServers }));
+  return c.json({ iceServers: getDefaultIcePool() });
 });
 
 app.post("/rooms", async (c) => {

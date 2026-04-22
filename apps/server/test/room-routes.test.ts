@@ -45,7 +45,9 @@ describe("room routes", () => {
     };
 
     expect(response.status).toBe(200);
+    expect(body.iceServers).toHaveLength(4);
     expect(body.iceServers[0].urls[0]).toContain("stun:");
+    expect(body.iceServers.every((server) => "username" in server)).toBe(false);
   });
 
   it("returns session-scoped turn credentials from POST /rooms", async () => {
@@ -116,12 +118,13 @@ describe("room routes", () => {
 
     const payload = await verifyScopedToken(body.hostToken, {
       secret: TEST_SECRET,
-      now: Math.floor(TEST_NOW / 1_000) + 60 * 60,
+      now: Math.floor(TEST_NOW / 1_000),
     });
 
     expect(payload?.roomId).toBe(body.roomId);
     expect(payload?.role).toBe("host");
     expect(payload?.sessionId).toMatch(/^host_/);
+    expect(payload?.exp).toBe(Math.floor(TEST_NOW / 1_000) + 12 * 60 * 60);
   });
 
   it("returns lightweight room state from GET /rooms/:roomId", async () => {
@@ -283,6 +286,45 @@ describe("room routes", () => {
     expect(body.iceServers[2]).toMatchObject({
       username: "1700000600:room_demo:host_123:host",
     });
+    expect(body.turnCredentialExpiresAt).toBe(TEST_NOW + 10 * 60 * 1_000);
+  });
+
+  it("rejects host ice refresh without a valid host bearer token", async () => {
+    const roomNamespace = createRoomNamespace(() => {
+      throw new Error("unexpected durable object request");
+    });
+
+    const missingTokenResponse = await app.request(
+      "/rooms/room_demo/host/ice",
+      { method: "POST" },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        TURN_AUTH_SECRET: "turn-secret",
+        TURN_URLS:
+          "turn:turn.screenmate.local:3478?transport=udp,turn:turn.screenmate.local:3478?transport=tcp,turns:turn.screenmate.local:5349?transport=tcp",
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+    const invalidTokenResponse = await app.request(
+      "/rooms/room_demo/host/ice",
+      {
+        method: "POST",
+        headers: { Authorization: "Bearer bad-token" },
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        TURN_AUTH_SECRET: "turn-secret",
+        TURN_URLS:
+          "turn:turn.screenmate.local:3478?transport=udp,turn:turn.screenmate.local:3478?transport=tcp,turns:turn.screenmate.local:5349?transport=tcp",
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+
+    expect(missingTokenResponse.status).toBe(401);
+    expect(invalidTokenResponse.status).toBe(401);
+    expect(roomNamespace.calls).toHaveLength(0);
   });
 
   it("rejects websocket upgrades with an invalid token", async () => {
