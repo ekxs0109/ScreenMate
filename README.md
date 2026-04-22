@@ -34,9 +34,18 @@ ScreenMate is a Turborepo monorepo for a small-room video sharing MVP:
 - `WXT_PUBLIC_SCREENMATE_VIEWER_BASE_URL`
   Optional. Used by the extension popup to build the viewer room link.
   Default: `http://localhost:4173`
-- `VITE_API_BASE_URL`
-  Optional. Used by the viewer web app to point at the Cloudflare API.
+- `VITE_SCREENMATE_API_BASE_URL`
+  Optional. Preferred variable for the viewer web app API base URL.
   Default: `http://127.0.0.1:8787`
+- `VITE_API_BASE_URL`
+  Optional legacy fallback for the viewer web app API base URL.
+  Default: `http://127.0.0.1:8787`
+
+Example local config templates:
+
+- [apps/server/.dev.vars.example](/Users/ekxs/Codes/ScreenMate/apps/server/.dev.vars.example)
+- [apps/extension/.env.local.example](/Users/ekxs/Codes/ScreenMate/apps/extension/.env.local.example)
+- [apps/viewer-web/.env.local.example](/Users/ekxs/Codes/ScreenMate/apps/viewer-web/.env.local.example)
 
 ## Local Flow
 

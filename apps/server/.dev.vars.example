@@ -1,4 +1,4 @@
-ROOM_TOKEN_SECRET=screenmate-local-secret
+ROOM_TOKEN_SECRET=replace-with-a-long-random-secret
 TURN_AUTH_SECRET=screenmate-local-turn-secret
 TURN_REALM=screenmate.local
 TURN_URLS=turn:127.0.0.1:3478?transport=udp
