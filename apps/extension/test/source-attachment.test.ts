@@ -466,6 +466,53 @@ describe("createSourceAttachmentRuntime", () => {
     });
   });
 
+  it("updates active attachment ICE servers in place for later viewer negotiation", async () => {
+    document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
+    const video = document.getElementById("host") as HTMLVideoElement;
+    setVideoRect(video, 640, 360);
+    const track = createMockTrack() as unknown as MediaStreamTrack;
+
+    Object.defineProperty(video, "captureStream", {
+      configurable: true,
+      value: vi.fn(() => ({ getTracks: () => [track] })),
+    });
+
+    MockRTCPeerConnection.instances = [];
+    const runtime = createSourceAttachmentRuntime({
+      now: () => 90,
+      onSignal: vi.fn(),
+      onSourceDetached: vi.fn(),
+      RTCPeerConnectionImpl: MockRTCPeerConnection as never,
+    });
+
+    await runtime.attachSource({
+      roomId: "room_123",
+      sessionId: "host_1",
+      videoId: getVideoHandle(video),
+      viewerSessionIds: ["viewer_1"],
+      iceServers: [{ urls: ["turn:old.screenmate.dev"] }],
+    });
+
+    runtime.updateIceServers([{ urls: ["turn:new.screenmate.dev"] }]);
+
+    await runtime.handleSignal({
+      messageType: "viewer-joined",
+      sessionId: "viewer_2",
+      payload: {
+        viewerSessionId: "viewer_2",
+      },
+    });
+
+    expect(track.stop).not.toHaveBeenCalled();
+    expect(MockRTCPeerConnection.instances).toHaveLength(2);
+    expect(MockRTCPeerConnection.instances[0]?.config).toEqual({
+      iceServers: [{ urls: ["turn:old.screenmate.dev"] }],
+    });
+    expect(MockRTCPeerConnection.instances[1]?.config).toEqual({
+      iceServers: [{ urls: ["turn:new.screenmate.dev"] }],
+    });
+  });
+
   it("returns a visible-list fingerprint index when hidden videos exist", async () => {
     window.history.replaceState({}, "", "/video/BV1demo");
     document.body.innerHTML = `

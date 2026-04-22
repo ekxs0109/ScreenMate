@@ -7,6 +7,7 @@ import {
   getScreenMateApiBaseUrl,
   toScreenMateWebSocketUrl,
 } from "../../lib/config";
+import { refreshHostIce as requestHostIceRefresh } from "../../lib/room-api";
 import {
   createHostRoomStore,
   type HostSourceState,
@@ -18,6 +19,7 @@ import {
 const STORAGE_KEY = "screenmateHostRoomSession";
 const OPEN_SOCKET_READY_STATE = 1;
 const HEARTBEAT_INTERVAL_MS = 20_000;
+export const TURN_REFRESH_SKEW_MS = 60_000;
 
 type SessionStorageLike = {
   get: (key: string) => Promise<Record<string, PersistedHostRoomSession | undefined>>;
@@ -37,10 +39,12 @@ export function createHostRoomRuntime(options: {
   storage: SessionStorageLike;
   now?: () => number;
   apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
   WebSocketImpl?: new (url: string) => HostSocket;
 }) {
   const now = options.now ?? Date.now;
   const apiBaseUrl = options.apiBaseUrl ?? getScreenMateApiBaseUrl();
+  const fetchImpl = options.fetchImpl ?? fetch;
   const store = createHostRoomStore(now);
   const WebSocketImpl = options.WebSocketImpl ?? globalThis.WebSocket;
   let session: PersistedHostRoomSession | null = null;
@@ -56,6 +60,26 @@ export function createHostRoomRuntime(options: {
     }
 
     await options.storage.remove(STORAGE_KEY);
+  }
+
+  async function updateIceServers(
+    iceServers: RTCIceServer[],
+    turnCredentialExpiresAt: number | null,
+  ) {
+    if (!session) {
+      return null;
+    }
+
+    session = {
+      ...session,
+      iceServers,
+      turnCredentialExpiresAt,
+    };
+    await persist();
+    return {
+      iceServers: session.iceServers,
+      turnCredentialExpiresAt: session.turnCredentialExpiresAt,
+    };
   }
 
   function stopHeartbeat() {
@@ -226,6 +250,33 @@ export function createHostRoomRuntime(options: {
     },
     getSourceFingerprint() {
       return session?.sourceFingerprint ?? null;
+    },
+    shouldRefreshHostIce() {
+      if (!session || session.turnCredentialExpiresAt === null) {
+        return false;
+      }
+
+      return session.turnCredentialExpiresAt <= now() + TURN_REFRESH_SKEW_MS;
+    },
+    async refreshHostIce() {
+      if (!session) {
+        return null;
+      }
+
+      const refreshed = await requestHostIceRefresh(
+        fetchImpl,
+        apiBaseUrl,
+        session.roomId,
+        session.hostToken,
+      );
+      await updateIceServers(
+        refreshed.iceServers,
+        refreshed.turnCredentialExpiresAt,
+      );
+      return refreshed;
+    },
+    async updateIceServers(iceServers: RTCIceServer[], turnCredentialExpiresAt) {
+      return updateIceServers(iceServers, turnCredentialExpiresAt);
     },
     async setViewerCount(viewerCount: number) {
       if (session) {

@@ -260,10 +260,22 @@ export function createSourceAttachmentRuntime(options: {
     teardownAttachment(reason);
   }
 
+  function updateIceServers(iceServers: RTCIceServer[]) {
+    if (!attachment) {
+      return;
+    }
+
+    attachment = {
+      ...attachment,
+      iceServers: normalizeIceServers(iceServers) as RTCIceServer[],
+    };
+  }
+
   return {
     attachSource,
     beginViewerNegotiation,
     handleSignal,
+    updateIceServers,
     destroy,
   };
 }

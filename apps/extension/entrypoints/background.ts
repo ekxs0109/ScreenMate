@@ -88,6 +88,10 @@ type TabContentMessage =
       roomSession: NonNullable<ReturnType<HostRoomRuntime["getAttachSession"]>>;
     }
   | {
+      type: "screenmate:update-ice-servers";
+      iceServers: RTCIceServer[];
+    }
+  | {
       type: "screenmate:signal-inbound";
       envelope: SignalEnvelope;
     };
@@ -208,6 +212,7 @@ export function createHostMessageHandler(
         hostToken: roomResponse.hostToken,
         signalingUrl: roomResponse.signalingUrl,
         iceServers: roomResponse.iceServers ?? [],
+        turnCredentialExpiresAt: roomResponse.turnCredentialExpiresAt ?? null,
         activeTabId: tabId,
         activeFrameId: message.frameId,
         viewerSessionIds: [],
@@ -313,34 +318,16 @@ export default defineBackground(() => {
   const internalHandler = createInternalHostNetworkHandler({
     fetchImpl: fetch,
   });
-  const forwardInboundSignal = (envelope: SignalEnvelope) => {
-    const snapshot = runtime.getSnapshot();
-    if (snapshot.activeTabId === null || snapshot.activeFrameId === null) {
-      return;
-    }
-
-    if (!shouldForwardSignalToContentRuntime(envelope)) {
-      return;
-    }
-
-    void browser.tabs
-      .sendMessage(
-        snapshot.activeTabId,
-        {
-          type: "screenmate:signal-inbound",
-          envelope,
-        } satisfies TabContentMessage,
-        { frameId: snapshot.activeFrameId },
-      )
-      .catch((error) => {
-        backgroundLogger.warn("Could not forward inbound signal to content.", {
-          activeFrameId: snapshot.activeFrameId,
-          activeTabId: snapshot.activeTabId,
-          error: toErrorMessage(error),
-          messageType: envelope.messageType,
-        });
-      });
-  };
+  const forwardInboundSignal = createForwardInboundSignalHandler({
+    runtime,
+    sendTabMessage(tabId, message, options) {
+      return browser.tabs.sendMessage(
+        tabId,
+        message,
+        options,
+      ) as Promise<TabMessageResponse>;
+    },
+  });
   const handler = createHostMessageHandler({
     apiBaseUrl,
     createRoom: async (requestedApiBaseUrl) => {
@@ -434,6 +421,73 @@ export function createInternalHostNetworkHandler(
         return { error: formattedError };
       }
     })();
+  };
+}
+
+export function createForwardInboundSignalHandler(dependencies: {
+  runtime: Pick<
+    HostRoomRuntime,
+    "getSnapshot" | "shouldRefreshHostIce" | "refreshHostIce"
+  >;
+  sendTabMessage: (
+    tabId: number,
+    message: TabContentMessage,
+    options?: { frameId?: number },
+  ) => Promise<TabMessageResponse>;
+}) {
+  return async (envelope: SignalEnvelope) => {
+    const snapshot = dependencies.runtime.getSnapshot();
+    if (snapshot.activeTabId === null || snapshot.activeFrameId === null) {
+      return;
+    }
+
+    if (!shouldForwardSignalToContentRuntime(envelope)) {
+      return;
+    }
+
+    if (
+      envelope.messageType === "viewer-joined" &&
+      dependencies.runtime.shouldRefreshHostIce()
+    ) {
+      try {
+        const refreshed = await dependencies.runtime.refreshHostIce();
+        if (refreshed) {
+          await dependencies.sendTabMessage(
+            snapshot.activeTabId,
+            {
+              type: "screenmate:update-ice-servers",
+              iceServers: refreshed.iceServers,
+            },
+            { frameId: snapshot.activeFrameId },
+          );
+        }
+      } catch (error) {
+        backgroundLogger.warn("Could not refresh host ICE before forwarding.", {
+          activeFrameId: snapshot.activeFrameId,
+          activeTabId: snapshot.activeTabId,
+          error: toErrorMessage(error),
+          messageType: envelope.messageType,
+        });
+      }
+    }
+
+    try {
+      await dependencies.sendTabMessage(
+        snapshot.activeTabId,
+        {
+          type: "screenmate:signal-inbound",
+          envelope,
+        },
+        { frameId: snapshot.activeFrameId },
+      );
+    } catch (error) {
+      backgroundLogger.warn("Could not forward inbound signal to content.", {
+        activeFrameId: snapshot.activeFrameId,
+        activeTabId: snapshot.activeTabId,
+        error: toErrorMessage(error),
+        messageType: envelope.messageType,
+      });
+    }
   };
 }
 

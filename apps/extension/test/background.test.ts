@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createHostMessageHandler,
+  createForwardInboundSignalHandler,
   createInternalHostNetworkHandler,
   createHostRuntimeMessageListener,
   shouldForwardSignalToContentRuntime,
@@ -1158,6 +1159,65 @@ describe("createHostMessageHandler", () => {
       signalingUrl: "/rooms/room_123/ws",
       iceServers: [{ urls: ["stun:stun.screenmate.dev"] }],
     });
+  });
+
+  it("refreshes host ICE before forwarding a late viewer-joined signal", async () => {
+    const sendTabMessage = vi.fn().mockResolvedValue(undefined);
+    const refreshHostIce = vi.fn().mockResolvedValue({
+      iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+      turnCredentialExpiresAt: 200_000,
+    });
+    const forwardInboundSignal = createForwardInboundSignalHandler({
+      runtime: {
+        getSnapshot: vi.fn().mockReturnValue({
+          roomLifecycle: "open",
+          sourceState: "attached",
+          roomId: "room_123",
+          viewerCount: 1,
+          sourceLabel: "Primary source",
+          activeTabId: 42,
+          activeFrameId: 7,
+          recoverByTimestamp: null,
+          message: null,
+        }),
+        shouldRefreshHostIce: vi.fn().mockReturnValue(true),
+        refreshHostIce,
+      } as never,
+      sendTabMessage,
+    });
+
+    const envelope = {
+      roomId: "room_123",
+      sessionId: "viewer_2",
+      role: "viewer" as const,
+      messageType: "viewer-joined" as const,
+      timestamp: 10,
+      payload: {
+        viewerSessionId: "viewer_2",
+      },
+    };
+
+    await forwardInboundSignal(envelope);
+
+    expect(refreshHostIce).toHaveBeenCalledTimes(1);
+    expect(sendTabMessage).toHaveBeenNthCalledWith(
+      1,
+      42,
+      {
+        type: "screenmate:update-ice-servers",
+        iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+      },
+      { frameId: 7 },
+    );
+    expect(sendTabMessage).toHaveBeenNthCalledWith(
+      2,
+      42,
+      {
+        type: "screenmate:signal-inbound",
+        envelope,
+      },
+      { frameId: 7 },
+    );
   });
 
   it("forwards viewer lifecycle and negotiation envelopes to the content runtime", () => {

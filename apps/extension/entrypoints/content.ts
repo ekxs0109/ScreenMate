@@ -37,6 +37,10 @@ export type ContentControlMessage =
       envelope: Record<string, unknown>;
     }
   | {
+      type: "screenmate:update-ice-servers";
+      iceServers: RTCIceServer[];
+    }
+  | {
       type: "screenmate:preview-video";
       videoId: string;
       frameId: number;
@@ -123,6 +127,18 @@ export function createVideoMessageListener(
           .then(() => {
             sendResponse({ ok: true });
           });
+      });
+
+      return true;
+    }
+
+    if (
+      message.type === "screenmate:update-ice-servers" &&
+      sourceAttachmentRuntime
+    ) {
+      queueMicrotask(() => {
+        sourceAttachmentRuntime.updateIceServers(message.iceServers);
+        sendResponse({ ok: true });
       });
 
       return true;

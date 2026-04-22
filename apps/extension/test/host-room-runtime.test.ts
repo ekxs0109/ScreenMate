@@ -262,6 +262,106 @@ describe("createHostRoomRuntime", () => {
     );
   });
 
+  it("restores the persisted TURN credential expiry from storage", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({
+        screenmateHostRoomSession: {
+          roomId: "room_123",
+          hostSessionId: "host_1",
+          hostToken: "host-token",
+          signalingUrl: "/rooms/room_123/ws",
+          iceServers: [],
+          turnCredentialExpiresAt: 100_000,
+          activeTabId: 42,
+          activeFrameId: 0,
+          viewerSessionIds: [],
+          viewerCount: 0,
+          sourceFingerprint: null,
+          recoverByTimestamp: null,
+        },
+      }),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    const runtime = createHostRoomRuntime({
+      storage,
+      now: () => 1_000,
+    });
+
+    await runtime.restoreFromStorage();
+
+    expect(runtime.shouldRefreshHostIce()).toBe(false);
+  });
+
+  it("refreshes host ICE when TURN credentials are within the refresh skew and persists the update", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+        turnCredentialExpiresAt: 500_000,
+      }),
+    });
+
+    const runtime = createHostRoomRuntime({
+      storage,
+      now: () => 150_000,
+      apiBaseUrl: "http://localhost:8787",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [{ urls: ["turn:stale.screenmate.dev"] }],
+      turnCredentialExpiresAt: 150_500,
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    expect(runtime.shouldRefreshHostIce()).toBe(true);
+
+    const refreshed = await runtime.refreshHostIce();
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://localhost:8787/rooms/room_123/host/ice",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer host-token",
+        },
+      },
+    );
+    expect(refreshed).toEqual({
+      iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+      turnCredentialExpiresAt: 500_000,
+    });
+    expect(runtime.getAttachSession()).toEqual({
+      roomId: "room_123",
+      sessionId: "host_1",
+      viewerSessionIds: [],
+      iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+    });
+    expect(runtime.shouldRefreshHostIce()).toBe(false);
+    expect(storage.set).toHaveBeenLastCalledWith({
+      screenmateHostRoomSession: expect.objectContaining({
+        iceServers: [{ urls: ["turn:refreshed.screenmate.dev"] }],
+        turnCredentialExpiresAt: 500_000,
+      }),
+    });
+  });
+
   it("forwards viewer lifecycle events after updating runtime viewer sessions", async () => {
     const storage = {
       get: vi.fn().mockResolvedValue({}),
