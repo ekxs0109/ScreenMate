@@ -1,53 +1,34 @@
 import { browser } from "wxt/browser";
 import { useEffect, useState } from "react";
 import type { HostMessage, TabVideoSource } from "../background";
+import {
+  createHostRoomSnapshot,
+  type HostRoomLifecycle,
+  type HostRoomSnapshot,
+  type HostSourceState,
+} from "../background/host-room-snapshot";
 import { createLogger } from "../../lib/logger";
-
-export type HostStatus =
-  | "idle"
-  | "starting"
-  | "hosting"
-  | "streaming"
-  | "degraded"
-  | "closed";
-
-export type HostSnapshot = {
-  status: HostStatus;
-  roomId: string | null;
-  viewerCount: number;
-  errorMessage: string | null;
-  sourceLabel: string | null;
-};
-
-type RoomSessionSnapshot = {
-  roomLifecycle?: "idle" | "opening" | "open" | "degraded" | "closed";
-  sourceState?:
-    | "unattached"
-    | "attaching"
-    | "attached"
-    | "recovering"
-    | "missing";
-  roomId?: string | null;
-  viewerCount?: number;
-  sourceLabel?: string | null;
-  message?: string | null;
-};
-
-export function createHostSnapshot(
-  overrides: Partial<HostSnapshot> = {},
-): HostSnapshot {
-  return {
-    status: "idle",
-    roomId: null,
-    viewerCount: 0,
-    errorMessage: null,
-    sourceLabel: null,
-    ...overrides,
-  };
-}
 
 const POLL_INTERVAL_MS = 2_000;
 const popupLogger = createLogger("popup");
+
+type BusyAction = "primary" | "stop" | null;
+
+const ROOM_LIFECYCLES = new Set<HostRoomLifecycle>([
+  "idle",
+  "opening",
+  "open",
+  "degraded",
+  "closed",
+]);
+
+const SOURCE_STATES = new Set<HostSourceState>([
+  "unattached",
+  "attaching",
+  "attached",
+  "recovering",
+  "missing",
+]);
 
 export type PopupLogger = Pick<
   ReturnType<typeof createLogger>,
@@ -62,7 +43,7 @@ export function buildSnapshotRequest(): Extract<
 }
 
 export function buildStartSharingRequests(
-  snapshot: HostSnapshot,
+  snapshot: HostRoomSnapshot,
   selectedVideo: Pick<TabVideoSource, "frameId" | "id">,
 ): Array<
   | Extract<HostMessage, { type: "screenmate:start-room" }>
@@ -74,7 +55,7 @@ export function buildStartSharingRequests(
     videoId: selectedVideo.id,
   };
 
-  if (snapshot.roomId && snapshot.status !== "closed") {
+  if (snapshot.roomId && snapshot.roomLifecycle !== "closed") {
     return [attachRequest];
   }
 
@@ -95,9 +76,12 @@ export function buildStopSharingRequest(): Extract<
 }
 
 export function useHostControls() {
-  const [snapshot, setSnapshot] = useState<HostSnapshot>(createHostSnapshot());
+  const [snapshot, setSnapshot] = useState<HostRoomSnapshot>(
+    createHostRoomSnapshot(),
+  );
   const [videos, setVideos] = useState<TabVideoSource[]>([]);
   const [selectedVideoKey, setSelectedVideoKey] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<BusyAction>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -108,19 +92,21 @@ export function useHostControls() {
         .then((nextSnapshot) => {
           if (!isCancelled) {
             const normalizedSnapshot = normalizeSnapshot(nextSnapshot);
-            popupLogger.debug("Synced host snapshot.", normalizedSnapshot);
+            popupLogger.debug("Synced host room snapshot.", normalizedSnapshot);
             setSnapshot(normalizedSnapshot);
           }
         })
         .catch(() => {
           if (!isCancelled) {
-            setSnapshot(
-              createHostSnapshot({
-                errorMessage: "Could not load popup state.",
+            setSnapshot((current) =>
+              createHostRoomSnapshot({
+                ...current,
+                message: "Could not load popup state.",
               }),
             );
           }
         });
+
     const syncVideos = () =>
       browser.runtime
         .sendMessage({ type: "screenmate:list-videos" })
@@ -142,10 +128,17 @@ export function useHostControls() {
             selectedVideoKey,
             totalVideos: normalizedVideos.length,
           });
-          if (Array.isArray(nextVideos) && nextVideos.length > 0 && normalizedVideos.length === 0) {
-            popupLogger.warn("Video list response was dropped during normalization.", {
-              nextVideos,
-            });
+          if (
+            Array.isArray(nextVideos) &&
+            nextVideos.length > 0 &&
+            normalizedVideos.length === 0
+          ) {
+            popupLogger.warn(
+              "Video list response was dropped during normalization.",
+              {
+                nextVideos,
+              },
+            );
           }
           setVideos(normalizedVideos);
           setSelectedVideoKey((current) => {
@@ -236,162 +229,156 @@ export function useHostControls() {
     };
   }, [selectedVideoKey, videos]);
 
+  const startOrAttach = async () => {
+    const selectedVideo = videos.find(
+      (video) => getVideoSelectionKey(video) === selectedVideoKey,
+    );
+    const hasActiveRoom =
+      snapshot.roomId !== null && snapshot.roomLifecycle !== "closed";
+
+    popupLogger.info("Room action requested.", {
+      selectedVideoKey,
+    });
+
+    if (!selectedVideo) {
+      setSnapshot((current) =>
+        createHostRoomSnapshot({
+          ...current,
+          message: "No video elements found on this page.",
+        }),
+      );
+      return;
+    }
+
+    setBusyAction("primary");
+    setSnapshot((current) =>
+      createHostRoomSnapshot({
+        ...current,
+        roomLifecycle:
+          current.roomId !== null && current.roomLifecycle !== "closed"
+            ? current.roomLifecycle
+            : "opening",
+        sourceState:
+          current.roomId !== null && current.roomLifecycle !== "closed"
+            ? "attaching"
+            : current.sourceState,
+        activeFrameId: selectedVideo.frameId,
+        message: null,
+      }),
+    );
+
+    try {
+      let nextSnapshot = snapshot;
+
+      if (!hasActiveRoom) {
+        const startedRoom = await browser.runtime.sendMessage({
+          type: "screenmate:start-room",
+          frameId: selectedVideo.frameId,
+        });
+        nextSnapshot = normalizeSnapshot(startedRoom);
+        reportRoomActionResult(popupLogger, nextSnapshot, startedRoom);
+        setSnapshot(nextSnapshot);
+
+        if (!nextSnapshot.roomId) {
+          return;
+        }
+      }
+
+      const attachedSource = await browser.runtime.sendMessage({
+        type: "screenmate:attach-source",
+        frameId: selectedVideo.frameId,
+        videoId: selectedVideo.id,
+      });
+      nextSnapshot = normalizeSnapshot(attachedSource);
+      reportRoomActionResult(popupLogger, nextSnapshot, attachedSource);
+      setSnapshot(nextSnapshot);
+    } catch (error) {
+      popupLogger.error("Room action runtime request failed.", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      setSnapshot((current) =>
+        createHostRoomSnapshot({
+          ...current,
+          message:
+            error instanceof Error && error.message
+              ? error.message
+              : "Could not update the room in the active tab.",
+        }),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const stopRoom = async () => {
+    setBusyAction("stop");
+
+    try {
+      const nextSnapshot = normalizeSnapshot(
+        await browser.runtime.sendMessage(buildStopSharingRequest()),
+      );
+      popupLogger.info("Stop room returned a snapshot.", {
+        message: nextSnapshot.message,
+        roomId: nextSnapshot.roomId,
+        roomLifecycle: nextSnapshot.roomLifecycle,
+        sourceState: nextSnapshot.sourceState,
+      });
+      setSnapshot(nextSnapshot);
+    } catch {
+      setSnapshot((current) =>
+        createHostRoomSnapshot({
+          ...current,
+          message: "Could not stop the room in the active tab.",
+        }),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   return {
     snapshot,
     videos,
     selectedVideoId: selectedVideoKey,
     setSelectedVideoId: setSelectedVideoKey,
-    startSharing: () => {
-      const selectedVideo = videos.find(
-        (video) => getVideoSelectionKey(video) === selectedVideoKey,
-      );
-
-      popupLogger.info("Start sharing requested.", {
-        selectedVideoKey,
-      });
-      if (!selectedVideo) {
-        setSnapshot(
-          createHostSnapshot({
-            errorMessage: "No video elements found on this page.",
-          }),
-        );
-        return;
-      }
-
-      setSnapshot((current) =>
-        createHostSnapshot({
-          ...current,
-          status: "starting",
-          errorMessage: null,
-        }),
-      );
-
-      return buildStartSharingRequests(snapshot, selectedVideo)
-        .reduce<Promise<unknown>>(
-          (chain, message) =>
-            chain.then((previousResponse) => {
-              if (
-                message.type === "screenmate:attach-source" &&
-                previousResponse &&
-                typeof previousResponse === "object" &&
-                "roomId" in (previousResponse as Record<string, unknown>) &&
-                typeof (previousResponse as { roomId?: unknown }).roomId !== "string"
-              ) {
-                return previousResponse;
-              }
-
-              return browser.runtime.sendMessage(message);
-            }),
-          Promise.resolve(undefined),
-        )
-        .then((nextSnapshot) => {
-          const normalizedSnapshot = normalizeSnapshot(nextSnapshot);
-          reportStartSharingResult(
-            popupLogger,
-            normalizedSnapshot,
-            nextSnapshot,
-          );
-          setSnapshot(normalizedSnapshot);
-        })
-        .catch((error) => {
-          popupLogger.error("Start sharing runtime request failed.", {
-            error: error instanceof Error ? error.message : String(error),
-          });
-          setSnapshot(
-            createHostSnapshot({
-              errorMessage:
-                error instanceof Error && error.message
-                  ? error.message
-                  : "Could not start sharing in the active tab.",
-            }),
-          );
-        });
-    },
-    stopSharing: () =>
-      browser.runtime
-        .sendMessage(buildStopSharingRequest())
-        .then((nextSnapshot) => {
-          const normalizedSnapshot = normalizeSnapshot(nextSnapshot);
-          popupLogger.info("Stop sharing returned a snapshot.", {
-            errorMessage: normalizedSnapshot.errorMessage,
-            roomId: normalizedSnapshot.roomId,
-            status: normalizedSnapshot.status,
-          });
-          setSnapshot(normalizedSnapshot);
-        })
-        .catch(() => {
-          setSnapshot(
-            createHostSnapshot({
-              errorMessage: "Could not stop sharing in the active tab.",
-            }),
-          );
-        }),
+    startOrAttach,
+    stopRoom,
+    isBusy: busyAction !== null,
+    busyAction,
   };
 }
 
-export function normalizeSnapshot(value: unknown): HostSnapshot {
+export function normalizeSnapshot(value: unknown): HostRoomSnapshot {
   if (!value || typeof value !== "object") {
-    return createHostSnapshot();
+    return createHostRoomSnapshot();
   }
 
-  const candidate = value as Partial<HostSnapshot> & RoomSessionSnapshot;
+  const candidate = value as Partial<HostRoomSnapshot>;
 
-  if (
-    typeof candidate.roomLifecycle === "string" ||
-    typeof candidate.sourceState === "string"
-  ) {
-    const viewerCount =
-      typeof candidate.viewerCount === "number" ? candidate.viewerCount : 0;
-    return createHostSnapshot({
-      status: normalizeStatus(candidate),
-      roomId: typeof candidate.roomId === "string" ? candidate.roomId : null,
-      viewerCount,
-      errorMessage:
-        typeof candidate.message === "string" ? candidate.message : null,
-      sourceLabel:
-        typeof candidate.sourceLabel === "string" ? candidate.sourceLabel : null,
-    });
-  }
-
-  return createHostSnapshot({
-    status: candidate.status,
+  return createHostRoomSnapshot({
+    roomLifecycle: ROOM_LIFECYCLES.has(candidate.roomLifecycle as HostRoomLifecycle)
+      ? (candidate.roomLifecycle as HostRoomLifecycle)
+      : "idle",
+    sourceState: SOURCE_STATES.has(candidate.sourceState as HostSourceState)
+      ? (candidate.sourceState as HostSourceState)
+      : "unattached",
     roomId: typeof candidate.roomId === "string" ? candidate.roomId : null,
     viewerCount:
       typeof candidate.viewerCount === "number" ? candidate.viewerCount : 0,
-    errorMessage:
-      typeof candidate.errorMessage === "string" ? candidate.errorMessage : null,
     sourceLabel:
       typeof candidate.sourceLabel === "string" ? candidate.sourceLabel : null,
+    activeTabId:
+      typeof candidate.activeTabId === "number" ? candidate.activeTabId : null,
+    activeFrameId:
+      typeof candidate.activeFrameId === "number"
+        ? candidate.activeFrameId
+        : null,
+    recoverByTimestamp:
+      typeof candidate.recoverByTimestamp === "number"
+        ? candidate.recoverByTimestamp
+        : null,
+    message: typeof candidate.message === "string" ? candidate.message : null,
   });
-}
-
-function normalizeStatus(
-  snapshot: Partial<HostSnapshot> & RoomSessionSnapshot,
-): HostStatus {
-  switch (snapshot.roomLifecycle) {
-    case "opening":
-      return "starting";
-    case "closed":
-      return "closed";
-    case "degraded":
-      return "degraded";
-    case "open":
-      if (snapshot.sourceState === "attached") {
-        return (snapshot.viewerCount ?? 0) > 0 ? "streaming" : "hosting";
-      }
-
-      if (
-        snapshot.sourceState === "recovering" ||
-        snapshot.sourceState === "missing"
-      ) {
-        return "degraded";
-      }
-
-      return "hosting";
-    case "idle":
-    default:
-      return "idle";
-  }
 }
 
 function normalizeVideos(value: unknown): TabVideoSource[] {
@@ -419,24 +406,25 @@ function getVideoSelectionKey(video: TabVideoSource): string {
   return `${video.frameId}:${video.id}`;
 }
 
-export function reportStartSharingResult(
+export function reportRoomActionResult(
   logger: PopupLogger,
-  normalizedSnapshot: HostSnapshot,
+  normalizedSnapshot: HostRoomSnapshot,
   rawSnapshot: unknown,
 ) {
   const details = {
-    errorMessage: normalizedSnapshot.errorMessage,
+    message: normalizedSnapshot.message,
     normalizedSnapshot,
     rawSnapshot,
     roomId: normalizedSnapshot.roomId,
+    roomLifecycle: normalizedSnapshot.roomLifecycle,
     sourceLabel: normalizedSnapshot.sourceLabel,
-    status: normalizedSnapshot.status,
+    sourceState: normalizedSnapshot.sourceState,
   };
 
-  if (normalizedSnapshot.errorMessage) {
-    logger.error("Start sharing returned an error snapshot.", details);
+  if (normalizedSnapshot.message && normalizedSnapshot.sourceState !== "attached") {
+    logger.error("Room action returned an error snapshot.", details);
     return;
   }
 
-  logger.info("Start sharing returned a snapshot.", details);
+  logger.info("Room action returned a snapshot.", details);
 }

@@ -2,12 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildStartSharingRequests,
   buildStopSharingRequest,
-  createHostSnapshot,
   normalizeSnapshot,
-  reportStartSharingResult,
-  type HostSnapshot,
+  reportRoomActionResult,
   type PopupLogger,
 } from "../entrypoints/popup/useHostControls";
+import { createHostRoomSnapshot } from "../entrypoints/background/host-room-snapshot";
 
 function createLoggerDouble(): PopupLogger {
   return {
@@ -17,41 +16,47 @@ function createLoggerDouble(): PopupLogger {
   };
 }
 
-describe("reportStartSharingResult", () => {
+describe("reportRoomActionResult", () => {
   it("logs error snapshots with error severity", () => {
     const logger = createLoggerDouble();
-    const snapshot: HostSnapshot = createHostSnapshot({
-      errorMessage: "Failed to fetch",
+    const snapshot = createHostRoomSnapshot({
+      message: "Failed to fetch",
       sourceLabel: "blob:https://example.com/video",
     });
 
-    reportStartSharingResult(logger, snapshot, snapshot);
+    reportRoomActionResult(logger, snapshot, snapshot);
 
     expect(logger.error).toHaveBeenCalledWith(
-      "Start sharing returned an error snapshot.",
+      "Room action returned an error snapshot.",
       expect.objectContaining({
-        errorMessage: "Failed to fetch",
-        status: "idle",
+        message: "Failed to fetch",
+        roomLifecycle: "idle",
       }),
     );
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
-  it("logs successful snapshots with info severity", () => {
+  it("logs room attach success snapshots with info severity", () => {
     const logger = createLoggerDouble();
-    const snapshot: HostSnapshot = createHostSnapshot({
+    const snapshot = createHostRoomSnapshot({
+      roomLifecycle: "open",
+      sourceState: "attached",
       roomId: "room_123",
-      sourceLabel: "Video 1",
-      status: "hosting",
+      viewerCount: 1,
+      sourceLabel: "Video 2",
+      activeTabId: 42,
+      activeFrameId: 0,
+      recoverByTimestamp: null,
+      message: null,
     });
 
-    reportStartSharingResult(logger, snapshot, snapshot);
+    reportRoomActionResult(logger, snapshot, snapshot);
 
     expect(logger.info).toHaveBeenCalledWith(
-      "Start sharing returned a snapshot.",
+      "Room action returned a snapshot.",
       expect.objectContaining({
         roomId: "room_123",
-        status: "hosting",
+        sourceState: "attached",
       }),
     );
     expect(logger.error).not.toHaveBeenCalled();
@@ -59,7 +64,7 @@ describe("reportStartSharingResult", () => {
 });
 
 describe("normalizeSnapshot", () => {
-  it("maps room-runtime snapshots into popup compatibility state", () => {
+  it("maps room-runtime snapshots into popup room state", () => {
     expect(
       normalizeSnapshot({
         roomLifecycle: "open",
@@ -70,11 +75,15 @@ describe("normalizeSnapshot", () => {
         message: null,
       }),
     ).toEqual({
-      status: "streaming",
+      roomLifecycle: "open",
+      sourceState: "attached",
       roomId: "room_123",
       viewerCount: 2,
-      errorMessage: null,
       sourceLabel: "Video 1",
+      activeTabId: null,
+      activeFrameId: null,
+      recoverByTimestamp: null,
+      message: null,
     });
   });
 });
@@ -82,7 +91,7 @@ describe("normalizeSnapshot", () => {
 describe("popup compatibility messages", () => {
   it("builds room-start then attach requests when no room exists yet", () => {
     expect(
-      buildStartSharingRequests(createHostSnapshot(), {
+      buildStartSharingRequests(createHostRoomSnapshot(), {
         id: "screenmate-video-1",
         frameId: 7,
       }),
@@ -102,9 +111,9 @@ describe("popup compatibility messages", () => {
   it("builds attach-only and stop-room requests for an existing room", () => {
     expect(
       buildStartSharingRequests(
-        createHostSnapshot({
+        createHostRoomSnapshot({
+          roomLifecycle: "open",
           roomId: "room_123",
-          status: "hosting",
         }),
         {
           id: "screenmate-video-1",

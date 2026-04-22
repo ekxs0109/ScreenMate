@@ -1,11 +1,42 @@
 .popup-shell {
-  min-width: 280px;
+  min-width: 300px;
   padding: 16px;
   display: grid;
   gap: 12px;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   background: linear-gradient(180deg, #081018 0%, #0f172a 100%);
   color: #e2e8f0;
+}
+
+.popup-header {
+  display: grid;
+  gap: 6px;
+}
+
+.popup-header h1 {
+  margin: 0;
+}
+
+.popup-status-text {
+  margin: 0;
+  color: #cbd5e1;
+}
+
+.popup-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.popup-status-card {
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.popup-status-card p:last-child {
+  margin: 0;
 }
 
 .popup-shell button {
@@ -16,14 +47,16 @@
   background: linear-gradient(135deg, #14b8a6, #0f766e);
   color: #f8fafc;
   font-weight: 600;
+  cursor: pointer;
 }
 
 .popup-shell button[disabled] {
   opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .popup-label {
-  margin-bottom: -8px;
+  margin: 0 0 -8px;
   color: #94a3b8;
   font-size: 12px;
   text-transform: uppercase;
@@ -62,5 +95,16 @@
 }
 
 .popup-error {
+  margin: 0;
   color: #fca5a5;
+}
+
+.popup-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.popup-secondary-button {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.3);
 }
