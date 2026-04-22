@@ -7,7 +7,6 @@ import type { CloudflareBindings } from "../env.js";
 
 type SessionRole = "host" | "viewer";
 type RoomLifecycleState =
-  | "idle"
   | "hosting"
   | "streaming"
   | "degraded"
@@ -212,12 +211,10 @@ export class RoomState {
 
   getStateSnapshot(): RoomStateSnapshot {
     const viewerCount = this.viewers.size;
-    let state: RoomLifecycleState = "idle";
+    let state: RoomLifecycleState = "hosting";
 
     if (this.isClosed()) {
       state = "closed";
-    } else if (!this.hostConnection) {
-      state = "idle";
     } else if (this.sourceState !== "attached") {
       state = "degraded";
     } else if (viewerCount > 0) {

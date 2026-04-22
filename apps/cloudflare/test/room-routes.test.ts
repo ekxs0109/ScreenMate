@@ -68,7 +68,7 @@ describe("room routes", () => {
 
       return Response.json({
         roomId,
-        state: "idle",
+        state: "degraded",
         hostConnected: false,
         viewerCount: 0,
       });

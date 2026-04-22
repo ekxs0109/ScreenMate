@@ -62,6 +62,26 @@ function createSocketPair() {
 }
 
 describe("RoomState", () => {
+  it("reports a newly created room with a missing source as degraded", () => {
+    const room = new RoomState({
+      roomId: "room_demo",
+      hostSessionId: "host_1",
+      createdAt: 1,
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      closedAt: null,
+      closedReason: null,
+    });
+
+    expect(room.initialize()).toEqual({
+      roomId: "room_demo",
+      hostSessionId: "host_1",
+      hostConnected: false,
+      viewerCount: 0,
+      state: "degraded",
+      sourceState: "missing",
+    });
+  });
+
   it("tracks host and viewer presence and reports a missing source until the host publishes room state", () => {
     const room = new RoomState({
       roomId: "room_demo",
