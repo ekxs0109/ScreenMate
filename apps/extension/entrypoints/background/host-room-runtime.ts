@@ -76,29 +76,35 @@ export function createHostRoomRuntime(options: {
       return store.getSnapshot();
     },
     async setAttachedSource(sourceLabel: string, fingerprint: SourceFingerprint) {
-      if (session) {
-        session = {
-          ...session,
-          sourceFingerprint: fingerprint,
-          recoverByTimestamp: null,
-        };
+      if (!session) {
+        return store.getSnapshot();
       }
+
+      session = {
+        ...session,
+        sourceFingerprint: fingerprint,
+        recoverByTimestamp: null,
+      };
       store.setAttached(sourceLabel);
       await persist();
       return store.getSnapshot();
     },
     async markRecovering(message: string) {
-      const next = store.markRecovering(message);
-      if (session) {
-        session = { ...session, recoverByTimestamp: next.recoverByTimestamp };
+      if (!session) {
+        return store.getSnapshot();
       }
+
+      const next = store.markRecovering(message);
+      session = { ...session, recoverByTimestamp: next.recoverByTimestamp };
       await persist();
       return next;
     },
     async markMissing(message: string) {
-      if (session) {
-        session = { ...session, recoverByTimestamp: null };
+      if (!session) {
+        return store.getSnapshot();
       }
+
+      session = { ...session, recoverByTimestamp: null };
       const next = store.markMissing(message);
       await persist();
       return next;
@@ -118,7 +124,10 @@ export function createHostRoomRuntime(options: {
       session = stored;
       store.openRoom(stored);
       if (stored.recoverByTimestamp && stored.recoverByTimestamp > now()) {
-        store.markRecovering("Recovering video source after background restart.");
+        store.markRecovering(
+          "Recovering video source after background restart.",
+          stored.recoverByTimestamp,
+        );
       } else {
         store.markMissing("No video attached.");
       }

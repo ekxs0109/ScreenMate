@@ -94,13 +94,16 @@ export function createHostRoomStore(
       };
       return snapshot;
     },
-    markRecovering(message: string) {
+    markRecovering(
+      message: string,
+      recoverByTimestamp = now() + recoverWindowMs,
+    ) {
       snapshot = {
         ...snapshot,
         roomLifecycle: "degraded",
         sourceState: "recovering",
         message,
-        recoverByTimestamp: now() + recoverWindowMs,
+        recoverByTimestamp,
       };
       return snapshot;
     },

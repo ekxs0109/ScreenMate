@@ -36,4 +36,36 @@ describe("createHostRoomStore", () => {
       }),
     );
   });
+
+  it("preserves an existing recovery deadline when restoring recovery state", () => {
+    const store = createHostRoomStore(() => 1_000);
+
+    store.openRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      sourceFingerprint: null,
+      recoverByTimestamp: 5_000,
+    });
+    store.markRecovering("Background restored.", 5_000);
+
+    expect(store.getSnapshot()).toEqual(
+      createHostRoomSnapshot({
+        roomLifecycle: "degraded",
+        sourceState: "recovering",
+        roomId: "room_123",
+        activeTabId: 42,
+        activeFrameId: 0,
+        viewerCount: 0,
+        message: "Background restored.",
+        recoverByTimestamp: 5_000,
+      }),
+    );
+  });
 });
