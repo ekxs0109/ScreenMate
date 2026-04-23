@@ -151,3 +151,4 @@ apps/server/.wrangler/
 apps/extension/.output/
 apps/extension/.wxt/
 docs/.DS_Store
+ui_test/
