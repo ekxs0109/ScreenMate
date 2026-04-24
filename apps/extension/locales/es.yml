@@ -1,0 +1,39 @@
+appName: SyncPlay
+tabSource: Orígenes
+tabRoom: Sala Ajustes
+tabChat: Chat
+sourceSniff: Reconocer
+sourceScreen: Compartir Pantalla
+sourceUpload: Subir Archivo
+detected: Medios detectados
+mockOrigin: Pestaña
+refreshSniff: Refrescar
+noVideo: No se detectó video en esta página.
+captureTitle: Capturar pantalla o ventana
+captureDescription: Comparte una pestaña, una ventana de app o todo el escritorio.
+captureButton: Seleccionar contenido
+screenReady: Pantalla lista
+screenReadyDescription: Fuente capturada. Haz clic abajo para iniciar la sala.
+reselect: Volver a elegir
+uploadDropzone: Haz clic o arrastra archivos de video
+roomId: ID Sala
+openRoom: Entrar
+passwordPlaceholder: Dejar en blanco para sin contraseña
+save: Guardar
+saved: Guardado
+viewerList: Conexiones de Espectadores
+viewerName: Nombre
+connType: Método
+connPing: Ping
+notSharedYet: No compartido
+cancel: Cancelar
+changeSource: Cambiar Fuente
+generateShare: Crear Sala
+endShare: Finalizar
+roomChat: Chat
+chatPlaceholder: Di algo...
+popout: Ventana
+themeLabel: Tema
+themeLight: Claro
+themeDark: Oscuro
+themeSystem: Sistema

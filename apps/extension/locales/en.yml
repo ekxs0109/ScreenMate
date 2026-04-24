@@ -1,0 +1,39 @@
+appName: SyncPlay
+tabSource: Source
+tabRoom: Room Settings
+tabChat: Room Chat
+sourceSniff: Site Sniffer
+sourceScreen: Screen Share
+sourceUpload: Local Upload
+detected: Detected Video Resources
+mockOrigin: Tab
+refreshSniff: Rescan
+noVideo: No video detected on this page.
+captureTitle: Capture Screen/Window
+captureDescription: Share a specific tab, app window, or entire desktop.
+captureButton: Select Content
+screenReady: Screen Ready
+screenReadyDescription: Source captured. Click the button below to start sharing.
+reselect: Reselect
+uploadDropzone: Click or drag video files
+roomId: Room ID
+openRoom: Open Room
+passwordPlaceholder: Leave blank for none
+save: Save
+saved: Saved
+viewerList: Viewer Connection Status
+viewerName: Name
+connType: Method
+connPing: Ping
+notSharedYet: No video shared yet
+cancel: Cancel
+changeSource: Change Source
+generateShare: Start Sync Room
+endShare: End Share
+roomChat: Room Chat
+chatPlaceholder: Say something...
+popout: Pop Out
+themeLabel: Theme
+themeLight: Light
+themeDark: Dark
+themeSystem: System
