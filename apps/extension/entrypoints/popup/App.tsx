@@ -1,27 +1,16 @@
 import "./popup.css";
-import { startTransition, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useMemo } from "react";
 import { useTheme } from "next-themes";
 import { buildScreenMateViewerRoomUrl } from "../../lib/config";
 import { cn } from "../../lib/utils";
-import {
-  getExtensionDictionary,
-  getExtensionLanguagePreference,
-  normalizeExtensionLocale,
-  persistExtensionLanguagePreference,
-  resolveExtensionLanguagePreference,
-  type ExtensionLanguagePreference,
-} from "./i18n";
+import { getExtensionDictionary } from "./i18n";
 import { ExtensionPopupPresenter } from "./presenter";
 import { usePopupUiStore } from "./popup-ui-store";
 import { buildExtensionSceneModel } from "./scene-adapter";
 import { useHostControls } from "./useHostControls";
 
 function App() {
-  const { i18n } = useTranslation();
   const { resolvedTheme, setTheme, theme } = useTheme();
-  const [languagePreference, setLanguagePreference] =
-    useState<ExtensionLanguagePreference>(getExtensionLanguagePreference);
   const activeTab = usePopupUiStore((state) => state.activeTab);
   const activeSourceType = usePopupUiStore((state) => state.activeSourceType);
   const screenReady = usePopupUiStore((state) => state.screenReady);
@@ -69,8 +58,7 @@ function App() {
     new URLSearchParams(window.location.search).get("mode") === "popout"
       ? "popout"
       : "popup";
-  const language = normalizeExtensionLocale(i18n.resolvedLanguage ?? i18n.language);
-  const copy = getExtensionDictionary(language);
+  const copy = getExtensionDictionary();
   const viewerRoomUrl = snapshot.roomId
     ? buildScreenMateViewerRoomUrl(snapshot.roomId)
     : null;
@@ -130,20 +118,9 @@ function App() {
         windowMode={windowMode}
         scene={scene}
         copy={copy}
-        languagePreference={languagePreference}
         themeMode={theme === "light" || theme === "dark" ? theme : "system"}
         resolvedThemeMode={resolvedTheme === "light" ? "light" : "dark"}
         sniffScrollTop={sniffScrollTop}
-        onLanguageChange={(nextLanguage) => {
-          const preference = nextLanguage as ExtensionLanguagePreference;
-          setLanguagePreference(preference);
-          persistExtensionLanguagePreference(preference);
-          startTransition(() => {
-            void i18n.changeLanguage(
-              resolveExtensionLanguagePreference(preference),
-            );
-          });
-        }}
         onThemeToggle={() => {
           const nextTheme =
             theme === "system"

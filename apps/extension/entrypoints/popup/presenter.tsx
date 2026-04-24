@@ -6,7 +6,6 @@ import {
   Check,
   Copy,
   ExternalLink,
-  Globe,
   Hash,
   Info,
   Key,
@@ -24,31 +23,18 @@ import {
   Users,
   X,
 } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { cn } from "../../lib/utils";
-import type {
-  ExtensionDictionary,
-  ExtensionLanguagePreference,
-} from "./i18n";
+import type { ExtensionDictionary } from "./i18n";
 import type { ExtensionSceneModel, PopupTab, SourceType } from "./scene-model";
 
 export function ExtensionPopupPresenter({
   windowMode,
   scene,
   copy,
-  languagePreference,
   themeMode,
   resolvedThemeMode,
   sniffScrollTop,
-  onLanguageChange,
   onThemeToggle,
   onOpenPopout,
   onSelectTab,
@@ -71,11 +57,9 @@ export function ExtensionPopupPresenter({
   windowMode: "popup" | "popout";
   scene: ExtensionSceneModel;
   copy: ExtensionDictionary;
-  languagePreference: ExtensionLanguagePreference;
   themeMode: "light" | "dark" | "system";
   resolvedThemeMode: "light" | "dark";
   sniffScrollTop: number;
-  onLanguageChange: (language: string) => void;
   onThemeToggle: () => void;
   onOpenPopout: () => void;
   onSelectTab: (tab: PopupTab) => void;
@@ -138,21 +122,6 @@ export function ExtensionPopupPresenter({
       <header className="shrink-0 flex items-center justify-between p-4 border-b border-border bg-zinc-50/80 dark:bg-zinc-950/80 backdrop-blur">
         <span className="font-bold text-lg tracking-tight">{copy.appName}</span>
         <div className="flex items-center gap-1.5">
-          <Select value={languagePreference} onValueChange={onLanguageChange}>
-            <SelectTrigger aria-label={copy.languageLabel} className="h-8 w-[110px] gap-1.5 border-border bg-background px-2.5 text-xs font-medium shadow-sm">
-              <Globe className="size-3.5 shrink-0 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectGroup>
-                <SelectItem value="system">{copy.systemLabel}</SelectItem>
-                <SelectItem value="zh">中文</SelectItem>
-                <SelectItem value="en">English</SelectItem>
-                <SelectItem value="ja">日本語</SelectItem>
-                <SelectItem value="es">Español</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
           <button
             aria-label={copy.themeLabel}
             className={cn(

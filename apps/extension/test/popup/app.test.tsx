@@ -2,6 +2,55 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const messages = {
+  appName: "SyncPlay",
+  tabSource: "Source",
+  tabRoom: "Room Settings",
+  tabChat: "Room Chat",
+  sourceSniff: "Site Sniffer",
+  sourceScreen: "Screen Share",
+  sourceUpload: "Local Upload",
+  detected: "Detected Video Resources",
+  mockOrigin: "Tab",
+  refreshSniff: "Rescan",
+  noVideo: "No video detected on this page.",
+  captureTitle: "Capture Screen/Window",
+  captureDescription: "Share a specific tab, app window, or entire desktop.",
+  captureButton: "Select Content",
+  screenReady: "Screen Ready",
+  screenReadyDescription: "Source captured. Click the button below to start sharing.",
+  reselect: "Reselect",
+  uploadDropzone: "Click or drag video files",
+  roomId: "Room ID",
+  openRoom: "Open Room",
+  passwordPlaceholder: "Leave blank for none",
+  save: "Save",
+  saved: "Saved",
+  viewerList: "Viewer Connection Status",
+  viewerName: "Name",
+  connType: "Method",
+  connPing: "Ping",
+  notSharedYet: "No video shared yet",
+  cancel: "Cancel",
+  changeSource: "Change Source",
+  generateShare: "Start Sync Room",
+  endShare: "End Share",
+  roomChat: "Room Chat",
+  chatPlaceholder: "Say something...",
+  popout: "Pop Out",
+  themeLabel: "Theme",
+  themeLight: "Light",
+  themeDark: "Dark",
+  themeSystem: "System",
+};
+
+vi.mock("#i18n", () => ({
+  i18n: {
+    t: (key: keyof typeof messages) => messages[key] ?? `missing:${key}`,
+  },
+}));
+
 import { ExtensionPopupPresenter } from "../../entrypoints/popup/presenter";
 import { getExtensionDictionary } from "../../entrypoints/popup/i18n";
 import { buildExtensionSceneModel } from "../../entrypoints/popup/scene-adapter";
@@ -36,12 +85,10 @@ describe("ExtensionPopupPresenter", () => {
       <ExtensionPopupPresenter
         windowMode="popup"
         scene={scene}
-        copy={getExtensionDictionary("en")}
-        languagePreference="system"
+        copy={getExtensionDictionary()}
         themeMode="dark"
         resolvedThemeMode="dark"
         sniffScrollTop={0}
-        onLanguageChange={vi.fn()}
         onThemeToggle={vi.fn()}
         onOpenPopout={vi.fn()}
         onSelectTab={vi.fn()}
@@ -68,6 +115,7 @@ describe("ExtensionPopupPresenter", () => {
     expect(screen.getByRole("tab", { name: "Room Settings" })).toBeTruthy();
     expect(screen.getByText("Detected Video Resources")).toBeTruthy();
     expect(screen.getByText("Big Buck Bunny")).toBeTruthy();
+    expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.queryByText("Room open · attached")).toBeNull();
   });
 
@@ -91,12 +139,10 @@ describe("ExtensionPopupPresenter", () => {
       <ExtensionPopupPresenter
         windowMode="popup"
         scene={scene}
-        copy={getExtensionDictionary("en")}
-        languagePreference="system"
+        copy={getExtensionDictionary()}
         themeMode="dark"
         resolvedThemeMode="dark"
         sniffScrollTop={0}
-        onLanguageChange={vi.fn()}
         onThemeToggle={vi.fn()}
         onOpenPopout={vi.fn()}
         onSelectTab={vi.fn()}
@@ -145,12 +191,10 @@ describe("ExtensionPopupPresenter", () => {
       <ExtensionPopupPresenter
         windowMode="popup"
         scene={scene}
-        copy={getExtensionDictionary("en")}
-        languagePreference="system"
+        copy={getExtensionDictionary()}
         themeMode="dark"
         resolvedThemeMode="dark"
         sniffScrollTop={0}
-        onLanguageChange={vi.fn()}
         onThemeToggle={vi.fn()}
         onOpenPopout={vi.fn()}
         onSelectTab={vi.fn()}
@@ -196,12 +240,10 @@ describe("ExtensionPopupPresenter", () => {
       <ExtensionPopupPresenter
         windowMode="popup"
         scene={scene}
-        copy={getExtensionDictionary("en")}
-        languagePreference="system"
+        copy={getExtensionDictionary()}
         themeMode="dark"
         resolvedThemeMode="dark"
         sniffScrollTop={0}
-        onLanguageChange={vi.fn()}
         onThemeToggle={vi.fn()}
         onOpenPopout={vi.fn()}
         onSelectTab={vi.fn()}
@@ -258,12 +300,10 @@ describe("ExtensionPopupPresenter", () => {
       <ExtensionPopupPresenter
         windowMode="popup"
         scene={scene}
-        copy={getExtensionDictionary("en")}
-        languagePreference="system"
+        copy={getExtensionDictionary()}
         themeMode="dark"
         resolvedThemeMode="dark"
         sniffScrollTop={0}
-        onLanguageChange={vi.fn()}
         onThemeToggle={vi.fn()}
         onOpenPopout={vi.fn()}
         onSelectTab={vi.fn()}
