@@ -8,10 +8,17 @@
 - [ ] Build and load the extension from `apps/extension/.output/chrome-mv3`.
 - [ ] Open a page with at least one normal capturable `video` element.
 - [ ] Open the popup and verify it shows `Room idle · unattached` before sharing.
+- [ ] In the popup, verify the `Source`, `Room`, and conditional `Chat` tabs match the `ui_test` layout and no source-section element is missing.
+- [ ] Hover a sniffed source card in the popup and confirm the host page shows the yellow preview/highlight overlay on the corresponding video area.
+- [ ] After attaching a source, confirm a floating page-level `Room Chat` widget appears inside the page (not inside the popup).
+- [ ] In the popup, switch between `Page Sniffer`, `Screen Share`, and `Local Upload` and confirm all three sections render even when some actions are mock-backed.
 - [ ] Click `Start room` and confirm a real room code appears.
 - [ ] Attach the selected video and confirm the popup shows `attached`.
+- [ ] In the popup `Room` tab, confirm room ID, share link, password row, and viewer connection table all render together.
+- [ ] In the popup `Chat` tab, confirm existing system messages render and new local messages can be added.
 - [ ] Join from the viewer web app with the room code.
 - [ ] Confirm the viewer transitions from joining/waiting to connected.
+- [ ] Verify the viewer web app uses the migrated `ui_test` shell: live header, connection pills, custom player chrome, right sidebar timeline, identity row, and send box.
 - [ ] Refresh the host page and confirm the room code remains visible.
 - [ ] Confirm the popup shows `Recovering video source...` during automatic recovery.
 - [ ] Confirm the viewer stays in the room and shows `Host is reconnecting the video source`.

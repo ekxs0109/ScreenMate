@@ -1,5 +1,6 @@
 import { browser } from "wxt/browser";
-import { useEffect, useState } from "react";
+import { storage } from "wxt/utils/storage";
+import { useEffect, useRef, useState } from "react";
 import type { HostMessage, TabVideoSource } from "../background";
 import {
   createHostRoomSnapshot,
@@ -7,12 +8,23 @@ import {
   type HostRoomSnapshot,
   type HostSourceState,
 } from "../background/host-room-snapshot";
+import {
+  createEmptyVideoSniffState,
+  type VideoSniffState,
+} from "../background/video-source-cache";
 import { createLogger } from "../../lib/logger";
 
-const POLL_INTERVAL_MS = 2_000;
 const popupLogger = createLogger("popup");
+const MANUAL_REFRESH_SPINNER_MIN_MS = 650;
 
 type BusyAction = "primary" | "stop" | null;
+type SniffTabSummary = {
+  tabId: number;
+  title?: string;
+};
+type SyncOptions = {
+  minimumRefreshingMs?: number;
+};
 
 const ROOM_LIFECYCLES = new Set<HostRoomLifecycle>([
   "idle",
@@ -44,13 +56,14 @@ export function buildSnapshotRequest(): Extract<
 
 export function buildStartSharingRequests(
   snapshot: HostRoomSnapshot,
-  selectedVideo: Pick<TabVideoSource, "frameId" | "id">,
+  selectedVideo: Pick<TabVideoSource, "tabId" | "frameId" | "id">,
 ): Array<
   | Extract<HostMessage, { type: "screenmate:start-room" }>
   | Extract<HostMessage, { type: "screenmate:attach-source" }>
 > {
   const attachRequest: Extract<HostMessage, { type: "screenmate:attach-source" }> = {
     type: "screenmate:attach-source",
+    tabId: selectedVideo.tabId,
     frameId: selectedVideo.frameId,
     videoId: selectedVideo.id,
   };
@@ -62,6 +75,7 @@ export function buildStartSharingRequests(
   return [
     {
       type: "screenmate:start-room",
+      tabId: selectedVideo.tabId,
       frameId: selectedVideo.frameId,
     },
     attachRequest,
@@ -75,16 +89,72 @@ export function buildStopSharingRequest(): Extract<
   return { type: "screenmate:stop-room" };
 }
 
-export function useHostControls() {
+export function useHostControls({
+  persistedSelectedVideoId,
+  onSelectedVideoChange,
+}: {
+  persistedSelectedVideoId?: string | null;
+  onSelectedVideoChange?: (selectedVideoId: string | null) => void;
+} = {}) {
   const [snapshot, setSnapshot] = useState<HostRoomSnapshot>(
     createHostRoomSnapshot(),
   );
   const [videos, setVideos] = useState<TabVideoSource[]>([]);
-  const [selectedVideoKey, setSelectedVideoKey] = useState<string | null>(null);
+  const [sniffTabs, setSniffTabs] = useState<SniffTabSummary[]>([]);
+  const [selectedVideoKey, setSelectedVideoKeyState] = useState<string | null>(
+    persistedSelectedVideoId ?? null,
+  );
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
+  const [isSniffRefreshing, setIsSniffRefreshing] = useState(false);
+  const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
+  const refreshVideosRef = useRef<
+    (options?: SyncOptions) => Promise<void>
+  >(
+    async () => {},
+  );
+  const selectedVideoKeyRef = useRef<string | null>(
+    persistedSelectedVideoId ?? null,
+  );
+  const desiredSelectedVideoKeyRef = useRef<string | null>(
+    persistedSelectedVideoId ?? null,
+  );
+
+  const setSelectedVideoKey = (
+    nextSelectedVideoKey: string | null,
+    options: { persist?: boolean } = {},
+  ) => {
+    selectedVideoKeyRef.current = nextSelectedVideoKey;
+    setSelectedVideoKeyState(nextSelectedVideoKey);
+    if (options.persist !== false) {
+      desiredSelectedVideoKeyRef.current = nextSelectedVideoKey;
+      onSelectedVideoChange?.(nextSelectedVideoKey);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof persistedSelectedVideoId === "undefined") {
+      return;
+    }
+
+    desiredSelectedVideoKeyRef.current = persistedSelectedVideoId;
+    if (videos.length === 0) {
+      return;
+    }
+
+    const nextSelectedVideoKey = resolvePopupSelectedVideoKey({
+      currentSelectedVideoKey: selectedVideoKeyRef.current,
+      desiredSelectedVideoKey: persistedSelectedVideoId,
+      videos,
+    });
+
+    if (nextSelectedVideoKey !== selectedVideoKeyRef.current) {
+      setSelectedVideoKey(nextSelectedVideoKey, { persist: false });
+    }
+  }, [persistedSelectedVideoId, videos]);
 
   useEffect(() => {
     let isCancelled = false;
+    const videoSniffStateStorage = createVideoSniffStateStorage();
 
     const syncSnapshot = () =>
       browser.runtime
@@ -107,119 +177,150 @@ export function useHostControls() {
           }
         });
 
-    const syncVideos = () =>
-      browser.runtime
-        .sendMessage({ type: "screenmate:list-videos" })
-        .then((nextVideos) => {
-          if (isCancelled) {
-            return;
-          }
+    const applyVideoSniffState = (nextState: unknown) => {
+      if (isCancelled) {
+        return;
+      }
 
-          const normalizedVideos = normalizeVideos(nextVideos);
-          popupLogger.info("Synced page videos.", {
-            firstRawVideo:
-              Array.isArray(nextVideos) && nextVideos.length > 0
-                ? nextVideos[0]
-                : null,
-            normalizedFirstVideo:
-              normalizedVideos.length > 0 ? normalizedVideos[0] : null,
-            rawIsArray: Array.isArray(nextVideos),
-            rawLength: Array.isArray(nextVideos) ? nextVideos.length : null,
-            selectedVideoKey,
-            totalVideos: normalizedVideos.length,
-          });
-          if (
-            Array.isArray(nextVideos) &&
-            nextVideos.length > 0 &&
-            normalizedVideos.length === 0
-          ) {
-            popupLogger.warn(
-              "Video list response was dropped during normalization.",
-              {
-                nextVideos,
-              },
-            );
-          }
-          setVideos(normalizedVideos);
-          setSelectedVideoKey((current) => {
-            if (
-              current &&
-              normalizedVideos.some(
-                (video) => getVideoSelectionKey(video) === current,
-              )
-            ) {
-              return current;
-            }
+      const normalizedState = normalizeVideoSniffState(nextState);
+      const normalizedVideos = normalizeVideos(normalizedState.videos);
+      const normalizedTabs = normalizeSniffTabs(normalizedState.tabs);
+      popupLogger.debug("Synced video sniff state.", {
+        selectedVideoId: selectedVideoKeyRef.current,
+        status: normalizedState.status,
+        tabCount: normalizedTabs.length,
+        totalVideos: normalizedVideos.length,
+        updatedAt: normalizedState.updatedAt,
+      });
 
-            return normalizedVideos[0]
-              ? getVideoSelectionKey(normalizedVideos[0])
-              : null;
+      setSniffTabs(normalizedTabs);
+      setVideos(normalizedVideos);
+      setIsSniffRefreshing(
+        normalizedState.status === "refreshing" || normalizedState.isScanning,
+      );
+
+      const desiredSelectedVideoKey = desiredSelectedVideoKeyRef.current;
+      const currentSelectedVideoKey =
+        desiredSelectedVideoKey ?? selectedVideoKeyRef.current;
+      const nextSelectedVideoKey = resolvePopupSelectedVideoKey({
+        currentSelectedVideoKey,
+        desiredSelectedVideoKey,
+        videos: normalizedVideos,
+      });
+      const shouldPersistResolvedSelection =
+        nextSelectedVideoKey === desiredSelectedVideoKey;
+
+      setSelectedVideoKey(nextSelectedVideoKey, {
+        persist: shouldPersistResolvedSelection,
+      });
+    };
+
+    const syncCachedVideoSniffState = () =>
+      videoSniffStateStorage
+        .getValue()
+        .then(applyVideoSniffState)
+        .catch((error) => {
+          popupLogger.warn("Could not read cached video sniff state.", {
+            error: error instanceof Error ? error.message : String(error),
           });
-        })
-        .catch(() => {
-          if (!isCancelled) {
-            setVideos([]);
-            setSelectedVideoKey(null);
-          }
         });
 
-    const syncAll = () => {
-      void syncSnapshot();
-      void syncVideos();
+    const ensureVideoSniffState = () =>
+      browser.runtime
+        .sendMessage({ type: "screenmate:ensure-video-sniff-state" })
+        .then(applyVideoSniffState)
+        .catch((error) => {
+          popupLogger.warn("Could not ensure video sniff state.", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+    const refreshVideos = async (options: SyncOptions = {}) => {
+      const startedAt = Date.now();
+      setIsManualRefreshPending(true);
+      try {
+        const nextState = await browser.runtime.sendMessage({
+          type: "screenmate:refresh-video-sniff-state",
+        });
+        applyVideoSniffState(nextState);
+      } catch (error) {
+        popupLogger.warn("Could not refresh video sniff state.", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        await waitForMinimumRefreshDuration({
+          elapsedMs: Date.now() - startedAt,
+          minimumMs: options.minimumRefreshingMs ?? 0,
+        });
+        if (!isCancelled) {
+          setIsManualRefreshPending(false);
+        }
+      }
     };
+    refreshVideosRef.current = refreshVideos;
 
     const handleTabActivated = () => {
-      popupLogger.info("Active tab changed. Refreshing popup state.");
-      syncAll();
+      popupLogger.info("Active tab changed. Ensuring popup state.");
+      void syncSnapshot();
+      void ensureVideoSniffState();
     };
 
-    const handleTabUpdated = () => {
-      popupLogger.info("Tab updated. Refreshing popup state.");
-      syncAll();
+    const handleTabUpdated = (
+      _tabId: number,
+      changeInfo: { status?: string },
+      tab: { active?: boolean },
+    ) => {
+      if (!tab.active || changeInfo.status !== "complete") {
+        return;
+      }
+
+      popupLogger.info("Tab updated. Ensuring popup state.");
+      void syncSnapshot();
+      void ensureVideoSniffState();
     };
 
-    const handleWindowFocus = () => {
-      popupLogger.info("Popup window focus changed. Refreshing popup state.");
-      syncAll();
+    const handleMessage = (message: unknown) => {
+      if (!isRecord(message)) {
+        return;
+      }
+
+      if (message.type === "screenmate:content-ready") {
+        popupLogger.debug("Received content notification. Waiting for sniff state storage update.", {
+          type: message.type,
+        });
+        return;
+      }
+
+      if (message.type === "screenmate:source-detached") {
+        popupLogger.info("Received source detach notification. Refreshing room snapshot.", {
+          type: message.type,
+        });
+        void syncSnapshot();
+      }
     };
 
-    syncAll();
-    const intervalId = window.setInterval(() => {
-      syncAll();
-    }, POLL_INTERVAL_MS);
+    const unwatchVideoSniffState = videoSniffStateStorage.watch((nextState) => {
+      applyVideoSniffState(nextState);
+    });
+
+    void syncSnapshot();
+    void syncCachedVideoSniffState().then(() => {
+      void ensureVideoSniffState();
+    });
     browser.tabs.onActivated.addListener(handleTabActivated);
     browser.tabs.onUpdated.addListener(handleTabUpdated);
-    window.addEventListener("focus", handleWindowFocus);
-    document.addEventListener("visibilitychange", handleWindowFocus);
+    browser.runtime.onMessage.addListener(handleMessage);
 
     return () => {
       isCancelled = true;
-      window.clearInterval(intervalId);
+      unwatchVideoSniffState();
       browser.tabs.onActivated.removeListener(handleTabActivated);
       browser.tabs.onUpdated.removeListener(handleTabUpdated);
-      window.removeEventListener("focus", handleWindowFocus);
-      document.removeEventListener("visibilitychange", handleWindowFocus);
+      browser.runtime.onMessage.removeListener(handleMessage);
     };
   }, []);
 
   useEffect(() => {
-    const selectedVideo = videos.find(
-      (video) => getVideoSelectionKey(video) === selectedVideoKey,
-    );
-    const previewMessage = selectedVideo
-      ? {
-          type: "screenmate:preview-video" as const,
-          frameId: selectedVideo.frameId,
-          label: selectedVideo.label,
-          videoId: selectedVideo.id,
-        }
-      : ({ type: "screenmate:clear-preview" } as const);
-
-    popupLogger.info("Updating page preview selection.", previewMessage);
-    void browser.runtime.sendMessage(previewMessage).catch(() => {
-      popupLogger.warn("Could not update page preview selection.");
-    });
-
     return () => {
       void browser.runtime
         .sendMessage({ type: "screenmate:clear-preview" })
@@ -227,7 +328,7 @@ export function useHostControls() {
           popupLogger.warn("Could not clear page preview on popup cleanup.");
         });
     };
-  }, [selectedVideoKey, videos]);
+  }, []);
 
   const startOrAttach = async () => {
     const selectedVideo = videos.find(
@@ -302,6 +403,36 @@ export function useHostControls() {
     }
   };
 
+  const previewVideo = (videoKey: string) => {
+    const previewVideo = videos.find(
+      (video) => getVideoSelectionKey(video) === videoKey,
+    );
+
+    if (!previewVideo) {
+      return;
+    }
+
+    void browser.runtime
+      .sendMessage({
+        type: "screenmate:preview-video",
+        tabId: previewVideo.tabId,
+        frameId: previewVideo.frameId,
+        label: previewVideo.label,
+        videoId: previewVideo.id,
+      } satisfies Extract<HostMessage, { type: "screenmate:preview-video" }>)
+      .catch(() => {
+        popupLogger.warn("Could not update page preview selection.");
+      });
+  };
+
+  const clearVideoPreview = () => {
+    void browser.runtime
+      .sendMessage({ type: "screenmate:clear-preview" })
+      .catch(() => {
+        popupLogger.warn("Could not clear page preview.");
+      });
+  };
+
   const stopRoom = async () => {
     setBusyAction("stop");
 
@@ -330,14 +461,33 @@ export function useHostControls() {
 
   return {
     snapshot,
+    sniffTabs,
     videos,
     selectedVideoId: selectedVideoKey,
-    setSelectedVideoId: setSelectedVideoKey,
+    setSelectedVideoId: (nextSelectedVideoKey: string | null) => {
+      setSelectedVideoKey(nextSelectedVideoKey, { persist: true });
+    },
+    refreshVideos: () =>
+      refreshVideosRef.current({
+        minimumRefreshingMs: MANUAL_REFRESH_SPINNER_MIN_MS,
+      }),
+    previewVideo,
+    clearVideoPreview,
     startOrAttach,
     stopRoom,
     isBusy: busyAction !== null,
     busyAction,
+    isRefreshing: isSniffRefreshing || isManualRefreshPending,
   };
+}
+
+function createVideoSniffStateStorage() {
+  return storage.defineItem<VideoSniffState>(
+    "session:screenmate-video-sniff-state",
+    {
+      fallback: createEmptyVideoSniffState(),
+    },
+  );
 }
 
 export function normalizeSnapshot(value: unknown): HostRoomSnapshot {
@@ -385,17 +535,172 @@ function normalizeVideos(value: unknown): TabVideoSource[] {
         item !== null &&
         typeof (item as TabVideoSource).id === "string" &&
         typeof (item as TabVideoSource).label === "string" &&
+        typeof (item as TabVideoSource).tabId === "number" &&
         typeof (item as TabVideoSource).frameId === "number",
     )
     .map((item) => ({
       id: item.id,
       label: item.label,
+      primaryUrl: typeof item.primaryUrl === "string" ? item.primaryUrl : null,
+      posterUrl: typeof item.posterUrl === "string" ? item.posterUrl : null,
+      thumbnailUrl:
+        typeof item.thumbnailUrl === "string" ? item.thumbnailUrl : null,
+      width: typeof item.width === "number" ? item.width : null,
+      height: typeof item.height === "number" ? item.height : null,
+      duration: typeof item.duration === "number" ? item.duration : null,
+      format: typeof item.format === "string" ? item.format : null,
+      isVisible: item.isVisible !== false,
+      tabId: item.tabId,
+      tabTitle: typeof item.tabTitle === "string" ? item.tabTitle : undefined,
       frameId: item.frameId,
     }));
 }
 
-function getVideoSelectionKey(video: TabVideoSource): string {
-  return `${video.frameId}:${video.id}`;
+function normalizeVideoSniffState(value: unknown): VideoSniffState {
+  const fallback = createEmptyVideoSniffState();
+  if (!isRecord(value)) {
+    return fallback;
+  }
+
+  const status =
+    value.status === "idle" ||
+    value.status === "refreshing" ||
+    value.status === "success" ||
+    value.status === "error"
+      ? value.status
+      : value.isScanning === true
+        ? "refreshing"
+        : fallback.status;
+
+  return {
+    tabs: Array.isArray(value.tabs) ? normalizeSniffTabs(value.tabs) : [],
+    videos: Array.isArray(value.videos) ? normalizeVideos(value.videos) : [],
+    status,
+    isScanning: value.isScanning === true || status === "refreshing",
+    updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : null,
+    startedAt: typeof value.startedAt === "number" ? value.startedAt : null,
+    refreshId: typeof value.refreshId === "string" ? value.refreshId : null,
+    error: typeof value.error === "string" ? value.error : null,
+  };
+}
+
+function normalizeSniffTabs(value: unknown): SniffTabSummary[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(
+      (item): item is SniffTabSummary =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof (item as SniffTabSummary).tabId === "number",
+    )
+    .map((tab) => ({
+      tabId: tab.tabId,
+      title: typeof tab.title === "string" ? tab.title : undefined,
+    }));
+}
+
+export function resolveSelectedVideoKey(
+  selectedVideoKey: string | null | undefined,
+  videos: Array<Pick<TabVideoSource, "id" | "tabId" | "frameId">>,
+) {
+  if (
+    selectedVideoKey &&
+    videos.some((video) => getVideoSelectionKey(video) === selectedVideoKey)
+  ) {
+    return selectedVideoKey;
+  }
+
+  return videos[0] ? getVideoSelectionKey(videos[0]) : null;
+}
+
+export function resolvePopupSelectedVideoKey({
+  currentSelectedVideoKey,
+  desiredSelectedVideoKey,
+  videos,
+}: {
+  currentSelectedVideoKey: string | null | undefined;
+  desiredSelectedVideoKey: string | null | undefined;
+  videos: Array<Pick<TabVideoSource, "id" | "tabId" | "frameId">>;
+}) {
+  if (
+    desiredSelectedVideoKey &&
+    !videos.some((video) => getVideoSelectionKey(video) === desiredSelectedVideoKey)
+  ) {
+    return desiredSelectedVideoKey;
+  }
+
+  return resolveSelectedVideoKey(
+    desiredSelectedVideoKey ?? currentSelectedVideoKey,
+    videos,
+  );
+}
+
+export async function waitForMinimumRefreshDuration({
+  elapsedMs,
+  minimumMs,
+  sleep = sleepMs,
+}: {
+  elapsedMs: number;
+  minimumMs: number;
+  sleep?: (durationMs: number) => Promise<void>;
+}) {
+  const remainingMs = minimumMs - elapsedMs;
+  if (remainingMs <= 0) {
+    return;
+  }
+
+  await sleep(remainingMs);
+}
+
+function sleepMs(durationMs: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, durationMs);
+  });
+}
+
+export function shouldRetryEmptyVideoList({
+  retryCount,
+  retryLimit,
+  scannableTabCount,
+}: {
+  retryCount: number;
+  retryLimit: number;
+  scannableTabCount: number;
+}) {
+  return scannableTabCount > 0 && retryCount < retryLimit;
+}
+
+export function shouldRunQueuedSync({
+  currentForceRefresh,
+  hasQueuedSync,
+  queuedForceRefresh,
+}: {
+  currentForceRefresh: boolean;
+  hasQueuedSync: boolean;
+  queuedForceRefresh: boolean;
+}) {
+  if (!hasQueuedSync) {
+    return false;
+  }
+
+  if (currentForceRefresh) {
+    return false;
+  }
+
+  return queuedForceRefresh;
+}
+
+function getVideoSelectionKey(
+  video: Pick<TabVideoSource, "id" | "tabId" | "frameId">,
+): string {
+  return `${video.tabId}:${video.frameId}:${video.id}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 export function reportRoomActionResult(

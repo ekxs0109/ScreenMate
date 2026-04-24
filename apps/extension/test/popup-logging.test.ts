@@ -3,7 +3,12 @@ import {
   buildStartSharingRequests,
   buildStopSharingRequest,
   normalizeSnapshot,
+  resolvePopupSelectedVideoKey,
   reportRoomActionResult,
+  resolveSelectedVideoKey,
+  shouldRunQueuedSync,
+  shouldRetryEmptyVideoList,
+  waitForMinimumRefreshDuration,
   type PopupLogger,
 } from "../entrypoints/popup/useHostControls";
 import { createHostRoomSnapshot } from "../entrypoints/background/host-room-snapshot";
@@ -93,16 +98,19 @@ describe("popup room action messages", () => {
     expect(
       buildStartSharingRequests(createHostRoomSnapshot(), {
         id: "screenmate-video-1",
+        tabId: 42,
         frameId: 7,
       }),
     ).toEqual([
       {
         type: "screenmate:start-room",
+        tabId: 42,
         frameId: 7,
       },
       {
         type: "screenmate:attach-source",
         videoId: "screenmate-video-1",
+        tabId: 42,
         frameId: 7,
       },
     ]);
@@ -117,6 +125,7 @@ describe("popup room action messages", () => {
         }),
         {
           id: "screenmate-video-1",
+          tabId: 42,
           frameId: 0,
         },
       ),
@@ -124,6 +133,7 @@ describe("popup room action messages", () => {
       {
         type: "screenmate:attach-source",
         videoId: "screenmate-video-1",
+        tabId: 42,
         frameId: 0,
       },
     ]);
@@ -141,19 +151,154 @@ describe("popup room action messages", () => {
         }),
         {
           id: "screenmate-video-1",
+          tabId: 42,
           frameId: 0,
         },
       ),
     ).toEqual([
       {
         type: "screenmate:start-room",
+        tabId: 42,
         frameId: 0,
       },
       {
         type: "screenmate:attach-source",
         videoId: "screenmate-video-1",
+        tabId: 42,
         frameId: 0,
       },
     ]);
+  });
+});
+
+describe("waitForMinimumRefreshDuration", () => {
+  it("waits for the remaining minimum refresh spinner time", async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await waitForMinimumRefreshDuration({
+      elapsedMs: 120,
+      minimumMs: 500,
+      sleep,
+    });
+
+    expect(sleep).toHaveBeenCalledWith(380);
+  });
+
+  it("does not wait when refresh already exceeded the minimum spinner time", async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await waitForMinimumRefreshDuration({
+      elapsedMs: 700,
+      minimumMs: 500,
+      sleep,
+    });
+
+    expect(sleep).not.toHaveBeenCalled();
+  });
+});
+
+describe("shouldRetryEmptyVideoList", () => {
+  it("retries an empty video list only while there are scannable tabs and retry budget remains", () => {
+    expect(
+      shouldRetryEmptyVideoList({
+        retryCount: 0,
+        retryLimit: 5,
+        scannableTabCount: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not retry when every browser tab was skipped as non-scannable", () => {
+    expect(
+      shouldRetryEmptyVideoList({
+        retryCount: 0,
+        retryLimit: 5,
+        scannableTabCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not retry after the retry budget is exhausted", () => {
+    expect(
+      shouldRetryEmptyVideoList({
+        retryCount: 5,
+        retryLimit: 5,
+        scannableTabCount: 1,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldRunQueuedSync", () => {
+  it("does not rerun a queued refresh after the current run already forced a live scan", () => {
+    expect(
+      shouldRunQueuedSync({
+        currentForceRefresh: true,
+        hasQueuedSync: true,
+        queuedForceRefresh: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("runs a queued forced refresh after a non-forced sync", () => {
+    expect(
+      shouldRunQueuedSync({
+        currentForceRefresh: false,
+        hasQueuedSync: true,
+        queuedForceRefresh: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not run when no sync was queued", () => {
+    expect(
+      shouldRunQueuedSync({
+        currentForceRefresh: false,
+        hasQueuedSync: false,
+        queuedForceRefresh: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("resolveSelectedVideoKey", () => {
+  const videos = [
+    { id: "video-1", tabId: 42, frameId: 0, label: "Video 1" },
+    { id: "video-2", tabId: 84, frameId: 0, label: "Video 2" },
+  ];
+
+  it("keeps a persisted selected video when it is still present", () => {
+    expect(resolveSelectedVideoKey("84:0:video-2", videos)).toBe("84:0:video-2");
+  });
+
+  it("falls back to the first video when the selected video is missing", () => {
+    expect(resolveSelectedVideoKey("99:0:missing", videos)).toBe("42:0:video-1");
+  });
+});
+
+describe("resolvePopupSelectedVideoKey", () => {
+  const videos = [
+    { id: "video-1", tabId: 42, frameId: 0, label: "Video 1" },
+    { id: "video-2", tabId: 84, frameId: 0, label: "Video 2" },
+  ];
+
+  it("keeps a desired selected video id even while the sniff list is temporarily missing it", () => {
+    expect(
+      resolvePopupSelectedVideoKey({
+        currentSelectedVideoKey: "42:0:video-1",
+        desiredSelectedVideoKey: "99:0:video-3",
+        videos,
+      }),
+    ).toBe("99:0:video-3");
+  });
+
+  it("falls back to the first available video when there is no desired selection", () => {
+    expect(
+      resolvePopupSelectedVideoKey({
+        currentSelectedVideoKey: "99:0:missing",
+        desiredSelectedVideoKey: null,
+        videos,
+      }),
+    ).toBe("42:0:video-1");
   });
 });

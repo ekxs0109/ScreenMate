@@ -1,5 +1,5 @@
 import { createLogger } from "../../lib/logger";
-import { findVisibleVideoByHandle } from "./video-detector";
+import { collectVisibleVideos, findVisibleVideoByHandle } from "./video-detector";
 
 const previewLogger = createLogger("content:preview");
 const PREVIEW_ATTR = "data-screenmate-preview";
@@ -50,10 +50,10 @@ export function createVideoPreviewController() {
 
   function refresh(reason = "manual-refresh") {
     if (scheduledRefreshId) {
-      cancelAnimationFrame(scheduledRefreshId);
+      cancelPreviewFrame(scheduledRefreshId);
     }
 
-    scheduledRefreshId = requestAnimationFrame(() => {
+    scheduledRefreshId = requestPreviewFrame(() => {
       scheduledRefreshId = 0;
       renderPreview(reason);
     });
@@ -66,11 +66,6 @@ export function createVideoPreviewController() {
   function renderPreview(reason: string) {
     if (!currentSelection) {
       clearVideoSelectionPreview();
-      return;
-    }
-
-    if (document.hidden) {
-      hidePreviewOverlay();
       return;
     }
 
@@ -89,10 +84,16 @@ export function createVideoPreviewController() {
     }
 
     hasLoggedMissingVideo = false;
+    const targetVideo = getPreviewTargetVideo(video);
+    if (!targetVideo) {
+      hidePreviewOverlay();
+      return;
+    }
+
     showVideoSelectionPreview({
       frameId: currentSelection.frameId,
       label: currentSelection.label,
-      video,
+      video: targetVideo,
       videoId: currentSelection.videoId,
     });
   }
@@ -128,7 +129,7 @@ export function createVideoPreviewController() {
 
   function stopAutoRefresh() {
     if (scheduledRefreshId) {
-      cancelAnimationFrame(scheduledRefreshId);
+      cancelPreviewFrame(scheduledRefreshId);
       scheduledRefreshId = 0;
     }
 
@@ -167,7 +168,7 @@ export function showVideoSelectionPreview({
   overlay.style.left = `${rect.left}px`;
   overlay.style.width = `${rect.width}px`;
   overlay.style.height = `${rect.height}px`;
-  overlay.textContent = `Selected · ${label} · ID ${videoId}${frameId === 0 ? "" : ` · iframe #${frameId}`}`;
+  overlay.innerHTML = `<div style="position:absolute;inset:0;border-radius:16px;background:rgba(250,204,21,0.14);"></div><div style="position:absolute;left:12px;bottom:12px;">${escapeHtml(label)}${frameId === 0 ? "" : ` · iframe #${frameId}`}</div>`;
 }
 
 export function clearVideoSelectionPreview() {
@@ -188,6 +189,15 @@ function hidePreviewOverlay() {
   overlay.style.display = "none";
 }
 
+function getPreviewTargetVideo(video: HTMLVideoElement) {
+  const rect = video.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) {
+    return video;
+  }
+
+  return collectVisibleVideos()[0] ?? null;
+}
+
 function ensurePreviewOverlay() {
   const existing = document.querySelector(
     `[${PREVIEW_ATTR}="overlay"]`,
@@ -204,9 +214,8 @@ function ensurePreviewOverlay() {
     zIndex: "2147483647",
     pointerEvents: "none",
     border: "3px dashed #ffffff",
-    background:
-      "linear-gradient(135deg, rgba(20, 184, 166, 0.28), rgba(14, 116, 144, 0.18))",
-    boxShadow: "0 0 0 2px rgba(15, 23, 42, 0.6), 0 18px 36px rgba(15, 23, 42, 0.35)",
+    background: "transparent",
+    boxShadow: "0 0 0 4px rgba(234, 179, 8, 0.9), 0 18px 36px rgba(15, 23, 42, 0.35)",
     borderRadius: "16px",
     color: "#f8fafc",
     fontFamily: "\"IBM Plex Sans\", \"Segoe UI\", sans-serif",
@@ -221,6 +230,15 @@ function ensurePreviewOverlay() {
 
   document.documentElement.appendChild(overlay);
   return overlay;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function addWindowListener(
@@ -239,4 +257,21 @@ function addDocumentListener(type: string, listener: EventListener) {
   return () => {
     document.removeEventListener(type, listener);
   };
+}
+
+function requestPreviewFrame(callback: () => void) {
+  if (typeof requestAnimationFrame === "function") {
+    return requestAnimationFrame(callback);
+  }
+
+  return globalThis.setTimeout(callback, 16) as unknown as number;
+}
+
+function cancelPreviewFrame(id: number) {
+  if (typeof cancelAnimationFrame === "function") {
+    cancelAnimationFrame(id);
+    return;
+  }
+
+  globalThis.clearTimeout(id);
 }

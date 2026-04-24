@@ -1,5 +1,6 @@
 import { browser, type Browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
+import { storage } from "wxt/utils/storage";
 import { getScreenMateApiBaseUrl } from "../lib/config";
 import { createLogger } from "../lib/logger";
 import {
@@ -16,15 +17,29 @@ import {
   type HostRoomSnapshot,
   type SourceFingerprint,
 } from "./background/host-room-snapshot";
+import {
+  createEmptyVideoSniffState,
+  VideoSourceCache,
+  type SniffTabSummary,
+  type VideoSniffState,
+} from "./background/video-source-cache";
 import type { VideoSource as LocalVideoSource } from "./content/video-detector";
 
 type SourceFingerprintMatch = Omit<SourceFingerprint, "frameId" | "tabId">;
 
 export type HostMessage =
   | { type: "screenmate:get-room-session" }
-  | { type: "screenmate:list-videos" }
-  | { type: "screenmate:start-room"; frameId: number }
-  | { type: "screenmate:attach-source"; videoId: string; frameId: number }
+  | { type: "screenmate:list-videos"; refresh?: boolean }
+  | { type: "screenmate:get-video-sniff-state" }
+  | { type: "screenmate:ensure-video-sniff-state" }
+  | { type: "screenmate:refresh-video-sniff-state" }
+  | { type: "screenmate:start-room"; frameId: number; tabId?: number }
+  | {
+      type: "screenmate:attach-source";
+      videoId: string;
+      frameId: number;
+      tabId?: number;
+    }
   | { type: "screenmate:stop-room" }
   | {
       type: "screenmate:content-ready";
@@ -53,13 +68,16 @@ export type HostMessage =
       type: "screenmate:preview-video";
       videoId: string;
       frameId: number;
+      tabId?: number;
       label: string;
       active?: boolean;
     }
-  | { type: "screenmate:clear-preview" };
+  | { type: "screenmate:clear-preview"; tabId?: number };
 
 export type TabVideoSource = LocalVideoSource & {
+  tabId: number;
   frameId: number;
+  tabTitle?: string;
   fingerprint?: SourceFingerprintMatch;
 };
 
@@ -96,7 +114,11 @@ type TabContentMessage =
       envelope: SignalEnvelope;
     };
 
-type HandlerResponse = HostRoomSnapshot | TabVideoSource[] | PreviewAck;
+type HandlerResponse =
+  | HostRoomSnapshot
+  | TabVideoSource[]
+  | VideoSniffState
+  | PreviewAck;
 type TabMessageResponse =
   | LocalVideoSource[]
   | AttachSourceResponse
@@ -107,13 +129,19 @@ type InternalHostNetworkResponse =
   | InternalHostNetworkErrorResponse;
 
 const backgroundLogger = createLogger("background");
-
+const VIDEO_SNIFF_AUTO_REFRESH_TTL_MS = 30_000;
+const VIDEO_SNIFF_STUCK_REFRESH_MS = 60_000;
 type HostMessageHandlerDependencies = {
   apiBaseUrl?: string;
   createRoom: (apiBaseUrl: string) => Promise<InternalHostNetworkResponse>;
   queryActiveTabId: () => Promise<number | null>;
+  queryCurrentWindowTabs?: () => Promise<
+    Array<{ id: number; title?: string; url?: string }>
+  >;
   queryFrameIds: (tabId: number) => Promise<number[]>;
   runtime: HostRoomRuntime;
+  videoCache?: VideoSourceCache;
+  videoListScanPromise?: Promise<TabVideoSource[]> | null;
   sendTabMessage: (
     tabId: number,
     message: TabContentMessage,
@@ -164,15 +192,38 @@ export function createHostMessageHandler(
       return { ok: true };
     }
 
+    const requestedTabId =
+      "tabId" in message && typeof message.tabId === "number"
+        ? message.tabId
+        : null;
+    if (message.type === "screenmate:get-video-sniff-state") {
+      return getVideoSniffState(dependencies);
+    }
+
+    if (message.type === "screenmate:ensure-video-sniff-state") {
+      const fallbackTabId = requestedTabId ?? await dependencies.queryActiveTabId();
+      return ensureVideoSniffState(dependencies, fallbackTabId);
+    }
+
+    if (message.type === "screenmate:refresh-video-sniff-state") {
+      const fallbackTabId = requestedTabId ?? await dependencies.queryActiveTabId();
+      return refreshVideoSniffState(dependencies, fallbackTabId);
+    }
+
+    if (message.type === "screenmate:list-videos") {
+      const fallbackTabId = requestedTabId ?? await dependencies.queryActiveTabId();
+      return listVideosAcrossTabs(
+        dependencies,
+        fallbackTabId,
+        message.refresh === true,
+      );
+    }
+
     const tabId =
       message.type === "screenmate:content-ready"
-        ? dependencies.runtime.getSnapshot().activeTabId
-        : await dependencies.queryActiveTabId();
+        ? requestedTabId ?? dependencies.runtime.getSnapshot().activeTabId
+        : requestedTabId ?? await dependencies.queryActiveTabId();
     if (tabId === null) {
-      if (message.type === "screenmate:list-videos") {
-        return [];
-      }
-
       if (
         message.type === "screenmate:preview-video" ||
         message.type === "screenmate:clear-preview" ||
@@ -184,10 +235,6 @@ export function createHostMessageHandler(
       return createHostRoomSnapshot({
         message: "Could not find an active tab to continue.",
       });
-    }
-
-    if (message.type === "screenmate:list-videos") {
-      return listVideosForTab(dependencies, tabId);
     }
 
     if (message.type === "screenmate:preview-video") {
@@ -229,6 +276,17 @@ export function createHostMessageHandler(
     }
 
     if (message.type === "screenmate:content-ready") {
+      if (typeof message.tabId === "number") {
+        await getVideoCache(dependencies).setForFrame(
+          message.tabId,
+          message.frameId,
+          message.videos.map((video) => ({
+            ...video,
+            frameId: message.frameId,
+            tabId: message.tabId as number,
+          })),
+        );
+      }
       return maybeReattachSource(dependencies, tabId, message);
     }
 
@@ -315,6 +373,13 @@ export default defineBackground(() => {
     apiBaseUrl,
     storage: browser.storage.session,
   });
+  const videoSniffStateStorage = storage.defineItem<VideoSniffState>(
+    "session:screenmate-video-sniff-state",
+    {
+      fallback: createEmptyVideoSniffState(),
+    },
+  );
+  const videoCache = new VideoSourceCache(videoSniffStateStorage);
   const internalHandler = createInternalHostNetworkHandler({
     fetchImpl: fetch,
   });
@@ -343,10 +408,24 @@ export default defineBackground(() => {
     queryActiveTabId: async () => {
       const [tab] = await browser.tabs.query({
         active: true,
-        currentWindow: true,
+        lastFocusedWindow: true,
+        windowType: "normal",
       });
 
       return tab?.id ?? null;
+    },
+    queryCurrentWindowTabs: async () => {
+      const tabs = await browser.tabs.query({
+        windowType: "normal",
+      });
+
+      return tabs
+        .filter((tab): tab is Browser.tabs.Tab & { id: number } => typeof tab.id === "number")
+        .map((tab) => ({
+          id: tab.id,
+          title: tab.title,
+          url: tab.url,
+        }));
     },
     queryFrameIds: async (tabId) => {
       const frames = (await browser.webNavigation.getAllFrames({ tabId })) ?? [];
@@ -357,6 +436,7 @@ export default defineBackground(() => {
       return frameIds.length > 0 ? frameIds : [0];
     },
     runtime,
+    videoCache,
     sendTabMessage(tabId, message, options) {
       return browser.tabs.sendMessage(
         tabId,
@@ -385,6 +465,10 @@ export default defineBackground(() => {
   browser.runtime.onMessage.addListener(
     createHostRuntimeMessageListener(handler, internalHandler),
   );
+
+  browser.tabs.onRemoved.addListener((tabId) => {
+    void videoCache.removeTab(tabId);
+  });
 });
 
 export function createInternalHostNetworkHandler(
@@ -520,6 +604,7 @@ export function createForwardInboundSignalHandler(dependencies: {
 async function listVideosForTab(
   dependencies: HostMessageHandlerDependencies,
   tabId: number,
+  tabTitle?: string,
 ): Promise<TabVideoSource[]> {
   const frameIds = await resolveFrameIds(dependencies, tabId);
   backgroundLogger.info("Scanning active tab for videos.", {
@@ -539,6 +624,12 @@ async function listVideosForTab(
   const videos: TabVideoSource[] = [];
   for (const [index, result] of results.entries()) {
     if (!isFulfilledVideoList(result)) {
+      backgroundLogger.warn("Could not list videos in frame.", {
+        error:
+          result.status === "rejected" ? toErrorMessage(result.reason) : "Invalid response",
+        frameId: frameIds[index] ?? 0,
+        tabId,
+      });
       continue;
     }
 
@@ -547,12 +638,245 @@ async function listVideosForTab(
       videos.push({
         ...video,
         label: formatFrameScopedLabel(video.label, frameId),
+        tabId,
+        ...(tabTitle !== undefined && { tabTitle }),
         frameId,
       });
     }
   }
 
+  backgroundLogger.info("Finished scanning tab for videos.", {
+    frameCount: frameIds.length,
+    tabId,
+    videoCount: videos.length,
+  });
+
   return videos;
+}
+
+async function listVideosAcrossTabs(
+  dependencies: HostMessageHandlerDependencies,
+  activeTabId: number | null,
+  forceRefresh: boolean,
+): Promise<TabVideoSource[]> {
+  const videoCache = getVideoCache(dependencies);
+  await videoCache.restore();
+  const cachedVideos = videoCache.getAll();
+  if (!forceRefresh && cachedVideos.length > 0) {
+    backgroundLogger.info("Returning cached videos.", { count: cachedVideos.length });
+    return cachedVideos;
+  }
+
+  if (dependencies.videoListScanPromise) {
+    backgroundLogger.info("Joining in-flight video scan.", { activeTabId });
+    return dependencies.videoListScanPromise;
+  }
+
+  dependencies.videoListScanPromise = scanVideosAcrossTabs(
+    dependencies,
+    activeTabId,
+    videoCache,
+  ).finally(() => {
+    dependencies.videoListScanPromise = null;
+  });
+
+  return dependencies.videoListScanPromise;
+}
+
+async function getVideoSniffState(
+  dependencies: HostMessageHandlerDependencies,
+): Promise<VideoSniffState> {
+  const videoCache = getVideoCache(dependencies);
+  await videoCache.restore();
+  const state = videoCache.getState();
+  backgroundLogger.info("Returning video sniff state.", {
+    status: state.status,
+    tabCount: state.tabs.length,
+    videoCount: state.videos.length,
+  });
+  return state;
+}
+
+async function ensureVideoSniffState(
+  dependencies: HostMessageHandlerDependencies,
+  activeTabId: number | null,
+): Promise<VideoSniffState> {
+  const videoCache = getVideoCache(dependencies);
+  await videoCache.restore();
+  const state = videoCache.getState();
+  const currentTabs = await querySniffTabs(dependencies, activeTabId);
+  if (currentTabs.length > 0 && !hasSameTabIds(state.tabs, currentTabs)) {
+    backgroundLogger.info("Refreshing video sniff state because browser tabs changed.", {
+      cachedTabCount: state.tabs.length,
+      currentTabCount: currentTabs.length,
+    });
+    return refreshVideoSniffState(dependencies, activeTabId);
+  }
+
+  if (shouldRefreshVideoSniffState(state)) {
+    return refreshVideoSniffState(dependencies, activeTabId);
+  }
+
+  if (currentTabs.length > 0 && hasMissingTabMetadata(state.tabs, currentTabs)) {
+    await videoCache.setTabs(mergeTabMetadata(state.tabs, currentTabs));
+    return videoCache.getState();
+  }
+
+  backgroundLogger.info("Returning fresh video sniff state.", {
+    status: state.status,
+    tabCount: state.tabs.length,
+    videoCount: state.videos.length,
+  });
+  return state;
+}
+
+async function refreshVideoSniffState(
+  dependencies: HostMessageHandlerDependencies,
+  activeTabId: number | null,
+): Promise<VideoSniffState> {
+  await listVideosAcrossTabs(dependencies, activeTabId, true);
+  const videoCache = getVideoCache(dependencies);
+  await videoCache.restore();
+  return videoCache.getState();
+}
+
+async function scanVideosAcrossTabs(
+  dependencies: HostMessageHandlerDependencies,
+  activeTabId: number | null,
+  videoCache: VideoSourceCache,
+): Promise<TabVideoSource[]> {
+  backgroundLogger.info("Cache empty, performing live scan.", { activeTabId });
+  const windowTabs = await queryWindowTabs(dependencies, activeTabId);
+  const sniffTabs = windowTabs.map(toSniffTabSummary);
+  await videoCache.markScanning(sniffTabs);
+  const scannableTabs = windowTabs.filter(isScannableTab);
+
+  backgroundLogger.info("Scanning normal browser tabs for videos.", {
+    scannableTabCount: scannableTabs.length,
+    skippedTabCount: windowTabs.length - scannableTabs.length,
+    tabCount: windowTabs.length,
+  });
+
+  let settled: Array<PromiseSettledResult<TabVideoSource[]>>;
+  try {
+    settled = await Promise.allSettled(
+      scannableTabs.map((tab) => listVideosForTab(dependencies, tab.id, tab.title)),
+    );
+  } catch (error) {
+    await videoCache.markScanError(toErrorMessage(error));
+    return videoCache.getAll();
+  }
+
+  const videosByTab = new Map<number, TabVideoSource[]>();
+  for (const [i, result] of settled.entries()) {
+    const tab = scannableTabs[i];
+    if (result.status === "fulfilled" && tab) {
+      videosByTab.set(tab.id, result.value);
+    }
+  }
+
+  await videoCache.replaceScanResults(sniffTabs, videosByTab);
+
+  return videoCache.getAll();
+}
+
+function shouldRefreshVideoSniffState(state: VideoSniffState) {
+  const now = Date.now();
+  if (
+    state.status === "refreshing" &&
+    typeof state.startedAt === "number" &&
+    now - state.startedAt <= VIDEO_SNIFF_STUCK_REFRESH_MS
+  ) {
+    return false;
+  }
+
+  if (typeof state.updatedAt !== "number") {
+    return true;
+  }
+
+  return now - state.updatedAt > VIDEO_SNIFF_AUTO_REFRESH_TTL_MS;
+}
+
+async function querySniffTabs(
+  dependencies: HostMessageHandlerDependencies,
+  activeTabId: number | null,
+): Promise<SniffTabSummary[]> {
+  const tabs = await queryWindowTabs(dependencies, activeTabId);
+  return tabs.map(toSniffTabSummary);
+}
+
+async function queryWindowTabs(
+  dependencies: HostMessageHandlerDependencies,
+  activeTabId: number | null,
+) {
+  return dependencies.queryCurrentWindowTabs
+    ? dependencies.queryCurrentWindowTabs()
+    : activeTabId === null
+      ? []
+      : [{ id: activeTabId, title: undefined as string | undefined }];
+}
+
+function hasSameTabIds(left: SniffTabSummary[], right: SniffTabSummary[]) {
+  return (
+    left.length === right.length &&
+    left.every((tab, index) => tab.tabId === right[index]?.tabId)
+  );
+}
+
+function hasMissingTabMetadata(
+  cachedTabs: SniffTabSummary[],
+  currentTabs: SniffTabSummary[],
+) {
+  return cachedTabs.some((tab, index) => {
+    const current = currentTabs[index];
+    if (!current || tab.tabId !== current.tabId) {
+      return false;
+    }
+
+    return (
+      (!tab.title && typeof current.title === "string") ||
+      (!tab.url && typeof current.url === "string")
+    );
+  });
+}
+
+function mergeTabMetadata(
+  cachedTabs: SniffTabSummary[],
+  currentTabs: SniffTabSummary[],
+) {
+  return cachedTabs.map((tab, index) => {
+    const current = currentTabs[index];
+    if (!current || tab.tabId !== current.tabId) {
+      return tab;
+    }
+
+    return {
+      ...tab,
+      title: tab.title ?? current.title,
+      url: tab.url ?? current.url,
+    };
+  });
+}
+
+function toSniffTabSummary(tab: { id: number; title?: string; url?: string }): SniffTabSummary {
+  return {
+    tabId: tab.id,
+    ...(tab.title !== undefined && { title: tab.title }),
+    ...(tab.url !== undefined && { url: tab.url }),
+  };
+}
+
+function isScannableTab(tab: { id: number; url?: string }) {
+  if (!tab.url) {
+    return true;
+  }
+
+  return tab.url.startsWith("http://") || tab.url.startsWith("https://");
+}
+
+function getVideoCache(dependencies: HostMessageHandlerDependencies) {
+  dependencies.videoCache ??= new VideoSourceCache();
+  return dependencies.videoCache;
 }
 
 async function attachSourceInFrame(
@@ -800,16 +1124,28 @@ function isHostMessage(message: unknown): message is HostMessage {
 
   switch (message.type) {
     case "screenmate:get-room-session":
+    case "screenmate:get-video-sniff-state":
+    case "screenmate:ensure-video-sniff-state":
+    case "screenmate:refresh-video-sniff-state":
+      return true;
     case "screenmate:list-videos":
+      return (
+        typeof message.refresh === "undefined" ||
+        typeof message.refresh === "boolean"
+      );
     case "screenmate:stop-room":
     case "screenmate:clear-preview":
       return true;
     case "screenmate:start-room":
-      return typeof message.frameId === "number";
+      return (
+        typeof message.frameId === "number" &&
+        (typeof message.tabId === "undefined" || typeof message.tabId === "number")
+      );
     case "screenmate:attach-source":
       return (
         typeof message.videoId === "string" &&
-        typeof message.frameId === "number"
+        typeof message.frameId === "number" &&
+        (typeof message.tabId === "undefined" || typeof message.tabId === "number")
       );
     case "screenmate:content-ready":
       return (
@@ -834,6 +1170,7 @@ function isHostMessage(message: unknown): message is HostMessage {
       return (
         typeof message.videoId === "string" &&
         typeof message.frameId === "number" &&
+        (typeof message.tabId === "undefined" || typeof message.tabId === "number") &&
         typeof message.label === "string"
       );
     default:

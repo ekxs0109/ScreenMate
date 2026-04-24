@@ -31,7 +31,7 @@ function writeLog(
     return;
   }
 
-  consoleMethod(prefix, details);
+  consoleMethod(prefix, serializeLogDetails(details));
 }
 
 function getConsoleMethod(level: LogLevel) {
@@ -46,4 +46,55 @@ function getConsoleMethod(level: LogLevel) {
     default:
       return console.log.bind(console);
   }
+}
+
+function serializeLogDetails(details: unknown): string {
+  const seen = new WeakSet<object>();
+
+  try {
+    return JSON.stringify(details, (_key, value: unknown) => {
+      if (typeof value === "string") {
+        return sanitizeLogString(value);
+      }
+
+      if (typeof value === "bigint") {
+        return value.toString();
+      }
+
+      if (value instanceof Error) {
+        return {
+          name: value.name,
+          message: value.message,
+          stack: value.stack,
+        };
+      }
+
+      if (typeof value === "object" && value !== null) {
+        if (seen.has(value)) {
+          return "[Circular]";
+        }
+
+        seen.add(value);
+      }
+
+      return value;
+    }) ?? "undefined";
+  } catch (error) {
+    return JSON.stringify({
+      serializationError:
+        error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function sanitizeLogString(value: string) {
+  if (value.startsWith("data:")) {
+    return `${value.slice(0, 48)}...[truncated:${value.length}]`;
+  }
+
+  if (value.length > 500) {
+    return `${value.slice(0, 500)}...[truncated:${value.length}]`;
+  }
+
+  return value;
 }

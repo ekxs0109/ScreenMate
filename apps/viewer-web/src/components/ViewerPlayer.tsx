@@ -82,7 +82,7 @@ export function ViewerPlayer({
           {roomState === "closed" ? (
             <span className="text-red-500 dark:text-red-400">Host ended the room</span>
           ) : sourceState === "recovering" ? (
-            <span className="text-amber-500">Host is reconnecting video...</span>
+            <span className="text-amber-500">Host is reconnecting the video source</span>
           ) : sourceState === "missing" ? (
             <span>Waiting for video source...</span>
           ) : status === "connected" ? (

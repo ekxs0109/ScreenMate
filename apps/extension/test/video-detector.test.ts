@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   collectPageVideos,
   collectVisibleVideos,
@@ -9,7 +9,10 @@ import {
   listVisibleVideoCandidates,
   listVisibleVideoSources,
 } from "../entrypoints/content/video-detector";
-import { createVideoMessageListener } from "../entrypoints/content";
+import {
+  createVideoChangeNotifier,
+  createVideoMessageListener,
+} from "../entrypoints/content";
 
 function setVideoRect(element: Element | null, width: number, height: number) {
   Object.defineProperty(element, "getBoundingClientRect", {
@@ -17,6 +20,10 @@ function setVideoRect(element: Element | null, width: number, height: number) {
     value: () => ({ width, height, top: 0, left: 0, right: width, bottom: height }),
   });
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("collectVisibleVideos", () => {
   it("returns visible videos ordered by size", () => {
@@ -136,14 +143,97 @@ describe("listVisibleVideoSources", () => {
     const secondPass = listVisibleVideoSources();
 
     expect(firstPass).toEqual(secondPass);
-    expect(firstPass[0]).toEqual({
+    expect(firstPass[0]).toMatchObject({
       id: getVideoHandle(named),
       label: "https://example.com/a.mp4",
+      primaryUrl: "https://example.com/a.mp4",
+      format: "mp4",
+      isVisible: true,
     });
-    expect(firstPass[1]).toEqual({
+    expect(firstPass[1]).toMatchObject({
       id: getVideoHandle(hidden),
       label: "hidden (not visible)",
+      primaryUrl: null,
+      isVisible: false,
     });
+  });
+
+  it("captures a best-effort thumbnail from a readable video frame", () => {
+    document.body.innerHTML = `<video id="with-frame" src="https://example.com/a.mp4"></video>`;
+    const video = document.getElementById("with-frame") as HTMLVideoElement;
+    setVideoRect(video, 300, 200);
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_CURRENT_DATA,
+    });
+    Object.defineProperty(video, "videoWidth", {
+      configurable: true,
+      value: 1280,
+    });
+    Object.defineProperty(video, "videoHeight", {
+      configurable: true,
+      value: 720,
+    });
+
+    const originalCreateElement = document.createElement.bind(document);
+    const drawImage = vi.fn();
+    vi.spyOn(document, "createElement").mockImplementation((tagName) => {
+      if (tagName === "canvas") {
+        return {
+          width: 0,
+          height: 0,
+          getContext: vi.fn(() => ({ drawImage })),
+          toDataURL: vi.fn(() => "data:image/webp;base64,frame"),
+        } as unknown as HTMLCanvasElement;
+      }
+
+      return originalCreateElement(tagName);
+    });
+
+    const [source] = listVisibleVideoSources();
+
+    expect(drawImage).toHaveBeenCalledWith(video, 0, 0, 320, 180);
+    expect(source?.thumbnailUrl).toBe("data:image/webp;base64,frame");
+  });
+
+  it("omits the frame thumbnail when the video cannot be read", () => {
+    document.body.innerHTML = `<video id="tainted" src="https://example.com/a.mp4"></video>`;
+    const video = document.getElementById("tainted") as HTMLVideoElement;
+    setVideoRect(video, 300, 200);
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_CURRENT_DATA,
+    });
+    Object.defineProperty(video, "videoWidth", {
+      configurable: true,
+      value: 1280,
+    });
+    Object.defineProperty(video, "videoHeight", {
+      configurable: true,
+      value: 720,
+    });
+
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName) => {
+      if (tagName === "canvas") {
+        return {
+          width: 0,
+          height: 0,
+          getContext: vi.fn(() => ({
+            drawImage: vi.fn(() => {
+              throw new DOMException("Tainted canvas", "SecurityError");
+            }),
+          })),
+          toDataURL: vi.fn(),
+        } as unknown as HTMLCanvasElement;
+      }
+
+      return originalCreateElement(tagName);
+    });
+
+    const [source] = listVisibleVideoSources();
+
+    expect(source?.thumbnailUrl).toBeNull();
   });
 });
 
@@ -235,10 +325,13 @@ describe("createVideoMessageListener", () => {
     await Promise.resolve();
 
     expect(sendResponse).toHaveBeenCalledWith([
-      {
+      expect.objectContaining({
         id: getVideoHandle(video),
         label: "https://example.com/message.mp4",
-      },
+        primaryUrl: "https://example.com/message.mp4",
+        format: "mp4",
+        isVisible: true,
+      }),
     ]);
   });
 
@@ -301,5 +394,57 @@ describe("createVideoMessageListener", () => {
 
     expect(sourceAttachmentRuntime.destroy).toHaveBeenCalledWith("manual-detach");
     expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+  });
+});
+
+describe("createVideoChangeNotifier", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("debounces DOM video additions into a content-ready notification", async () => {
+    vi.useFakeTimers();
+    const notify = vi.fn();
+    const notifier = createVideoChangeNotifier({
+      debounceMs: 250,
+      highFrequencyLifetimeMs: 15_000,
+      notify,
+      pollIntervalMs: 1_000,
+    });
+
+    notifier.start();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    document.body.appendChild(document.createElement("video"));
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(249);
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(notify).toHaveBeenCalledTimes(2);
+
+    notifier.stop();
+  });
+
+  it("notifies when an existing video's media metadata changes", async () => {
+    vi.useFakeTimers();
+    const notify = vi.fn();
+    const notifier = createVideoChangeNotifier({
+      debounceMs: 100,
+      highFrequencyLifetimeMs: 15_000,
+      notify,
+      pollIntervalMs: 1_000,
+    });
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+
+    notifier.start();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    video.dispatchEvent(new Event("loadedmetadata"));
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    notifier.stop();
   });
 });

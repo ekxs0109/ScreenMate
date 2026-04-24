@@ -5,6 +5,14 @@ let nextVideoHandle = 1;
 export type VideoSource = {
   id: string;
   label: string;
+  primaryUrl?: string | null;
+  posterUrl?: string | null;
+  thumbnailUrl?: string | null;
+  width?: number | null;
+  height?: number | null;
+  duration?: number | null;
+  format?: string | null;
+  isVisible?: boolean;
 };
 
 export type VideoCandidate = {
@@ -138,6 +146,14 @@ export function listVisibleVideoSources(): VideoSource[] {
   return collectPageVideos().map((video, index) => ({
     id: getVideoHandle(video),
     label: formatVideoLabel(video, index),
+    primaryUrl: video.currentSrc || video.src || null,
+    posterUrl: video.getAttribute("poster"),
+    thumbnailUrl: captureVideoFrameThumbnail(video),
+    width: video.videoWidth || null,
+    height: video.videoHeight || null,
+    duration: Number.isFinite(video.duration) ? video.duration : null,
+    format: getVideoFormat(video),
+    isVisible: isRenderableVideo(video),
   }));
 }
 
@@ -216,6 +232,40 @@ function addVideo(
   videos.push(video);
 }
 
+function captureVideoFrameThumbnail(video: HTMLVideoElement): string | null {
+  if (!isRenderableVideo(video)) {
+    return null;
+  }
+
+  if (
+    video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+    video.videoWidth <= 0 ||
+    video.videoHeight <= 0
+  ) {
+    return null;
+  }
+
+  try {
+    const maxWidth = 320;
+    const aspectRatio = video.videoHeight / video.videoWidth;
+    const width = Math.min(maxWidth, video.videoWidth);
+    const height = Math.max(1, Math.round(width * aspectRatio));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    context.drawImage(video, 0, 0, width, height);
+    return canvas.toDataURL("image/webp", 0.72);
+  } catch {
+    return null;
+  }
+}
+
 function formatVideoSample(video: HTMLVideoElement, index: number): string {
   const parts = [
     `#${index + 1}`,
@@ -225,4 +275,19 @@ function formatVideoSample(video: HTMLVideoElement, index: number): string {
   ].filter(Boolean);
 
   return parts.join(" | ");
+}
+
+function getVideoFormat(video: HTMLVideoElement): string | null {
+  const primaryUrl = video.currentSrc || video.src;
+  if (!primaryUrl) {
+    return null;
+  }
+
+  try {
+    const pathname = new URL(primaryUrl, window.location.href).pathname;
+    const extension = pathname.split(".").pop()?.toLowerCase();
+    return extension && extension.length <= 5 ? extension : null;
+  } catch {
+    return null;
+  }
 }

@@ -8,6 +8,7 @@ import {
   type HostMessage,
 } from "../entrypoints/background";
 import { createHostRoomSnapshot } from "../entrypoints/background/host-room-snapshot";
+import { VideoSourceCache } from "../entrypoints/background/video-source-cache";
 
 function createHandlerDependencies(
   overrides: Partial<Parameters<typeof createHostMessageHandler>[0]> = {},
@@ -22,7 +23,9 @@ function createHandlerDependencies(
       iceServers: [],
     }),
     queryActiveTabId: vi.fn().mockResolvedValue(42),
+    queryCurrentWindowTabs: vi.fn().mockResolvedValue([{ id: 42 }]),
     queryFrameIds: vi.fn().mockResolvedValue([0]),
+    videoCache: new VideoSourceCache(),
     runtime: {
       close: vi.fn().mockResolvedValue({
         roomLifecycle: "closed",
@@ -96,8 +99,9 @@ function createHandlerDependencies(
 }
 
 describe("createHostMessageHandler", () => {
-  it("aggregates video lists from all reachable frames in the active tab", async () => {
+  it("aggregates video lists from the current window and all reachable frames", async () => {
     const queryActiveTabId = vi.fn().mockResolvedValue(42);
+    const queryCurrentWindowTabs = vi.fn().mockResolvedValue([{ id: 42 }, { id: 84 }]);
     const queryFrameIds = vi.fn().mockResolvedValue([0, 5]);
     const sendTabMessage = vi
       .fn()
@@ -111,6 +115,12 @@ describe("createHostMessageHandler", () => {
             return [];
           }
 
+          if (_tabId === 84 && options?.frameId === 0) {
+            return [
+              { id: "screenmate-video-2", label: "https://example.com/other.mp4" },
+            ];
+          }
+
           if (options?.frameId === 5) {
             return [
               { id: "screenmate-video-1", label: "https://example.com/a.mp4" },
@@ -122,6 +132,7 @@ describe("createHostMessageHandler", () => {
       );
     const handler = createHostMessageHandler(createHandlerDependencies({
       queryActiveTabId,
+      queryCurrentWindowTabs,
       queryFrameIds,
       sendTabMessage,
     }));
@@ -129,7 +140,9 @@ describe("createHostMessageHandler", () => {
     const result = await handler({ type: "screenmate:list-videos" });
 
     expect(queryActiveTabId).toHaveBeenCalledTimes(1);
+    expect(queryCurrentWindowTabs).toHaveBeenCalledTimes(1);
     expect(queryFrameIds).toHaveBeenCalledWith(42);
+    expect(queryFrameIds).toHaveBeenCalledWith(84);
     expect(sendTabMessage).toHaveBeenCalledWith(
       42,
       { type: "screenmate:list-videos" },
@@ -140,11 +153,497 @@ describe("createHostMessageHandler", () => {
       { type: "screenmate:list-videos" },
       { frameId: 5 },
     );
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      84,
+      { type: "screenmate:list-videos" },
+      { frameId: 0 },
+    );
     expect(result).toEqual([
       {
         id: "screenmate-video-1",
         label: "https://example.com/a.mp4 [iframe #5]",
+        tabId: 42,
         frameId: 5,
+      },
+      {
+        id: "screenmate-video-2",
+        label: "https://example.com/other.mp4",
+        tabId: 84,
+        frameId: 0,
+      },
+      {
+        id: "screenmate-video-1",
+        label: "https://example.com/a.mp4 [iframe #5]",
+        tabId: 84,
+        frameId: 5,
+      },
+    ]);
+  });
+
+  it("keeps sniff results in the browser tab order instead of forcing the active tab first", async () => {
+    const queryActiveTabId = vi.fn().mockResolvedValue(84);
+    const queryCurrentWindowTabs = vi.fn().mockResolvedValue([
+      { id: 42, title: "First tab" },
+      { id: 84, title: "Active tab" },
+    ]);
+    const sendTabMessage = vi
+      .fn()
+      .mockImplementation(async (tabId: number, message: HostMessage) => {
+        if (message.type !== "screenmate:list-videos") {
+          return [];
+        }
+
+        return [{ id: `video-${tabId}`, label: `video-${tabId}` }];
+      });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      queryActiveTabId,
+      queryCurrentWindowTabs,
+      queryFrameIds: vi.fn().mockResolvedValue([0]),
+      sendTabMessage,
+    }));
+
+    const result = await handler({ type: "screenmate:list-videos" });
+
+    expect(result).toEqual([
+      {
+        id: "video-42",
+        label: "video-42",
+        tabId: 42,
+        tabTitle: "First tab",
+        frameId: 0,
+      },
+      {
+        id: "video-84",
+        label: "video-84",
+        tabId: 84,
+        tabTitle: "Active tab",
+        frameId: 0,
+      },
+    ]);
+  });
+
+  it("restores persisted sniff results before falling back to a live scan", async () => {
+    const persistedVideos = [
+      {
+        id: "persisted-video",
+        label: "Persisted Video",
+        tabId: 42,
+        frameId: 0,
+      },
+    ];
+    const sendTabMessage = vi.fn();
+    const videoCache = new VideoSourceCache({
+      getValue: vi.fn().mockResolvedValue({
+        videos: persistedVideos,
+        isScanning: false,
+        updatedAt: 123,
+        error: null,
+      }),
+      setValue: vi.fn(),
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      sendTabMessage,
+      videoCache,
+    }));
+
+    const result = await handler({ type: "screenmate:list-videos" });
+
+    expect(result).toEqual(persistedVideos);
+    expect(sendTabMessage).not.toHaveBeenCalled();
+  });
+
+  it("returns the persisted video sniff state without starting a live scan", async () => {
+    const persistedVideos = [
+      {
+        id: "persisted-video",
+        label: "Persisted Video",
+        tabId: 42,
+        frameId: 0,
+      },
+    ];
+    const sendTabMessage = vi.fn();
+    const videoCache = new VideoSourceCache({
+      getValue: vi.fn().mockResolvedValue({
+        tabs: [{ tabId: 42, title: "Cached tab" }],
+        videos: persistedVideos,
+        status: "success",
+        isScanning: false,
+        updatedAt: Date.now(),
+        startedAt: null,
+        refreshId: null,
+        error: null,
+      }),
+      setValue: vi.fn(),
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      sendTabMessage,
+      videoCache,
+    }));
+
+    const result = await handler({ type: "screenmate:get-video-sniff-state" });
+
+    expect(result).toMatchObject({
+      tabs: [{ tabId: 42, title: "Cached tab" }],
+      videos: persistedVideos,
+      status: "success",
+      error: null,
+    });
+    expect(sendTabMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not scan when ensuring a fresh cached video sniff state", async () => {
+    const persistedVideos = [
+      {
+        id: "persisted-video",
+        label: "Persisted Video",
+        tabId: 42,
+        frameId: 0,
+      },
+    ];
+    const sendTabMessage = vi.fn();
+    const videoCache = new VideoSourceCache({
+      getValue: vi.fn().mockResolvedValue({
+        tabs: [{ tabId: 42, title: "Cached tab" }],
+        videos: persistedVideos,
+        status: "success",
+        isScanning: false,
+        updatedAt: Date.now(),
+        startedAt: null,
+        refreshId: null,
+        error: null,
+      }),
+      setValue: vi.fn(),
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      sendTabMessage,
+      videoCache,
+    }));
+
+    const result = await handler({ type: "screenmate:ensure-video-sniff-state" });
+
+    expect(result).toMatchObject({
+      tabs: [{ tabId: 42, title: "Cached tab" }],
+      videos: persistedVideos,
+      status: "success",
+    });
+    expect(sendTabMessage).not.toHaveBeenCalled();
+  });
+
+  it("refreshes when ensuring a stale video sniff state", async () => {
+    const sendTabMessage = vi.fn().mockImplementation(async (
+      _tabId: number,
+      message: HostMessage,
+    ) => {
+      if (message.type !== "screenmate:list-videos") {
+        return [];
+      }
+
+      return [{ id: "fresh-video", label: "Fresh Video" }];
+    });
+    const videoCache = new VideoSourceCache({
+      getValue: vi.fn().mockResolvedValue({
+        tabs: [{ tabId: 42, title: "Cached tab" }],
+        videos: [],
+        status: "success",
+        isScanning: false,
+        updatedAt: Date.now() - 60_000,
+        startedAt: null,
+        refreshId: null,
+        error: null,
+      }),
+      setValue: vi.fn(),
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      queryCurrentWindowTabs: vi.fn().mockResolvedValue([
+        { id: 42, title: "Fresh tab", url: "https://example.com" },
+      ]),
+      queryFrameIds: vi.fn().mockResolvedValue([0]),
+      sendTabMessage,
+      videoCache,
+    }));
+
+    const result = await handler({ type: "screenmate:ensure-video-sniff-state" });
+
+    expect(result).toMatchObject({
+      tabs: [{ tabId: 42, title: "Fresh tab", url: "https://example.com" }],
+      videos: [
+        {
+          id: "fresh-video",
+          label: "Fresh Video",
+          tabId: 42,
+          tabTitle: "Fresh tab",
+          frameId: 0,
+        },
+      ],
+      status: "success",
+    });
+    expect(sendTabMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists content-ready sniff results with the sender tab id", async () => {
+    const setValue = vi.fn();
+    const videoCache = new VideoSourceCache({
+      getValue: vi.fn().mockResolvedValue(null),
+      setValue,
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      videoCache,
+    }));
+
+    await handler({
+      type: "screenmate:content-ready",
+      tabId: 42,
+      frameId: 0,
+      videos: [
+        {
+          id: "screenmate-video-1",
+          label: "https://example.com/a.mp4",
+          frameId: 0,
+        },
+      ],
+    });
+
+    expect(setValue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: null,
+        isScanning: false,
+        videos: [
+          {
+            id: "screenmate-video-1",
+            label: "https://example.com/a.mp4",
+            tabId: 42,
+            frameId: 0,
+          },
+        ],
+      }),
+    );
+  });
+
+  it("merges content-ready sniff results by frame instead of replacing the whole tab", async () => {
+    const setValue = vi.fn();
+    const videoCache = new VideoSourceCache({
+      getValue: vi.fn().mockResolvedValue(null),
+      setValue,
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      videoCache,
+    }));
+
+    await handler({
+      type: "screenmate:content-ready",
+      tabId: 42,
+      frameId: 0,
+      videos: [
+        {
+          id: "main-video",
+          label: "Main frame video",
+          frameId: 0,
+        },
+      ],
+    });
+    await handler({
+      type: "screenmate:content-ready",
+      tabId: 42,
+      frameId: 5,
+      videos: [
+        {
+          id: "iframe-video",
+          label: "Iframe video",
+          frameId: 5,
+        },
+      ],
+    });
+
+    expect(setValue).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        videos: [
+          {
+            id: "main-video",
+            label: "Main frame video",
+            tabId: 42,
+            frameId: 0,
+          },
+          {
+            id: "iframe-video",
+            label: "Iframe video",
+            tabId: 42,
+            frameId: 5,
+          },
+        ],
+      }),
+    );
+  });
+
+  it("bypasses persisted sniff results when a refresh is requested", async () => {
+    const sendTabMessage = vi.fn().mockImplementation(async (
+      _tabId: number,
+      message: HostMessage,
+    ) => {
+      if (message.type !== "screenmate:list-videos") {
+        return [];
+      }
+
+      return [{ id: "fresh-video", label: "Fresh Video" }];
+    });
+    const videoCache = new VideoSourceCache({
+      getValue: vi.fn().mockResolvedValue({
+        videos: [
+          {
+            id: "persisted-video",
+            label: "Persisted Video",
+            tabId: 42,
+            frameId: 0,
+          },
+        ],
+        isScanning: false,
+        updatedAt: 123,
+        error: null,
+      }),
+      setValue: vi.fn(),
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      queryCurrentWindowTabs: vi.fn().mockResolvedValue([{ id: 42 }]),
+      queryFrameIds: vi.fn().mockResolvedValue([0]),
+      sendTabMessage,
+      videoCache,
+    }));
+
+    const result = await handler({ type: "screenmate:list-videos", refresh: true });
+
+    expect(result).toEqual([
+      {
+        id: "fresh-video",
+        label: "Fresh Video",
+        tabId: 42,
+        frameId: 0,
+      },
+    ]);
+  });
+
+  it("shares an in-flight all-tab video scan across overlapping list requests", async () => {
+    let resolveFrameMessage: ((videos: Array<{ id: string; label: string }>) => void) | null = null;
+    const sendTabMessage = vi.fn().mockImplementation(
+      (_tabId: number, message: HostMessage) => {
+        if (message.type !== "screenmate:list-videos") {
+          return Promise.resolve([]);
+        }
+
+        return new Promise((resolve) => {
+          resolveFrameMessage = resolve;
+        });
+      },
+    );
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      queryCurrentWindowTabs: vi.fn().mockResolvedValue([{ id: 42, title: "Video tab" }]),
+      queryFrameIds: vi.fn().mockResolvedValue([0]),
+      sendTabMessage,
+    }));
+
+    const firstScan = handler({ type: "screenmate:list-videos", refresh: true });
+    const secondScan = handler({ type: "screenmate:list-videos", refresh: true });
+    while (!resolveFrameMessage) {
+      await Promise.resolve();
+    }
+    const finishFrameMessage = resolveFrameMessage as (
+      videos: Array<{ id: string; label: string }>,
+    ) => void;
+    finishFrameMessage([{ id: "video-1", label: "Video 1" }]);
+
+    await expect(firstScan).resolves.toEqual([
+      {
+        id: "video-1",
+        label: "Video 1",
+        tabId: 42,
+        tabTitle: "Video tab",
+        frameId: 0,
+      },
+    ]);
+    await expect(secondScan).resolves.toEqual([
+      {
+        id: "video-1",
+        label: "Video 1",
+        tabId: 42,
+        tabTitle: "Video tab",
+        frameId: 0,
+      },
+    ]);
+    expect(sendTabMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("scans normal browser tabs even when there is no active tab context", async () => {
+    const queryActiveTabId = vi.fn().mockResolvedValue(null);
+    const queryCurrentWindowTabs = vi.fn().mockResolvedValue([
+      { id: 42, title: "Video tab" },
+      { id: 84, title: "Other window video tab" },
+    ]);
+    const sendTabMessage = vi.fn().mockImplementation(async (
+      tabId: number,
+      message: HostMessage,
+    ) => {
+      if (message.type !== "screenmate:list-videos") {
+        return [];
+      }
+
+      return [{ id: `video-${tabId}`, label: `Video ${tabId}` }];
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      queryActiveTabId,
+      queryCurrentWindowTabs,
+      queryFrameIds: vi.fn().mockResolvedValue([0]),
+      sendTabMessage,
+    }));
+
+    const result = await handler({ type: "screenmate:list-videos", refresh: true });
+
+    expect(result).toEqual([
+      {
+        id: "video-42",
+        label: "Video 42",
+        tabId: 42,
+        tabTitle: "Video tab",
+        frameId: 0,
+      },
+      {
+        id: "video-84",
+        label: "Video 84",
+        tabId: 84,
+        tabTitle: "Other window video tab",
+        frameId: 0,
+      },
+    ]);
+    expect(queryCurrentWindowTabs).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores non-web tabs when scanning all normal browser tabs", async () => {
+    const queryCurrentWindowTabs = vi.fn().mockResolvedValue([
+      { id: 42, title: "Video tab", url: "https://example.com/watch" },
+      { id: 99, title: "Settings", url: "chrome://settings" },
+    ]);
+    const sendTabMessage = vi.fn().mockResolvedValue([
+      { id: "video-42", label: "Video 42" },
+    ]);
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      queryActiveTabId: vi.fn().mockResolvedValue(null),
+      queryCurrentWindowTabs,
+      queryFrameIds: vi.fn().mockResolvedValue([0]),
+      sendTabMessage,
+    }));
+
+    const result = await handler({ type: "screenmate:list-videos", refresh: true });
+
+    expect(sendTabMessage).toHaveBeenCalledTimes(1);
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      42,
+      { type: "screenmate:list-videos" },
+      { frameId: 0 },
+    );
+    expect(result).toEqual([
+      {
+        id: "video-42",
+        label: "Video 42",
+        tabId: 42,
+        tabTitle: "Video tab",
+        frameId: 0,
       },
     ]);
   });
@@ -619,6 +1118,7 @@ describe("createHostMessageHandler", () => {
       forwardInboundSignal: vi.fn(),
       queryActiveTabId: vi.fn().mockResolvedValue(7),
       queryFrameIds: vi.fn().mockResolvedValue([0]),
+      videoCache: new VideoSourceCache(),
       sendTabMessage,
       runtime: {
         getSnapshot: vi.fn().mockReturnValue(snapshot),
@@ -676,7 +1176,7 @@ describe("createHostMessageHandler", () => {
     });
 
     expect(result).toBeDefined();
-    if (!result || Array.isArray(result) || "ok" in result) {
+    if (!result || Array.isArray(result) || "ok" in result || "status" in result) {
       throw new Error("Expected a snapshot result");
     }
 

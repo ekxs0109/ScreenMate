@@ -1,11 +1,13 @@
 import { browser, type Browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import { createLogger } from "../lib/logger";
+import { createContentChatWidgetController } from "./content/content-chat-widget";
 import { createSourceAttachmentRuntime } from "./content/source-attachment";
 import { createVideoPreviewController } from "./content/video-preview";
 import {
   collectPageVideos,
   getVideoDetectionDiagnostics,
+  getVideoHandle,
   listAllPageVideoCandidates,
   listVisibleVideoCandidates,
   listVisibleVideoSources,
@@ -65,10 +67,19 @@ type ListenerResponse =
   | { ok: true };
 
 const contentLogger = createLogger("content");
+const VIDEO_CHANGE_EVENT_NAMES = [
+  "loadedmetadata",
+  "loadeddata",
+  "canplay",
+  "durationchange",
+  "resize",
+  "emptied",
+] as const;
 
 export function createVideoMessageListener(
   sourceAttachmentRuntime?: ReturnType<typeof createSourceAttachmentRuntime>,
   previewController = createVideoPreviewController(),
+  chatWidget = createContentChatWidgetController(),
 ) {
   return (
     message: ContentMessage,
@@ -106,6 +117,7 @@ export function createVideoMessageListener(
             videoId: message.videoId,
           })
           .then((response) => {
+            chatWidget.show();
             sendResponse(response);
           });
       });
@@ -153,6 +165,7 @@ export function createVideoMessageListener(
           href: window.location.href,
         });
         sourceAttachmentRuntime.destroy("manual-detach");
+        chatWidget.hide();
         sendResponse({ ok: true });
       });
 
@@ -225,30 +238,27 @@ export default defineContentScript({
       },
     });
     const previewController = createVideoPreviewController();
+    const chatWidget = createContentChatWidgetController();
     const listener = createVideoMessageListener(
       sourceAttachmentRuntime,
       previewController,
+      chatWidget,
     );
 
     // Send content-ready with ALL page video candidates (including
     // non-renderable ones) so the background can fingerprint-match even
     // before the video element is fully initialised (e.g. Bilibili blob URLs).
-    const notifyContentReady = () => {
-      const allCandidates = listAllPageVideoCandidates();
-      const visibleCandidates = listVisibleVideoCandidates();
-
-      // Merge: prefer visible candidates (they have accurate visibleIndex),
-      // but include any non-visible ones that only appear in allCandidates.
-      const visibleIds = new Set(visibleCandidates.map((v) => v.id));
-      const merged = [
-        ...visibleCandidates,
-        ...allCandidates.filter((c) => !visibleIds.has(c.id)),
-      ];
-
+    const notifyContentReady = (reason = "manual") => {
+      const videos = buildContentReadyVideos();
+      contentLogger.info("Notifying content-ready.", {
+        href: window.location.href,
+        reason,
+        totalVideos: videos.length,
+      });
       void browser.runtime.sendMessage({
         type: "screenmate:content-ready",
         frameId: 0,
-        videos: merged.map((video) => ({
+        videos: videos.map((video) => ({
           ...video,
           frameId: 0,
         })),
@@ -257,54 +267,204 @@ export default defineContentScript({
 
     contentLogger.info("Content script booted.", getVideoDetectionDiagnostics());
     browser.runtime.onMessage.addListener(listener);
-    notifyContentReady();
-
-    // Poll for newly-appearing video elements during the recovery window.
-    // On SPA sites like Bilibili the <video> element is rendered asynchronously
-    // by JavaScript, well after the content script boots.  We poll rather than
-    // use a MutationObserver because:
-    //  1. The <video> might be in the DOM but not yet renderable (zero size).
-    //  2. Setting a blob: src on an existing element is NOT a DOM mutation.
-    //  3. Polling every 1 s for 15 s is cheap and covers all edge cases.
-    const VIDEO_POLL_INTERVAL_MS = 1_000;
-    const VIDEO_POLL_LIFETIME_MS = 15_000;
-
-    let lastSeenVideoCount = collectPageVideos().length;
-    let lastSeenSrcSignature = getVideoSrcSignature();
-
-    const videoPollInterval = setInterval(() => {
-      const currentPageVideoCount = collectPageVideos().length;
-      const currentSrcSignature = getVideoSrcSignature();
-
-      const videoCountChanged = currentPageVideoCount !== lastSeenVideoCount;
-      const srcChanged = currentSrcSignature !== lastSeenSrcSignature;
-
-      if (videoCountChanged || srcChanged) {
-        contentLogger.info("Video landscape changed, re-notifying content-ready.", {
-          href: window.location.href,
-          previousCount: lastSeenVideoCount,
-          currentCount: currentPageVideoCount,
-          srcChanged,
-        });
-        lastSeenVideoCount = currentPageVideoCount;
-        lastSeenSrcSignature = currentSrcSignature;
-        notifyContentReady();
-      }
-    }, VIDEO_POLL_INTERVAL_MS);
-
-    const videoPollTimeout = setTimeout(() => {
-      clearInterval(videoPollInterval);
-    }, VIDEO_POLL_LIFETIME_MS);
+    const videoChangeNotifier = createVideoChangeNotifier({
+      notify: notifyContentReady,
+    });
+    videoChangeNotifier.start();
 
     ctx.onInvalidated(() => {
-      clearTimeout(videoPollTimeout);
-      clearInterval(videoPollInterval);
+      videoChangeNotifier.stop();
       previewController.destroy();
       sourceAttachmentRuntime.destroy("content-invalidated");
       browser.runtime.onMessage.removeListener(listener);
     });
   },
 });
+
+export function createVideoChangeNotifier({
+  debounceMs = 500,
+  highFrequencyLifetimeMs = 15_000,
+  lowFrequencyPollIntervalMs = 10_000,
+  notify,
+  pollIntervalMs = 1_000,
+}: {
+  debounceMs?: number;
+  highFrequencyLifetimeMs?: number;
+  lowFrequencyPollIntervalMs?: number | null;
+  notify: (reason?: string) => void;
+  pollIntervalMs?: number;
+}) {
+  let mutationObserver: MutationObserver | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
+  let highFrequencyTimeout: ReturnType<typeof setTimeout> | null = null;
+  let lastSeenVideoCount = 0;
+  let lastSeenSrcSignature = "";
+  const trackedVideos = new Set<HTMLVideoElement>();
+
+  const scheduleNotify = (reason: string) => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      refreshTrackedVideos();
+      updateLandscapeSignature();
+      notify(reason);
+    }, debounceMs);
+  };
+
+  const handleVideoEvent = (event: Event) => {
+    scheduleNotify(`video-${event.type}`);
+  };
+
+  const trackVideo = (video: HTMLVideoElement) => {
+    if (trackedVideos.has(video)) {
+      return;
+    }
+
+    trackedVideos.add(video);
+    for (const eventName of VIDEO_CHANGE_EVENT_NAMES) {
+      video.addEventListener(eventName, handleVideoEvent);
+    }
+  };
+
+  const untrackDisconnectedVideos = () => {
+    for (const video of Array.from(trackedVideos)) {
+      if (video.isConnected) {
+        continue;
+      }
+
+      for (const eventName of VIDEO_CHANGE_EVENT_NAMES) {
+        video.removeEventListener(eventName, handleVideoEvent);
+      }
+      trackedVideos.delete(video);
+    }
+  };
+
+  const refreshTrackedVideos = () => {
+    untrackDisconnectedVideos();
+    for (const video of collectPageVideos()) {
+      trackVideo(video);
+    }
+  };
+
+  const updateLandscapeSignature = () => {
+    lastSeenVideoCount = collectPageVideos().length;
+    lastSeenSrcSignature = getVideoSrcSignature();
+  };
+
+  const checkLandscape = () => {
+    refreshTrackedVideos();
+    const currentPageVideoCount = collectPageVideos().length;
+    const currentSrcSignature = getVideoSrcSignature();
+    const videoCountChanged = currentPageVideoCount !== lastSeenVideoCount;
+    const srcChanged = currentSrcSignature !== lastSeenSrcSignature;
+
+    if (!videoCountChanged && !srcChanged) {
+      return;
+    }
+
+    contentLogger.info("Video landscape changed, scheduling content-ready.", {
+      currentCount: currentPageVideoCount,
+      href: window.location.href,
+      previousCount: lastSeenVideoCount,
+      srcChanged,
+    });
+    lastSeenVideoCount = currentPageVideoCount;
+    lastSeenSrcSignature = currentSrcSignature;
+    scheduleNotify(videoCountChanged ? "video-count-changed" : "video-src-changed");
+  };
+
+  const startPolling = (intervalMs: number) => {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+    }
+    pollInterval = setInterval(checkLandscape, intervalMs);
+  };
+
+  return {
+    start() {
+      refreshTrackedVideos();
+      updateLandscapeSignature();
+      notify("initial");
+      mutationObserver = new MutationObserver(() => {
+        refreshTrackedVideos();
+        scheduleNotify("dom-mutated");
+      });
+      mutationObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["src", "poster", "style", "class", "hidden"],
+        childList: true,
+        subtree: true,
+      });
+      startPolling(pollIntervalMs);
+      highFrequencyTimeout = setTimeout(() => {
+        if (lowFrequencyPollIntervalMs === null) {
+          if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+          }
+          return;
+        }
+
+        startPolling(lowFrequencyPollIntervalMs);
+      }, highFrequencyLifetimeMs);
+    },
+    stop() {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      if (highFrequencyTimeout) {
+        clearTimeout(highFrequencyTimeout);
+        highFrequencyTimeout = null;
+      }
+      mutationObserver?.disconnect();
+      mutationObserver = null;
+      for (const video of Array.from(trackedVideos)) {
+        for (const eventName of VIDEO_CHANGE_EVENT_NAMES) {
+          video.removeEventListener(eventName, handleVideoEvent);
+        }
+      }
+      trackedVideos.clear();
+    },
+  };
+}
+
+function buildContentReadyVideos() {
+  const sourcesById = new Map(
+    listVisibleVideoSources().map((source) => [source.id, source]),
+  );
+  const allCandidates = listAllPageVideoCandidates();
+  const visibleCandidates = listVisibleVideoCandidates();
+  const visibleIds = new Set(visibleCandidates.map((video) => video.id));
+  const mergedCandidates = [
+    ...visibleCandidates,
+    ...allCandidates.filter((candidate) => !visibleIds.has(candidate.id)),
+  ];
+
+  return mergedCandidates.map((candidate) => ({
+    ...(sourcesById.get(candidate.id) ?? {
+      id: candidate.id,
+      label: candidate.label,
+      primaryUrl: candidate.fingerprint.primaryUrl,
+      posterUrl: null,
+      thumbnailUrl: null,
+      width: null,
+      height: null,
+      duration: null,
+      format: null,
+      isVisible: false,
+    }),
+    fingerprint: candidate.fingerprint,
+  }));
+}
 
 /**
  * Build a simple signature from the src/currentSrc of all page videos.
@@ -313,6 +473,6 @@ export default defineContentScript({
  */
 function getVideoSrcSignature(): string {
   return collectPageVideos()
-    .map((v) => v.currentSrc || v.src || "")
+    .map((v) => `${getVideoHandle(v)}:${v.currentSrc || v.src || ""}`)
     .join("|");
 }
