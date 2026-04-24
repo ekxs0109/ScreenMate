@@ -26,8 +26,8 @@ This split makes the extension harder to reason about as a WXT app. It also incr
 - Reorganize extension tests around WXT entrypoint boundaries: background, content, popup, and shared lib.
 - Use WXT-generated TypeScript configuration as the extension's typecheck base.
 - Move popup localization to WXT i18n source files and generated types.
-- Make popup text follow the browser extension locale through WXT i18n.
-- Remove the popup's explicit runtime language switching, because WXT i18n is browser-locale based rather than app-locale based.
+- Make popup text follow the browser plugin locale through WXT i18n.
+- Remove the popup's explicit runtime language switcher to better match WXT's browser-extension i18n model.
 - Remove `i18next`, `react-i18next`, and `i18next-browser-languagedetector` from the extension once the WXT i18n adapter replaces them.
 - Preserve current extension runtime behavior while this infrastructure migration lands.
 
@@ -67,7 +67,7 @@ Use a gradual WXT alignment. The migration should keep runtime behavior stable a
 3. Convert tests that touch extension APIs to `wxt/testing/fake-browser`.
 4. Move popup i18n source text into WXT locale files.
 5. Replace the current `i18next` module with a thin WXT i18n adapter.
-6. Remove the popup language selector.
+6. Remove the popup language selector and its persisted language preference.
 7. Remove unused i18n dependencies after the popup no longer imports them.
 
 This approach keeps the blast radius small while still ending with a clean WXT-shaped extension workspace.
@@ -254,8 +254,6 @@ generateShare: Start Sync Room
 endShare: End Share
 roomChat: Room Chat
 chatPlaceholder: Say something...
-languageLabel: Language
-systemLabel: System
 popout: Pop Out
 themeLabel: Theme
 themeLight: Light
@@ -263,7 +261,7 @@ themeDark: Dark
 themeSystem: System
 ```
 
-The non-English files should carry the current strings from `apps/extension/entrypoints/popup/i18n.ts`.
+The non-English files should carry the current strings from `apps/extension/entrypoints/popup/i18n.ts`. Language-selector-only keys such as `languageLabel` and `systemLabel` should be removed when the popup selector is removed.
 
 ## Popup i18n Adapter
 
@@ -288,18 +286,16 @@ This allows `ExtensionPopupPresenter` to keep receiving one dictionary object an
 
 ## Language Preference Behavior
 
-WXT i18n follows the browser extension locale. The popup should therefore stop offering explicit app-local language choices.
+WXT/browser i18n follows the browser extension locale. In product terms, this is "follow the plugin", not "follow the operating system". The popup should not expose an explicit app-local language selector after this migration.
 
 Resolution rules:
 
-- The active locale is the browser extension locale resolved by WXT/browser i18n.
-- Unsupported browser locales fall back to English through WXT locale fallback behavior.
-- The old `screenmate-extension-locale` local storage preference is ignored after migration.
-- If existing stored language preferences are present, they do not affect the WXT i18n adapter.
+- The active locale is the browser plugin locale resolved by WXT/browser i18n.
+- Unsupported browser/plugin locales fall back to English through WXT locale fallback behavior.
+- Existing stored `screenmate-extension-locale` preferences are ignored after migration.
+- The language selector and related persistence helpers are removed from the popup container and presenter.
 
-The language selector in the popup toolbar should be removed because there is no user action available in the popup that can change WXT's active browser extension locale.
-
-The key requirement is that source strings live in WXT locale files and runtime translation reads go through WXT's i18n API, not a hand-written runtime dictionary.
+The key requirement is that source strings live in WXT locale files and runtime translation reads go through WXT's i18n API, not a hand-written runtime dictionary or an app-local language switcher.
 
 ## Manifest Localization
 
@@ -340,14 +336,15 @@ Required focused coverage:
 - Tests that use WXT browser APIs reset fake browser state between runs.
 - Popup i18n adapter reads strings through WXT i18n.
 - Popup no longer persists or applies explicit language preference choices.
+- Popup presenter no longer renders a language selector.
 - Presenter receives the same dictionary shape after WXT i18n migration.
 - Build output includes generated locale assets.
 
 ## Risks And Mitigations
 
-Risk: WXT `browser.i18n.getMessage` follows the active browser extension locale, while the popup currently supports explicit in-app language switching.
+Risk: Removing the popup language switcher changes an existing UI control.
 
-Mitigation: Prefer WXT-native behavior and remove the explicit popup language switcher. Keep the presenter dictionary shape stable so the text plumbing remains small.
+Mitigation: This is intentional for WXT alignment. The extension follows the browser plugin locale, and the removed selector avoids presenting an app-local choice that does not match WXT's i18n model.
 
 Risk: Moving tests changes many relative imports.
 
@@ -367,6 +364,7 @@ Mitigation: Commit this migration in focused commits that name exact files, and 
 - Extension tests are organized by WXT entrypoint boundary.
 - Popup localization source strings live in WXT locale files.
 - The popup no longer depends on `i18next`.
-- The popup no longer presents an explicit language switcher that cannot be backed by WXT i18n.
+- The popup no longer presents an explicit language switcher.
+- Popup language follows the browser plugin locale through WXT i18n.
 - Current extension tests, typecheck, and build pass.
 - Existing runtime behavior is unchanged.
