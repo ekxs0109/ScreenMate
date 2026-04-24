@@ -2,11 +2,11 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ExtensionPopupPresenter } from "../entrypoints/popup/presenter";
-import { getExtensionDictionary } from "../entrypoints/popup/i18n";
-import { buildExtensionSceneModel } from "../entrypoints/popup/scene-adapter";
-import { createExtensionMockState } from "../entrypoints/popup/mock-state";
-import { createHostRoomSnapshot } from "../entrypoints/background/host-room-snapshot";
+import { ExtensionPopupPresenter } from "../../entrypoints/popup/presenter";
+import { getExtensionDictionary } from "../../entrypoints/popup/i18n";
+import { buildExtensionSceneModel } from "../../entrypoints/popup/scene-adapter";
+import { createExtensionMockState } from "../../entrypoints/popup/mock-state";
+import { createHostRoomSnapshot } from "../../entrypoints/background/host-room-snapshot";
 
 describe("ExtensionPopupPresenter", () => {
   afterEach(() => {

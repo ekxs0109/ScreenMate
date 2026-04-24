@@ -5,8 +5,8 @@ import {
   clearVideoSelectionPreview,
   createVideoPreviewController,
   showVideoSelectionPreview,
-} from "../entrypoints/content/video-preview";
-import { getVideoHandle } from "../entrypoints/content/video-detector";
+} from "../../entrypoints/content/video-preview";
+import { getVideoHandle } from "../../entrypoints/content/video-detector";
 
 function setVideoRect(element: Element | null, width: number, height: number) {
   Object.defineProperty(element, "getBoundingClientRect", {

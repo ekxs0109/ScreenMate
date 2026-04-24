@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createHostRoomRuntime } from "../entrypoints/background/host-room-runtime";
+import { createHostRoomRuntime } from "../../entrypoints/background/host-room-runtime";
 
 class MockHostSocket {
   public readyState = 0;

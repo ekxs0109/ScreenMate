@@ -10,8 +10,8 @@ import {
   shouldRetryEmptyVideoList,
   waitForMinimumRefreshDuration,
   type PopupLogger,
-} from "../entrypoints/popup/useHostControls";
-import { createHostRoomSnapshot } from "../entrypoints/background/host-room-snapshot";
+} from "../../entrypoints/popup/useHostControls";
+import { createHostRoomSnapshot } from "../../entrypoints/background/host-room-snapshot";
 
 function createLoggerDouble(): PopupLogger {
   return {

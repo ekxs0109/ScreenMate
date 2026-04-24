@@ -8,11 +8,11 @@ import {
   getVideoHandle,
   listVisibleVideoCandidates,
   listVisibleVideoSources,
-} from "../entrypoints/content/video-detector";
+} from "../../entrypoints/content/video-detector";
 import {
   createVideoChangeNotifier,
   createVideoMessageListener,
-} from "../entrypoints/content";
+} from "../../entrypoints/content";
 
 function setVideoRect(element: Element | null, width: number, height: number) {
   Object.defineProperty(element, "getBoundingClientRect", {

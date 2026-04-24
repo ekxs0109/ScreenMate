@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createHostRoomSnapshot } from "../entrypoints/background/host-room-snapshot";
-import { buildExtensionSceneModel } from "../entrypoints/popup/scene-adapter";
-import { createExtensionMockState } from "../entrypoints/popup/mock-state";
+import { createHostRoomSnapshot } from "../../entrypoints/background/host-room-snapshot";
+import { buildExtensionSceneModel } from "../../entrypoints/popup/scene-adapter";
+import { createExtensionMockState } from "../../entrypoints/popup/mock-state";
 
 describe("buildExtensionSceneModel", () => {
   it("merges real host state with mock-backed popup sections", () => {

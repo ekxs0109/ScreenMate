@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createHostRoomSnapshot,
   createHostRoomStore,
-} from "../entrypoints/background/host-room-snapshot";
+} from "../../entrypoints/background/host-room-snapshot";
 
 describe("createHostRoomStore", () => {
   it("keeps the room open while source recovery is in progress", () => {

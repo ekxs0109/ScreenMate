@@ -7,7 +7,7 @@ import {
   normalizeExtensionLocale,
   persistExtensionLanguagePreference,
   resolveExtensionLanguagePreference,
-} from "../entrypoints/popup/i18n";
+} from "../../entrypoints/popup/i18n";
 
 describe("popup i18n", () => {
   it("normalizes browser locales to supported languages", () => {

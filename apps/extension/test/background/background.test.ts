@@ -6,9 +6,9 @@ import {
   createHostRuntimeMessageListener,
   shouldForwardSignalToContentRuntime,
   type HostMessage,
-} from "../entrypoints/background";
-import { createHostRoomSnapshot } from "../entrypoints/background/host-room-snapshot";
-import { VideoSourceCache } from "../entrypoints/background/video-source-cache";
+} from "../../entrypoints/background";
+import { createHostRoomSnapshot } from "../../entrypoints/background/host-room-snapshot";
+import { VideoSourceCache } from "../../entrypoints/background/video-source-cache";
 
 function createHandlerDependencies(
   overrides: Partial<Parameters<typeof createHostMessageHandler>[0]> = {},

@@ -2,8 +2,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { errorCodes } from "@screenmate/shared";
-import { createSourceAttachmentRuntime } from "../entrypoints/content/source-attachment";
-import { getVideoHandle } from "../entrypoints/content/video-detector";
+import { createSourceAttachmentRuntime } from "../../entrypoints/content/source-attachment";
+import { getVideoHandle } from "../../entrypoints/content/video-detector";
 
 function setVideoRect(element: Element | null, width: number, height: number) {
   Object.defineProperty(element, "getBoundingClientRect", {

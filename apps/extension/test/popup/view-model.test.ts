@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getPopupViewModel } from "../entrypoints/popup/view-model";
+import { getPopupViewModel } from "../../entrypoints/popup/view-model";
 
 describe("getPopupViewModel", () => {
   it("shows attach copy when the room is open but no video is attached", () => {

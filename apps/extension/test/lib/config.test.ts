@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildScreenMateViewerRoomUrl,
   getScreenMateViewerBaseUrl,
-} from "../lib/config";
+} from "../../lib/config";
 
 describe("viewer room url helpers", () => {
   it("uses the local viewer app as the default base url", () => {
