@@ -32,8 +32,6 @@ generateShare: Crear Sala
 endShare: Finalizar
 roomChat: Chat
 chatPlaceholder: Di algo...
-languageLabel: Idioma
-systemLabel: Sistema
 popout: Ventana
 themeLabel: Tema
 themeLight: Claro

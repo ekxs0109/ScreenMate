@@ -1,9 +1,5 @@
 import { i18n } from "#i18n";
 
-export const extensionLocales = ["zh", "en", "ja", "es"] as const;
-
-export type ExtensionLocale = (typeof extensionLocales)[number];
-
 export type ExtensionDictionary = {
   appName: string;
   tabSource: string;
@@ -45,23 +41,6 @@ export type ExtensionDictionary = {
   themeDark: string;
   themeSystem: string;
 };
-
-const FALLBACK_LOCALE: ExtensionLocale = "en";
-
-function isExtensionLocale(language: string): language is ExtensionLocale {
-  return (extensionLocales as readonly string[]).includes(language);
-}
-
-export function normalizeExtensionLocale(
-  language: string | undefined | null,
-): ExtensionLocale {
-  if (!language) {
-    return FALLBACK_LOCALE;
-  }
-
-  const baseLanguage = language.toLowerCase().split("-")[0];
-  return isExtensionLocale(baseLanguage) ? baseLanguage : FALLBACK_LOCALE;
-}
 
 export function getExtensionDictionary(): ExtensionDictionary {
   return {

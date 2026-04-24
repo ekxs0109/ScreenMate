@@ -5,44 +5,44 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const messages = {
   appName: "SyncPlay",
-  tabSource: "Source",
-  tabRoom: "Room Settings",
-  tabChat: "Room Chat",
-  sourceSniff: "Site Sniffer",
-  sourceScreen: "Screen Share",
-  sourceUpload: "Local Upload",
-  detected: "Detected Video Resources",
-  mockOrigin: "Tab",
-  refreshSniff: "Rescan",
-  noVideo: "No video detected on this page.",
-  captureTitle: "Capture Screen/Window",
-  captureDescription: "Share a specific tab, app window, or entire desktop.",
-  captureButton: "Select Content",
-  screenReady: "Screen Ready",
-  screenReadyDescription: "Source captured. Click the button below to start sharing.",
-  reselect: "Reselect",
-  uploadDropzone: "Click or drag video files",
-  roomId: "Room ID",
-  openRoom: "Open Room",
-  passwordPlaceholder: "Leave blank for none",
-  save: "Save",
-  saved: "Saved",
-  viewerList: "Viewer Connection Status",
-  viewerName: "Name",
-  connType: "Method",
+  tabSource: "Origen",
+  tabRoom: "Sala Ajustes",
+  tabChat: "Chat",
+  sourceSniff: "Reconocer",
+  sourceScreen: "Compartir Pantalla",
+  sourceUpload: "Subir Archivo",
+  detected: "Medios detectados",
+  mockOrigin: "Pestaña",
+  refreshSniff: "Refrescar",
+  noVideo: "No se detectó video en esta página.",
+  captureTitle: "Capturar pantalla o ventana",
+  captureDescription: "Comparte una pestaña, una ventana de app o todo el escritorio.",
+  captureButton: "Seleccionar contenido",
+  screenReady: "Pantalla lista",
+  screenReadyDescription: "Fuente capturada. Haz clic abajo para iniciar la sala.",
+  reselect: "Volver a elegir",
+  uploadDropzone: "Haz clic o arrastra archivos de video",
+  roomId: "ID Sala",
+  openRoom: "Entrar",
+  passwordPlaceholder: "Dejar en blanco para sin contraseña",
+  save: "Guardar",
+  saved: "Guardado",
+  viewerList: "Conexiones de Espectadores",
+  viewerName: "Nombre",
+  connType: "Método",
   connPing: "Ping",
-  notSharedYet: "No video shared yet",
-  cancel: "Cancel",
-  changeSource: "Change Source",
-  generateShare: "Start Sync Room",
-  endShare: "End Share",
-  roomChat: "Room Chat",
-  chatPlaceholder: "Say something...",
-  popout: "Pop Out",
-  themeLabel: "Theme",
-  themeLight: "Light",
-  themeDark: "Dark",
-  themeSystem: "System",
+  notSharedYet: "No compartido",
+  cancel: "Cancelar",
+  changeSource: "Cambiar Fuente",
+  generateShare: "Crear Sala",
+  endShare: "Finalizar",
+  roomChat: "Chat",
+  chatPlaceholder: "Di algo...",
+  popout: "Ventana",
+  themeLabel: "Tema",
+  themeLight: "Claro",
+  themeDark: "Oscuro",
+  themeSystem: "Sistema",
 };
 
 vi.mock("#i18n", () => ({
@@ -111,9 +111,9 @@ describe("ExtensionPopupPresenter", () => {
     );
 
     expect(screen.getByText("SyncPlay")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Source" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Room Settings" })).toBeTruthy();
-    expect(screen.getByText("Detected Video Resources")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Origen" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Sala Ajustes" })).toBeTruthy();
+    expect(screen.getByText("Medios detectados")).toBeTruthy();
     expect(screen.getByText("Big Buck Bunny")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.queryByText("Room open · attached")).toBeNull();
@@ -276,7 +276,7 @@ describe("ExtensionPopupPresenter", () => {
     fireEvent.click(bilibiliToggle);
     expect(screen.getByRole("button", { name: /Big Buck Bunny/ })).toBeTruthy();
     expect(bilibiliToggle.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("No video detected on this page.")).toBeTruthy();
+    expect(screen.getByText("No se detectó video en esta página.")).toBeTruthy();
   });
 
   it("keeps the detected resources header outside the scrollable list", () => {
@@ -326,7 +326,7 @@ describe("ExtensionPopupPresenter", () => {
     );
 
     expect(
-      screen.getByText("Detected Video Resources").closest(".popup-scroll-area"),
+      screen.getByText("Medios detectados").closest(".popup-scroll-area"),
     ).toBeNull();
     expect(
       screen.getByText("标签 1 - Bilibili").closest(".popup-scroll-area"),

@@ -3,45 +3,45 @@
 import { describe, expect, it, vi } from "vitest";
 
 const messages = {
-  appName: "SyncPlay",
-  tabSource: "Source",
-  tabRoom: "Room Settings",
-  tabChat: "Room Chat",
-  sourceSniff: "Site Sniffer",
-  sourceScreen: "Screen Share",
-  sourceUpload: "Local Upload",
-  detected: "Detected Video Resources",
-  mockOrigin: "Tab",
-  refreshSniff: "Rescan",
-  noVideo: "No video detected on this page.",
-  captureTitle: "Capture Screen/Window",
-  captureDescription: "Share a specific tab, app window, or entire desktop.",
-  captureButton: "Select Content",
-  screenReady: "Screen Ready",
-  screenReadyDescription: "Source captured. Click the button below to start sharing.",
-  reselect: "Reselect",
-  uploadDropzone: "Click or drag video files",
-  roomId: "Room ID",
-  openRoom: "Open Room",
-  passwordPlaceholder: "Leave blank for none",
-  save: "Save",
-  saved: "Saved",
-  viewerList: "Viewer Connection Status",
-  viewerName: "Name",
-  connType: "Method",
+  appName: "SyncPlay JP",
+  tabSource: "メディア元",
+  tabRoom: "ルーム設定",
+  tabChat: "チャット",
+  sourceSniff: "スニッファー",
+  sourceScreen: "画面共有",
+  sourceUpload: "ファイルアップロード",
+  detected: "検出されたメディア",
+  mockOrigin: "タブ",
+  refreshSniff: "再スキャン",
+  noVideo: "このページで動画が見つかりません。",
+  captureTitle: "画面 / ウィンドウをキャプチャ",
+  captureDescription: "特定のタブ、アプリウィンドウ、またはデスクトップ全体を共有します",
+  captureButton: "共有コンテンツを選択",
+  screenReady: "画面準備完了",
+  screenReadyDescription: "キャプチャ成功。下のボタンをクリックして共有を開始します。",
+  reselect: "再選択",
+  uploadDropzone: "クリックまたはドラッグしてアップロード",
+  roomId: "ルーム ID",
+  openRoom: "開く",
+  passwordPlaceholder: "パスワードなし(空白)",
+  save: "保存",
+  saved: "保存済み",
+  viewerList: "視聴者の接続状態",
+  viewerName: "名前",
+  connType: "接続タイプ",
   connPing: "Ping",
-  notSharedYet: "No video shared yet",
-  cancel: "Cancel",
-  changeSource: "Change Source",
-  generateShare: "Start Sync Room",
-  endShare: "End Share",
-  roomChat: "Room Chat",
-  chatPlaceholder: "Say something...",
-  popout: "Pop Out",
-  themeLabel: "Theme",
-  themeLight: "Light",
-  themeDark: "Dark",
-  themeSystem: "System",
+  notSharedYet: "まだ共有されていません",
+  cancel: "キャンセル",
+  changeSource: "ソースを変更",
+  generateShare: "ルームを作成",
+  endShare: "共有を終了",
+  roomChat: "チャット",
+  chatPlaceholder: "メッセージ...",
+  popout: "ポップアウト",
+  themeLabel: "テーマ",
+  themeLight: "ライト",
+  themeDark: "ダーク",
+  themeSystem: "システム",
 };
 
 vi.mock("#i18n", () => ({
@@ -50,29 +50,20 @@ vi.mock("#i18n", () => ({
   },
 }));
 
-import {
-  extensionLocales,
-  getExtensionDictionary,
-  normalizeExtensionLocale,
-} from "../../entrypoints/popup/i18n";
+import * as popupI18n from "../../entrypoints/popup/i18n";
 
 describe("popup i18n", () => {
-  it("normalizes browser locales to supported languages", () => {
-    expect(normalizeExtensionLocale("zh-CN")).toBe("zh");
-    expect(normalizeExtensionLocale("ja-JP")).toBe("ja");
-    expect(normalizeExtensionLocale("fr-FR")).toBe("en");
-  });
-
-  it("lists supported WXT locale source files", () => {
-    expect(extensionLocales).toEqual(["zh", "en", "ja", "es"]);
+  it("only exposes the WXT-backed dictionary adapter", () => {
+    expect(popupI18n).not.toHaveProperty("extensionLocales");
+    expect(popupI18n).not.toHaveProperty("normalizeExtensionLocale");
   });
 
   it("returns presenter copy from WXT i18n", () => {
-    const copy = getExtensionDictionary();
+    const copy = popupI18n.getExtensionDictionary();
 
-    expect(copy.appName).toBe("SyncPlay");
-    expect(copy.tabSource).toBe("Source");
-    expect(copy.themeSystem).toBe("System");
+    expect(copy.appName).toBe("SyncPlay JP");
+    expect(copy.tabSource).toBe("メディア元");
+    expect(copy.themeSystem).toBe("システム");
     expect("languageLabel" in copy).toBe(false);
     expect("systemLabel" in copy).toBe(false);
   });
