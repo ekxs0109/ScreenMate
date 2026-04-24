@@ -19,11 +19,8 @@
     "@screenmate/shared": "workspace:*",
     "@screenmate/webrtc-core": "workspace:*",
     "class-variance-authority": "^0.7.1",
-    "i18next": "^26.0.6",
-    "i18next-browser-languagedetector": "^8.2.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-i18next": "^17.0.4",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
