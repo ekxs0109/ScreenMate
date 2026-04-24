@@ -32,6 +32,8 @@ generateShare: Start Sync Room
 endShare: End Share
 roomChat: Room Chat
 chatPlaceholder: Say something...
+languageLabel: Language
+systemLabel: System
 popout: Pop Out
 themeLabel: Theme
 themeLight: Light

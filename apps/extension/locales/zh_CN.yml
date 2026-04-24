@@ -32,6 +32,8 @@ generateShare: 创建同步房间
 endShare: 结束分享
 roomChat: 房间群聊
 chatPlaceholder: 发点什么...
+languageLabel: 语言
+systemLabel: 跟随系统
 popout: 弹出窗口
 themeLabel: 主题
 themeLight: 浅色

@@ -32,6 +32,8 @@ generateShare: ルームを作成
 endShare: 共有を終了
 roomChat: チャット
 chatPlaceholder: メッセージ...
+languageLabel: 言語
+systemLabel: システム
 popout: ポップアウト
 themeLabel: テーマ
 themeLight: ライト
