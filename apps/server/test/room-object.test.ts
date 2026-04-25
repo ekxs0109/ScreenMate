@@ -283,6 +283,48 @@ describe("RoomObject", () => {
     ).toHaveLength(0);
   });
 
+  it("registers a replacement viewer before closing the old socket", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    const roomState = getRoomStateInstance(roomObject);
+    const firstViewer = createSocketPair();
+    const secondViewer = createSocketPair();
+    const host = createSocketPair();
+
+    roomState.connectSession({
+      roomId: "room_demo",
+      role: "host",
+      sessionId: "host_1",
+      socket: host.server,
+    });
+    const firstViewerConnection = {
+      roomId: "room_demo",
+      role: "viewer",
+      sessionId: "viewer_1",
+      socket: firstViewer.server,
+    } as const;
+    firstViewer.server.addEventListener("close", () => {
+      roomState.disconnectSession(firstViewerConnection);
+    });
+    roomState.connectSession(firstViewerConnection);
+
+    roomState.connectSession({
+      roomId: "room_demo",
+      role: "viewer",
+      sessionId: "viewer_1",
+      socket: secondViewer.server,
+    });
+
+    expect(roomState.getStateSnapshot().viewerCount).toBe(1);
+    expect(
+      host.client.messages.filter(
+        (message) =>
+          (message as { messageType?: string }).messageType === "viewer-left",
+      ),
+    ).toHaveLength(0);
+  });
+
   it("ignores stale host close events after the host reconnects", async () => {
     const { state } = createDurableObjectState();
     const roomObject = new RoomObject(state, {} as never);
@@ -306,6 +348,36 @@ describe("RoomObject", () => {
     });
 
     roomState.disconnectSession(firstHostConnection);
+
+    expect(roomState.getStateSnapshot().state).not.toBe("closed");
+    expect(roomState.getStateSnapshot().hostConnected).toBe(true);
+  });
+
+  it("registers a replacement host before closing the old socket", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    const roomState = getRoomStateInstance(roomObject);
+    const firstHost = createSocketPair();
+    const secondHost = createSocketPair();
+
+    const firstHostConnection = {
+      roomId: "room_demo",
+      role: "host",
+      sessionId: "host_1",
+      socket: firstHost.server,
+    } as const;
+    firstHost.server.addEventListener("close", () => {
+      roomState.disconnectSession(firstHostConnection);
+    });
+    roomState.connectSession(firstHostConnection);
+
+    roomState.connectSession({
+      roomId: "room_demo",
+      role: "host",
+      sessionId: "host_1",
+      socket: secondHost.server,
+    });
 
     expect(roomState.getStateSnapshot().state).not.toBe("closed");
     expect(roomState.getStateSnapshot().hostConnected).toBe(true);

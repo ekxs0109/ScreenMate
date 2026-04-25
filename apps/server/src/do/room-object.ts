@@ -191,11 +191,13 @@ export class RoomState {
     connection.socket.accept?.();
 
     if (connection.role === "host") {
-      if (this.hostConnection && this.hostConnection !== connection) {
-        this.hostConnection.socket.close(1012, "host-replaced");
-      }
+      const existingHost = this.hostConnection;
 
       this.hostConnection = connection;
+      if (existingHost && existingHost !== connection) {
+        existingHost.socket.close(1012, "host-replaced");
+      }
+
       this.send(connection, this.roomStateEnvelope());
       this.send(connection, this.viewerRosterEnvelope());
       this.send(connection, this.chatHistoryEnvelope());
@@ -213,11 +215,11 @@ export class RoomState {
     }
 
     const existingViewer = this.viewers.get(connection.sessionId);
+    this.viewers.set(connection.sessionId, connection);
     if (existingViewer && existingViewer !== connection) {
       existingViewer.socket.close(1012, "viewer-replaced");
     }
 
-    this.viewers.set(connection.sessionId, connection);
     this.ensureViewerProfile(connection.sessionId);
     void this.persistActivity();
     this.send(connection, this.roomStateEnvelope());
