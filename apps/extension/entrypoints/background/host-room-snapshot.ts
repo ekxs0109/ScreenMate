@@ -101,12 +101,17 @@ export function createHostRoomStore(
       viewerRoster?: ViewerRosterEntry[];
       chatMessages?: RoomChatMessage[];
     }) {
-      const viewerRoster = input.viewerRoster ?? snapshot.viewerRoster;
+      const hasViewerRoster = Object.hasOwn(input, "viewerRoster");
+      const viewerRoster = !hasViewerRoster
+        ? snapshot.viewerRoster
+        : input.viewerRoster ?? snapshot.viewerRoster;
       snapshot = {
         ...snapshot,
         viewerRoster,
         chatMessages: input.chatMessages ?? snapshot.chatMessages,
-        viewerCount: countOnlineViewers(viewerRoster, snapshot.viewerCount),
+        viewerCount: hasViewerRoster
+          ? countOnlineViewers(input.viewerRoster, snapshot.viewerCount)
+          : snapshot.viewerCount,
       };
       return snapshot;
     },

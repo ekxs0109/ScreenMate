@@ -178,6 +178,7 @@ export function createHostRoomRuntime(options: {
       ...session,
       viewerSessionIds: uniqueViewerSessionIds,
       viewerCount: uniqueViewerSessionIds.length,
+      viewerRoster: undefined,
     };
     store.setViewerCount(uniqueViewerSessionIds.length);
     await persist();
@@ -297,7 +298,7 @@ export function createHostRoomRuntime(options: {
   ): PersistedHostRoomSession {
     return {
       ...input,
-      viewerRoster: input.viewerRoster ?? [],
+      viewerRoster: input.viewerRoster,
       chatMessages: input.chatMessages ?? [],
     };
   }
