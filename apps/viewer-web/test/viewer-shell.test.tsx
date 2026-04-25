@@ -75,6 +75,28 @@ describe("ViewerShell", () => {
     expect(onDisplayNameChange).toHaveBeenCalledWith("Ira");
   });
 
+  it("restores the current display name when a blank edit blurs", () => {
+    const onDisplayNameChange = vi.fn();
+    const scene = buildViewerSceneModel({
+      locale: "en",
+      session: initialViewerSessionState,
+      mock: {
+        ...createViewerMockState("en"),
+        username: "Mina",
+      },
+    });
+
+    renderViewerShell(scene, { onDisplayNameChange });
+
+    const nameInput = screen.getByDisplayValue("Mina") as HTMLInputElement;
+
+    fireEvent.change(nameInput, { target: { value: "   " } });
+    fireEvent.blur(nameInput);
+
+    expect(onDisplayNameChange).not.toHaveBeenCalled();
+    expect(nameInput.value).toBe("Mina");
+  });
+
   it("preserves failed chat sends and clears successful sends", () => {
     const onSendMessage = vi.fn()
       .mockReturnValueOnce(false)

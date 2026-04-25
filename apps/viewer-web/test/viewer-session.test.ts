@@ -40,6 +40,18 @@ class FakeWebSocket {
       listener({ data });
     }
   }
+
+  emitClose() {
+    for (const listener of this.listeners.close) {
+      listener({ reason: "closed" });
+    }
+  }
+
+  emitError() {
+    for (const listener of this.listeners.error) {
+      listener();
+    }
+  }
 }
 
 class FakePeerConnection {
@@ -442,6 +454,90 @@ describe("ViewerSession", () => {
     await vi.advanceTimersByTimeAsync(500);
 
     expect(socket.sentMessages).toHaveLength(sentBeforeDestroy);
+  });
+
+  it("stops metrics sampling when the signaling socket closes", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeWebSocket();
+    const peer = new FakePeerConnection();
+    const getStats = vi.spyOn(peer, "getStats");
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 100,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    await Promise.resolve();
+    expect(getStats).toHaveBeenCalledTimes(1);
+
+    socket.emitClose();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(getStats).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops metrics sampling when the signaling socket errors", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeWebSocket();
+    const peer = new FakePeerConnection();
+    const getStats = vi.spyOn(peer, "getStats");
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 100,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    await Promise.resolve();
+    expect(getStats).toHaveBeenCalledTimes(1);
+
+    socket.emitError();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(getStats).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves updated display name through destroy and rejoin", async () => {
+    const firstSocket = new FakeWebSocket();
+    const secondSocket = new FakeWebSocket();
+    const sockets = [firstSocket, secondSocket];
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => sockets.shift() as never,
+      createPeerConnection: () => new FakePeerConnection() as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    firstSocket.emitOpen();
+    session.updateDisplayName("Noa");
+    session.destroy();
+
+    await session.join("room_demo");
+    secondSocket.emitOpen();
+
+    expect(secondSocket.sentMessages.map((message) => JSON.parse(message))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          messageType: "viewer-profile",
+          payload: {
+            viewerSessionId: "viewer_1",
+            displayName: "Noa",
+          },
+        }),
+      ]),
+    );
   });
 
   it("moves to an ended state when the room closes", async () => {

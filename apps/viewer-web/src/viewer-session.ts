@@ -155,6 +155,7 @@ export class ViewerSession {
             roomId: joined.roomId,
             sessionId: joined.sessionId,
           });
+          this.stopMetricsTimer();
           if (
             this.snapshot.status !== "ended" &&
             this.snapshot.status !== "error"
@@ -170,6 +171,7 @@ export class ViewerSession {
             roomId: joined.roomId,
             sessionId: joined.sessionId,
           });
+          this.stopMetricsTimer();
           this.update({
             status: "error",
             errorCode: viewerErrorCodes.SIGNALING_FAILED,
@@ -466,9 +468,13 @@ export class ViewerSession {
     this.joinResponse = null;
 
     if (resetSnapshot) {
+      const displayName =
+        this.snapshot.displayName.trim() ||
+        this.options.initialDisplayName?.trim() ||
+        "";
       this.snapshot = {
         ...initialViewerSessionState,
-        displayName: this.options.initialDisplayName?.trim() ?? "",
+        displayName,
       };
       this.emit();
     }

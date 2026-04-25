@@ -37,6 +37,15 @@ export function ViewerShell({
     setDisplayNameDraft(scene.sidebar.username);
   }, [scene.sidebar.username]);
 
+  function commitDisplayNameDraft(value: string) {
+    if (!value.trim()) {
+      setDisplayNameDraft(scene.sidebar.username);
+      return;
+    }
+
+    onDisplayNameChange(value);
+  }
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) {
@@ -215,7 +224,7 @@ export function ViewerShell({
                  <input
                    aria-label={copy.nameLabel}
                    value={displayNameDraft}
-                   onBlur={(event) => onDisplayNameChange(event.currentTarget.value)}
+                   onBlur={(event) => commitDisplayNameDraft(event.currentTarget.value)}
                    onChange={(event) => setDisplayNameDraft(event.currentTarget.value)}
                    onKeyDown={(event) => {
                      if (event.key === "Enter") {
