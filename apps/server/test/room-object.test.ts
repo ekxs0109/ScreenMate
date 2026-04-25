@@ -1106,7 +1106,20 @@ describe("RoomObject", () => {
     await initializeRoomObject(roomObject);
     await state.storage.put("room-activity", {
       viewerProfiles: [{ viewerSessionId: "viewer_1", displayName: "Mina" }],
-      viewerMetrics: [{ viewerSessionId: "viewer_1", connectionType: "relay" }],
+      viewerMetrics: [
+        {
+          viewerSessionId: "viewer_1",
+          connectionType: "relay",
+          pingMs: Number.POSITIVE_INFINITY,
+          metricsUpdatedAt: 1,
+        },
+        {
+          viewerSessionId: "viewer_2",
+          connectionType: "relay",
+          pingMs: 32,
+          metricsUpdatedAt: Number.NaN,
+        },
+      ],
       chatMessages: [{ text: "missing canonical fields" }],
     });
 
@@ -1124,6 +1137,23 @@ describe("RoomObject", () => {
         client: host,
       }),
     ).not.toThrow();
+    expect(
+      host.messages.find(
+        (message) =>
+          (message as { messageType?: string }).messageType === "viewer-roster",
+      ),
+    ).toMatchObject({
+      payload: {
+        viewers: [
+          {
+            viewerSessionId: "viewer_1",
+            connectionType: "unknown",
+            pingMs: null,
+            metricsUpdatedAt: null,
+          },
+        ],
+      },
+    });
   });
 
   it("caps chat history replay to the latest 100 messages", async () => {

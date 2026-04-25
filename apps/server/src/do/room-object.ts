@@ -1176,7 +1176,13 @@ function normalizePersistedActivity(value: unknown): PersistedRoomActivity {
               candidate.connectionType !== "relay" &&
               candidate.connectionType !== "unknown") ||
             typeof candidate.metricsUpdatedAt !== "number" ||
-            candidate.metricsUpdatedAt < 0
+            !Number.isFinite(candidate.metricsUpdatedAt) ||
+            candidate.metricsUpdatedAt < 0 ||
+            (candidate.pingMs !== null &&
+              candidate.pingMs !== undefined &&
+              (typeof candidate.pingMs !== "number" ||
+                !Number.isFinite(candidate.pingMs) ||
+                candidate.pingMs < 0))
           ) {
             return [];
           }
@@ -1186,7 +1192,8 @@ function normalizePersistedActivity(value: unknown): PersistedRoomActivity {
               viewerSessionId,
               connectionType: candidate.connectionType,
               pingMs:
-                typeof candidate.pingMs === "number" && candidate.pingMs >= 0
+                typeof candidate.pingMs === "number" &&
+                candidate.pingMs >= 0
                   ? Math.trunc(candidate.pingMs)
                   : null,
               metricsUpdatedAt: Math.trunc(candidate.metricsUpdatedAt),
