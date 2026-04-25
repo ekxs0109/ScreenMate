@@ -47,6 +47,7 @@ export function createExtensionMockState(): ExtensionMockState {
       {
         id: "viewer-a",
         name: "User_4092",
+        online: true,
         connType: "P2P",
         ping: "24ms",
         isGood: true,
@@ -54,6 +55,7 @@ export function createExtensionMockState(): ExtensionMockState {
       {
         id: "viewer-b",
         name: "User_7188",
+        online: true,
         connType: "Relay",
         ping: "142ms",
         isGood: false,
@@ -61,6 +63,7 @@ export function createExtensionMockState(): ExtensionMockState {
       {
         id: "viewer-c",
         name: "User_9112",
+        online: true,
         connType: "P2P",
         ping: "15ms",
         isGood: true,

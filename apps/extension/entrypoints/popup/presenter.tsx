@@ -98,7 +98,7 @@ export function ExtensionPopupPresenter({
   onCopyLink: () => void;
   onCopyRoomId: () => void;
   onJumpToRoom: () => void;
-  onSendChat: (text: string) => void;
+  onSendChat: (text: string) => boolean | Promise<boolean>;
 }) {
   const shouldShowMetaMessage =
     scene.meta.message !== null && scene.meta.message !== "Room closed.";
@@ -616,7 +616,7 @@ function formatFileSize(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-function ChatPane({ messages, onSend, placeholder }: { messages: ExtensionSceneModel["chatTab"]["messages"]; onSend: (text: string) => void; placeholder: string }) {
+function ChatPane({ messages, onSend, placeholder }: { messages: ExtensionSceneModel["chatTab"]["messages"]; onSend: (text: string) => boolean | Promise<boolean>; placeholder: string }) {
   return <ChatPaneInner messages={messages} onSend={onSend} placeholder={placeholder} roundedBottom />;
 }
 
@@ -629,7 +629,7 @@ export function ContentChatWidget({
   placeholder,
 }: {
   messages: ExtensionSceneModel["chatTab"]["messages"];
-  onSend: (text: string) => void;
+  onSend: (text: string) => boolean | Promise<boolean>;
   minimized: boolean;
   onToggleMinimized: () => void;
   title: string;
@@ -649,7 +649,7 @@ export function ContentChatWidget({
   );
 }
 
-function ChatPaneInner({ messages, onSend, placeholder, roundedBottom = false }: { messages: ExtensionSceneModel["chatTab"]["messages"]; onSend: (text: string) => void; placeholder: string; roundedBottom?: boolean }) {
+function ChatPaneInner({ messages, onSend, placeholder, roundedBottom = false }: { messages: ExtensionSceneModel["chatTab"]["messages"]; onSend: (text: string) => boolean | Promise<boolean>; placeholder: string; roundedBottom?: boolean }) {
   return (
     <>
       <PopupScrollArea
@@ -675,13 +675,17 @@ function ChatPaneInner({ messages, onSend, placeholder, roundedBottom = false }:
         className={cn("p-3 border-t border-border bg-card flex gap-2 shrink-0", roundedBottom && "pb-6 rounded-b-2xl")}
         onSubmit={(event) => {
           event.preventDefault();
-          const formData = new FormData(event.currentTarget);
+          const form = event.currentTarget;
+          const formData = new FormData(form);
           const value = String(formData.get("message") ?? "").trim();
           if (!value) {
             return;
           }
-          onSend(value);
-          event.currentTarget.reset();
+          void Promise.resolve(onSend(value)).then((sent) => {
+            if (sent) {
+              form.reset();
+            }
+          });
         }}
       >
         <input

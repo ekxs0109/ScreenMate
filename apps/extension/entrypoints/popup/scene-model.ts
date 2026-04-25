@@ -39,6 +39,7 @@ export type SniffVideoGroup = {
 export type ViewerConnectionRow = {
   id: string;
   name: string;
+  online: boolean;
   connType: string;
   ping: string;
   isGood: boolean;

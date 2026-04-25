@@ -35,9 +35,98 @@ describe("buildExtensionSceneModel", () => {
     expect(scene.sourceTab.sectionKinds).toEqual(["sniff", "screen", "upload"]);
     expect(scene.roomTab.roomId).toBe("room_demo");
     expect(scene.roomTab.viewerCount).toBe(2);
-    expect(scene.roomTab.viewerDetails).toHaveLength(3);
+    expect(scene.roomTab.viewerDetails).toHaveLength(0);
     expect(scene.roomTab.shareUrl).toBe("https://viewer.example/rooms/room_demo");
-    expect(scene.chatTab.messages[0]?.sender).toBe("System");
+    expect(scene.chatTab.messages).toHaveLength(0);
+  });
+
+  it("prefers real room roster and chat over popup mock activity", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        viewerCount: 1,
+        viewerRoster: [
+          {
+            viewerSessionId: "viewer_1",
+            displayName: "Mina",
+            online: true,
+            connectionType: "direct",
+            pingMs: 24,
+            joinedAt: 1,
+            profileUpdatedAt: 2,
+            metricsUpdatedAt: 3,
+          },
+          {
+            viewerSessionId: "viewer_2",
+            displayName: "Noor",
+            online: false,
+            connectionType: "relay",
+            pingMs: null,
+            joinedAt: 4,
+            profileUpdatedAt: null,
+            metricsUpdatedAt: null,
+          },
+        ],
+        chatMessages: [
+          {
+            messageId: "msg_1",
+            senderSessionId: "viewer_1",
+            senderRole: "viewer",
+            senderName: "Mina",
+            text: "hello room",
+            sentAt: 10,
+          },
+          {
+            messageId: "msg_2",
+            senderSessionId: "host_1",
+            senderRole: "host",
+            senderName: "Ignored",
+            text: "hello back",
+            sentAt: 11,
+          },
+        ],
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: createExtensionMockState(),
+    });
+
+    expect(scene.roomTab.viewerCount).toBe(1);
+    expect(scene.roomTab.viewerDetails).toEqual([
+      {
+        id: "viewer_1",
+        name: "Mina",
+        online: true,
+        connType: "P2P",
+        ping: "24ms",
+        isGood: true,
+      },
+      {
+        id: "viewer_2",
+        name: "Noor",
+        online: false,
+        connType: "Offline",
+        ping: "--",
+        isGood: false,
+      },
+    ]);
+    expect(scene.chatTab.messages).toEqual([
+      {
+        id: "msg_1",
+        sender: "Mina",
+        text: "hello room",
+      },
+      {
+        id: "msg_2",
+        sender: "Host",
+        text: "hello back",
+      },
+    ]);
   });
 
   it("groups sniff videos by tab and hides blob URLs from card titles", () => {

@@ -29,6 +29,7 @@ type SourceFingerprintMatch = Omit<SourceFingerprint, "frameId" | "tabId">;
 
 export type HostMessage =
   | { type: "screenmate:get-room-session" }
+  | { type: "screenmate:send-chat-message"; text: string }
   | { type: "screenmate:list-videos"; refresh?: boolean }
   | { type: "screenmate:get-video-sniff-state" }
   | { type: "screenmate:ensure-video-sniff-state" }
@@ -118,7 +119,12 @@ type HandlerResponse =
   | HostRoomSnapshot
   | TabVideoSource[]
   | VideoSniffState
-  | PreviewAck;
+  | PreviewAck
+  | {
+      ok: boolean;
+      snapshot: HostRoomSnapshot;
+      error: "room-chat-send-failed" | null;
+    };
 type TabMessageResponse =
   | LocalVideoSource[]
   | AttachSourceResponse
@@ -166,6 +172,16 @@ export function createHostMessageHandler(
 
     if (message.type === "screenmate:get-room-session") {
       return dependencies.runtime.getSnapshot();
+    }
+
+    if (message.type === "screenmate:send-chat-message") {
+      const text = message.text.trim();
+      const ok = dependencies.runtime.sendHostChatMessage(text);
+      return {
+        ok,
+        snapshot: dependencies.runtime.getSnapshot(),
+        error: ok ? null : "room-chat-send-failed",
+      };
     }
 
     if (message.type === "screenmate:stop-room") {
@@ -264,6 +280,8 @@ export function createHostMessageHandler(
         activeFrameId: message.frameId,
         viewerSessionIds: [],
         viewerCount: 0,
+        viewerRoster: [],
+        chatMessages: [],
         sourceFingerprint: null,
         recoverByTimestamp: null,
       });
@@ -372,6 +390,13 @@ export default defineBackground(() => {
   const runtime = createHostRoomRuntime({
     apiBaseUrl,
     storage: browser.storage.session,
+    onSnapshotUpdated() {
+      void browser.runtime
+        .sendMessage({ type: "screenmate:room-snapshot-updated" })
+        .catch(() => {
+          // No popup may be open to receive the notification.
+        });
+    },
   });
   const videoSniffStateStorage = storage.defineItem<VideoSniffState>(
     "session:screenmate-video-sniff-state",
@@ -1128,6 +1153,8 @@ function isHostMessage(message: unknown): message is HostMessage {
     case "screenmate:ensure-video-sniff-state":
     case "screenmate:refresh-video-sniff-state":
       return true;
+    case "screenmate:send-chat-message":
+      return typeof message.text === "string" && message.text.trim().length > 0;
     case "screenmate:list-videos":
       return (
         typeof message.refresh === "undefined" ||

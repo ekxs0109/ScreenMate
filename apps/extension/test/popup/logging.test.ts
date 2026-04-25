@@ -84,6 +84,8 @@ describe("normalizeSnapshot", () => {
       sourceState: "attached",
       roomId: "room_123",
       viewerCount: 2,
+      viewerRoster: [],
+      chatMessages: [],
       sourceLabel: "Video 1",
       activeTabId: null,
       activeFrameId: null,

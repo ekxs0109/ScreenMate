@@ -1,6 +1,7 @@
 import { browser } from "wxt/browser";
 import { storage } from "wxt/utils/storage";
 import { useEffect, useRef, useState } from "react";
+import type { RoomChatMessage, ViewerRosterEntry } from "@screenmate/shared";
 import type { HostMessage, TabVideoSource } from "../background";
 import {
   createHostRoomSnapshot,
@@ -297,6 +298,13 @@ export function useHostControls({
         });
         void syncSnapshot();
       }
+
+      if (message.type === "screenmate:room-snapshot-updated") {
+        popupLogger.debug("Received room activity notification. Refreshing room snapshot.", {
+          type: message.type,
+        });
+        void syncSnapshot();
+      }
     };
 
     const unwatchVideoSniffState = videoSniffStateStorage.watch((nextState) => {
@@ -507,6 +515,12 @@ export function normalizeSnapshot(value: unknown): HostRoomSnapshot {
     roomId: typeof candidate.roomId === "string" ? candidate.roomId : null,
     viewerCount:
       typeof candidate.viewerCount === "number" ? candidate.viewerCount : 0,
+    viewerRoster: Array.isArray(candidate.viewerRoster)
+      ? candidate.viewerRoster.filter(isViewerRosterEntry)
+      : [],
+    chatMessages: Array.isArray(candidate.chatMessages)
+      ? candidate.chatMessages.filter(isRoomChatMessage)
+      : [],
     sourceLabel:
       typeof candidate.sourceLabel === "string" ? candidate.sourceLabel : null,
     activeTabId:
@@ -521,6 +535,48 @@ export function normalizeSnapshot(value: unknown): HostRoomSnapshot {
         : null,
     message: typeof candidate.message === "string" ? candidate.message : null,
   });
+}
+
+function isViewerRosterEntry(value: unknown): value is ViewerRosterEntry {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.viewerSessionId === "string" &&
+    value.viewerSessionId.length > 0 &&
+    typeof value.displayName === "string" &&
+    value.displayName.length > 0 &&
+    typeof value.online === "boolean" &&
+    (value.connectionType === "direct" ||
+      value.connectionType === "relay" ||
+      value.connectionType === "unknown") &&
+    (typeof value.pingMs === "number" || value.pingMs === null) &&
+    typeof value.joinedAt === "number" &&
+    (typeof value.profileUpdatedAt === "number" ||
+      value.profileUpdatedAt === null) &&
+    (typeof value.metricsUpdatedAt === "number" ||
+      value.metricsUpdatedAt === null)
+  );
+}
+
+function isRoomChatMessage(value: unknown): value is RoomChatMessage {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.messageId === "string" &&
+    value.messageId.length > 0 &&
+    typeof value.senderSessionId === "string" &&
+    value.senderSessionId.length > 0 &&
+    (value.senderRole === "host" || value.senderRole === "viewer") &&
+    typeof value.senderName === "string" &&
+    value.senderName.length > 0 &&
+    typeof value.text === "string" &&
+    value.text.length > 0 &&
+    typeof value.sentAt === "number"
+  );
 }
 
 function normalizeVideos(value: unknown): TabVideoSource[] {

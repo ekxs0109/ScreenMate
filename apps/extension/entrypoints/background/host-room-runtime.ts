@@ -1,7 +1,9 @@
 import {
   signalEnvelopeSchema,
+  type RoomChatMessage,
   type RoomSourceState,
   type RoomState,
+  type ViewerRosterEntry,
 } from "@screenmate/shared";
 import {
   getScreenMateApiBaseUrl,
@@ -44,6 +46,7 @@ export function createHostRoomRuntime(options: {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
   WebSocketImpl?: new (url: string) => HostSocket;
+  onSnapshotUpdated?: () => void;
 }) {
   const now = options.now ?? Date.now;
   const apiBaseUrl = options.apiBaseUrl ?? getScreenMateApiBaseUrl();
@@ -69,6 +72,10 @@ export function createHostRoomRuntime(options: {
     }
 
     await options.storage.remove(STORAGE_KEY);
+  }
+
+  function notifySnapshotUpdated() {
+    options.onSnapshotUpdated?.();
   }
 
   function isSameSession(
@@ -177,6 +184,41 @@ export function createHostRoomRuntime(options: {
     return store.getSnapshot();
   }
 
+  async function applyViewerRoster(viewerRoster: ViewerRosterEntry[]) {
+    if (!session) {
+      return store.getSnapshot();
+    }
+
+    const viewerSessionIds = viewerRoster
+      .filter((viewer) => viewer.online)
+      .map((viewer) => viewer.viewerSessionId);
+    session = {
+      ...session,
+      viewerSessionIds,
+      viewerCount: viewerSessionIds.length,
+      viewerRoster,
+    };
+    store.setRoomActivity({ viewerRoster });
+    await persist();
+    notifySnapshotUpdated();
+    return store.getSnapshot();
+  }
+
+  async function applyChatMessages(chatMessages: RoomChatMessage[]) {
+    if (!session) {
+      return store.getSnapshot();
+    }
+
+    session = {
+      ...session,
+      chatMessages,
+    };
+    store.setRoomActivity({ chatMessages });
+    await persist();
+    notifySnapshotUpdated();
+    return store.getSnapshot();
+  }
+
   async function closeRoom(message: string) {
     closeSocket();
     session = null;
@@ -256,8 +298,12 @@ export function createHostRoomRuntime(options: {
     },
     async startRoom(input: PersistedHostRoomSession) {
       closeSocket();
-      session = input;
-      store.openRoom(input);
+      session = {
+        ...input,
+        viewerRoster: input.viewerRoster ?? [],
+        chatMessages: input.chatMessages ?? [],
+      };
+      store.openRoom(session);
       await persist();
       return store.getSnapshot();
     },
@@ -465,6 +511,24 @@ export function createHostRoomRuntime(options: {
             return;
           }
 
+          if (envelope.messageType === "viewer-roster") {
+            await applyViewerRoster(envelope.payload.viewers);
+            return;
+          }
+
+          if (envelope.messageType === "chat-history") {
+            await applyChatMessages(envelope.payload.messages);
+            return;
+          }
+
+          if (envelope.messageType === "chat-message-created") {
+            await applyChatMessages([
+              ...session.chatMessages,
+              envelope.payload,
+            ]);
+            return;
+          }
+
           if (envelope.messageType === "viewer-joined") {
             await applyViewerSessions([
               ...session.viewerSessionIds,
@@ -522,14 +586,41 @@ export function createHostRoomRuntime(options: {
       return connected;
     },
     sendSignal,
+    sendHostChatMessage(text: string) {
+      if (!session || !socket || socket.readyState !== OPEN_SOCKET_READY_STATE) {
+        return false;
+      }
+
+      const trimmedText = text.trim();
+      if (!trimmedText) {
+        return false;
+      }
+
+      return sendSignal(
+        signalEnvelopeSchema.parse({
+          roomId: session.roomId,
+          sessionId: session.hostSessionId,
+          role: "host",
+          messageType: "chat-message",
+          timestamp: now(),
+          payload: {
+            text: trimmedText,
+          },
+        }),
+      );
+    },
     async restoreFromStorage() {
       const stored = (await options.storage.get(STORAGE_KEY))[STORAGE_KEY];
       if (!stored) {
         return store.getSnapshot();
       }
 
-      session = stored;
-      store.openRoom(stored);
+      session = {
+        ...stored,
+        viewerRoster: stored.viewerRoster ?? [],
+        chatMessages: stored.chatMessages ?? [],
+      };
+      store.openRoom(session);
       if (stored.recoverByTimestamp && stored.recoverByTimestamp > now()) {
         store.markRecovering(
           "Recovering video source after background restart.",

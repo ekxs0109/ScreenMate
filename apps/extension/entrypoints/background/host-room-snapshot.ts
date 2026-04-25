@@ -1,3 +1,5 @@
+import type { RoomChatMessage, ViewerRosterEntry } from "@screenmate/shared";
+
 export type HostRoomLifecycle =
   | "idle"
   | "opening"
@@ -33,6 +35,8 @@ export type PersistedHostRoomSession = {
   activeFrameId: number;
   viewerSessionIds: string[];
   viewerCount: number;
+  viewerRoster: ViewerRosterEntry[];
+  chatMessages: RoomChatMessage[];
   sourceFingerprint: SourceFingerprint | null;
   recoverByTimestamp: number | null;
 };
@@ -42,6 +46,8 @@ export type HostRoomSnapshot = {
   sourceState: HostSourceState;
   roomId: string | null;
   viewerCount: number;
+  viewerRoster: ViewerRosterEntry[];
+  chatMessages: RoomChatMessage[];
   sourceLabel: string | null;
   activeTabId: number | null;
   activeFrameId: number | null;
@@ -57,6 +63,8 @@ export function createHostRoomSnapshot(
     sourceState: "unattached",
     roomId: null,
     viewerCount: 0,
+    viewerRoster: [],
+    chatMessages: [],
     sourceLabel: null,
     activeTabId: null,
     activeFrameId: null,
@@ -79,10 +87,25 @@ export function createHostRoomStore(
         roomLifecycle: "open",
         sourceState: "unattached",
         roomId: session.roomId,
-        viewerCount: session.viewerCount,
+        viewerCount: countOnlineViewers(session.viewerRoster, session.viewerCount),
+        viewerRoster: session.viewerRoster,
+        chatMessages: session.chatMessages,
         activeTabId: session.activeTabId,
         activeFrameId: session.activeFrameId,
       });
+      return snapshot;
+    },
+    setRoomActivity(input: {
+      viewerRoster?: ViewerRosterEntry[];
+      chatMessages?: RoomChatMessage[];
+    }) {
+      const viewerRoster = input.viewerRoster ?? snapshot.viewerRoster;
+      snapshot = {
+        ...snapshot,
+        viewerRoster,
+        chatMessages: input.chatMessages ?? snapshot.chatMessages,
+        viewerCount: countOnlineViewers(viewerRoster, snapshot.viewerCount),
+      };
       return snapshot;
     },
     setAttached(sourceLabel: string, owner: { tabId: number; frameId: number }) {
@@ -139,4 +162,15 @@ export function createHostRoomStore(
       return snapshot;
     },
   };
+}
+
+function countOnlineViewers(
+  viewerRoster: ViewerRosterEntry[],
+  fallbackViewerCount: number,
+) {
+  if (viewerRoster.length === 0) {
+    return Math.max(0, fallbackViewerCount);
+  }
+
+  return viewerRoster.filter((viewer) => viewer.online).length;
 }

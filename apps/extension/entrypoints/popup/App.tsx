@@ -1,6 +1,7 @@
 import "./popup.css";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTheme } from "next-themes";
+import { browser } from "wxt/browser";
 import { buildScreenMateViewerRoomUrl } from "../../lib/config";
 import { cn } from "../../lib/utils";
 import { getExtensionDictionary } from "./i18n";
@@ -226,7 +227,18 @@ function App() {
             window.open(viewerRoomUrl, "_blank");
           }
         }}
-        onSendChat={appendLocalMessage}
+        onSendChat={async (text) => {
+          if (snapshot.roomId && snapshot.roomLifecycle !== "closed") {
+            const result = await browser.runtime.sendMessage({
+              type: "screenmate:send-chat-message",
+              text,
+            });
+            return Boolean(result?.ok);
+          }
+
+          appendLocalMessage(text);
+          return true;
+        }}
       />
     </div>
   );

@@ -18,6 +18,8 @@ describe("createHostRoomStore", () => {
       activeFrameId: 0,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -50,6 +52,8 @@ describe("createHostRoomStore", () => {
       activeFrameId: 0,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: 5_000,
     });

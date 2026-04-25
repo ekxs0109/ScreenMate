@@ -69,6 +69,7 @@ function createHandlerDependencies(
         roomId: "room_123",
       }),
       sendSignal: vi.fn().mockReturnValue(true),
+      sendHostChatMessage: vi.fn().mockReturnValue(true),
       setAttachedSource: vi.fn().mockResolvedValue({
         roomLifecycle: "open",
         sourceState: "attached",
@@ -178,6 +179,66 @@ describe("createHostMessageHandler", () => {
         frameId: 5,
       },
     ]);
+  });
+
+  it("routes popup chat messages through the host runtime", async () => {
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+      })),
+      sendHostChatMessage: vi.fn().mockReturnValue(true),
+    };
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      runtime: runtime as never,
+    }));
+
+    const result = await handler({
+      type: "screenmate:send-chat-message",
+      text: "  hello room  ",
+    });
+
+    expect(runtime.sendHostChatMessage).toHaveBeenCalledWith("hello room");
+    expect(result).toEqual({
+      ok: true,
+      snapshot: expect.objectContaining({
+        roomId: "room_123",
+      }),
+      error: null,
+    });
+  });
+
+  it("reports popup chat send failures with the current snapshot", async () => {
+    const snapshot = createHostRoomSnapshot({
+      roomLifecycle: "open",
+      sourceState: "attached",
+      roomId: "room_123",
+    });
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(snapshot),
+      sendHostChatMessage: vi.fn().mockReturnValue(false),
+    };
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      runtime: runtime as never,
+    }));
+
+    const result = await handler({
+      type: "screenmate:send-chat-message",
+      text: "hello room",
+    });
+
+    expect(runtime.sendHostChatMessage).toHaveBeenCalledWith("hello room");
+    expect(result).toEqual({
+      ok: false,
+      snapshot,
+      error: "room-chat-send-failed",
+    });
+    await expect(
+      handler({ type: "screenmate:send-chat-message", text: "   " }),
+    ).resolves.toBeUndefined();
   });
 
   it("keeps sniff results in the browser tab order instead of forcing the active tab first", async () => {

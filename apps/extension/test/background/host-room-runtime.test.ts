@@ -24,6 +24,12 @@ class MockHostSocket {
   }
 }
 
+function emitSocketMessage(socket: MockHostSocket, payload: unknown) {
+  socket.emit("message", {
+    data: JSON.stringify(payload),
+  } as unknown as Event);
+}
+
 function createDeferredPromise<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -49,6 +55,8 @@ describe("createHostRoomRuntime", () => {
           activeFrameId: 0,
           viewerSessionIds: ["viewer_1"],
           viewerCount: 1,
+          viewerRoster: [],
+          chatMessages: [],
           sourceFingerprint: null,
           recoverByTimestamp: 5_000,
         },
@@ -86,6 +94,8 @@ describe("createHostRoomRuntime", () => {
           activeFrameId: 0,
           viewerSessionIds: ["viewer_1"],
           viewerCount: 1,
+          viewerRoster: [],
+          chatMessages: [],
           sourceFingerprint: null,
           recoverByTimestamp: 900,
         },
@@ -131,6 +141,8 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 0,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -176,6 +188,8 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 0,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -233,6 +247,8 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 0,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -287,6 +303,8 @@ describe("createHostRoomRuntime", () => {
           activeFrameId: 0,
           viewerSessionIds: [],
           viewerCount: 0,
+          viewerRoster: [],
+          chatMessages: [],
           sourceFingerprint: null,
           recoverByTimestamp: null,
         },
@@ -337,6 +355,8 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 0,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -406,6 +426,8 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 0,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -423,6 +445,8 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 1,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -484,6 +508,8 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 0,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -539,6 +565,8 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 0,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -585,6 +613,8 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 0,
       viewerSessionIds: [],
       viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -653,6 +683,219 @@ describe("createHostRoomRuntime", () => {
     );
   });
 
+  it("stores room activity messages from signaling in the host snapshot", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const sockets: MockHostSocket[] = [];
+    const onSnapshotUpdated = vi.fn();
+    const runtime = createHostRoomRuntime({
+      storage,
+      onSnapshotUpdated,
+      WebSocketImpl: class {
+        constructor(_url: string) {
+          const socket = new MockHostSocket();
+          sockets.push(socket);
+          return socket as never;
+        }
+      } as never,
+    });
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    const connectPromise = runtime.connectSignaling(vi.fn());
+    sockets[0]!.readyState = 1;
+    sockets[0]?.emit("open");
+    await connectPromise;
+
+    emitSocketMessage(sockets[0]!, {
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "viewer-roster",
+      timestamp: 10,
+      payload: {
+        viewers: [
+          {
+            viewerSessionId: "viewer_1",
+            displayName: "Mina",
+            online: true,
+            connectionType: "direct",
+            pingMs: 24,
+            joinedAt: 1,
+            profileUpdatedAt: 2,
+            metricsUpdatedAt: 3,
+          },
+          {
+            viewerSessionId: "viewer_2",
+            displayName: "Noor",
+            online: false,
+            connectionType: "relay",
+            pingMs: null,
+            joinedAt: 4,
+            profileUpdatedAt: null,
+            metricsUpdatedAt: null,
+          },
+        ],
+      },
+    });
+    emitSocketMessage(sockets[0]!, {
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "chat-history",
+      timestamp: 11,
+      payload: {
+        messages: [
+          {
+            messageId: "msg_1",
+            senderSessionId: "viewer_1",
+            senderRole: "viewer",
+            senderName: "Mina",
+            text: "hello room",
+            sentAt: 11,
+          },
+        ],
+      },
+    });
+    emitSocketMessage(sockets[0]!, {
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "chat-message-created",
+      timestamp: 12,
+      payload: {
+        messageId: "msg_2",
+        senderSessionId: "host_1",
+        senderRole: "host",
+        senderName: "Host",
+        text: "hello back",
+        sentAt: 12,
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      viewerCount: 1,
+      viewerRoster: [
+        expect.objectContaining({
+          viewerSessionId: "viewer_1",
+          displayName: "Mina",
+          online: true,
+        }),
+        expect.objectContaining({
+          viewerSessionId: "viewer_2",
+          displayName: "Noor",
+          online: false,
+        }),
+      ],
+      chatMessages: [
+        expect.objectContaining({
+          messageId: "msg_1",
+          senderRole: "viewer",
+          text: "hello room",
+        }),
+        expect.objectContaining({
+          messageId: "msg_2",
+          senderRole: "host",
+          text: "hello back",
+        }),
+      ],
+    });
+    expect(storage.set).toHaveBeenLastCalledWith({
+      screenmateHostRoomSession: expect.objectContaining({
+        viewerCount: 1,
+        viewerRoster: expect.arrayContaining([
+          expect.objectContaining({ viewerSessionId: "viewer_1" }),
+          expect.objectContaining({ viewerSessionId: "viewer_2" }),
+        ]),
+        chatMessages: expect.arrayContaining([
+          expect.objectContaining({ messageId: "msg_1" }),
+          expect.objectContaining({ messageId: "msg_2" }),
+        ]),
+      }),
+    });
+    expect(onSnapshotUpdated).toHaveBeenCalledTimes(3);
+  });
+
+  it("sends host chat messages over an open signaling socket", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const sockets: MockHostSocket[] = [];
+    const runtime = createHostRoomRuntime({
+      storage,
+      now: () => 1_710_000_000_000,
+      WebSocketImpl: class {
+        constructor(_url: string) {
+          const socket = new MockHostSocket();
+          sockets.push(socket);
+          return socket as never;
+        }
+      } as never,
+    });
+
+    expect(runtime.sendHostChatMessage("hello?")).toBe(false);
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    const connectPromise = runtime.connectSignaling(vi.fn());
+    sockets[0]!.readyState = 1;
+    sockets[0]?.emit("open");
+    await connectPromise;
+
+    expect(runtime.sendHostChatMessage("  hello room  ")).toBe(true);
+    expect(runtime.sendHostChatMessage("   ")).toBe(false);
+
+    const sentPayloads = sockets[0]!.send.mock.calls.map(([payload]) =>
+      JSON.parse(payload as string),
+    );
+    expect(sentPayloads).toContainEqual({
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "chat-message",
+      timestamp: 1_710_000_000_000,
+      payload: {
+        text: "hello room",
+      },
+    });
+  });
+
   it("publishes room-state on signaling connect and when host source state changes", async () => {
     const storage = {
       get: vi.fn().mockResolvedValue({}),
@@ -681,6 +924,8 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 0,
       viewerSessionIds: ["viewer_1"],
       viewerCount: 1,
+      viewerRoster: [],
+      chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
     });
@@ -790,6 +1035,8 @@ describe("createHostRoomRuntime", () => {
         activeFrameId: 0,
         viewerSessionIds: [],
         viewerCount: 0,
+        viewerRoster: [],
+        chatMessages: [],
         sourceFingerprint: null,
         recoverByTimestamp: null,
       });
@@ -864,6 +1111,8 @@ describe("createHostRoomRuntime", () => {
         activeFrameId: 0,
         viewerSessionIds: [],
         viewerCount: 0,
+        viewerRoster: [],
+        chatMessages: [],
         sourceFingerprint: null,
         recoverByTimestamp: null,
       });
@@ -924,6 +1173,8 @@ describe("createHostRoomRuntime", () => {
         activeFrameId: 0,
         viewerSessionIds: [],
         viewerCount: 0,
+        viewerRoster: [],
+        chatMessages: [],
         sourceFingerprint: null,
         recoverByTimestamp: null,
       });

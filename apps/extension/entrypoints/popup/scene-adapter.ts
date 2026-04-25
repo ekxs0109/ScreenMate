@@ -1,8 +1,14 @@
+import type { RoomChatMessage, ViewerRosterEntry } from "@screenmate/shared";
 import type { TabVideoSource } from "../background";
 import type { HostRoomSnapshot } from "../background/host-room-snapshot";
 import { getPopupViewModel } from "./view-model";
 import type { ExtensionMockState } from "./mock-state";
-import type { ExtensionSceneModel, SniffTabSummary } from "./scene-model";
+import type {
+  ExtensionChatMessage,
+  ExtensionSceneModel,
+  SniffTabSummary,
+  ViewerConnectionRow,
+} from "./scene-model";
 
 type BusyAction = "primary" | "stop" | null;
 
@@ -19,6 +25,10 @@ export function buildExtensionSceneModel(input: {
   const viewModel = getPopupViewModel(input.snapshot);
   const hasShared =
     input.snapshot.roomId !== null && input.snapshot.roomLifecycle !== "closed";
+  const hasActiveRealRoom =
+    input.snapshot.roomId !== null &&
+    input.snapshot.roomLifecycle !== "idle" &&
+    input.snapshot.roomLifecycle !== "closed";
   const sniffCards = input.videos.map((video, index) =>
     buildSniffCard(video, index, input.selectedVideoId),
   );
@@ -46,12 +56,16 @@ export function buildExtensionSceneModel(input: {
       roomId: input.snapshot.roomId,
       shareUrl: input.viewerRoomUrl,
       viewerCount: input.snapshot.viewerCount,
-      viewerDetails: input.mock.viewerDetails,
+      viewerDetails: hasActiveRealRoom
+        ? input.snapshot.viewerRoster.map(toViewerConnectionRow)
+        : input.mock.viewerDetails,
       passwordDraft: input.mock.passwordDraft,
       passwordSaved: input.mock.passwordSaved,
     },
     chatTab: {
-      messages: input.mock.messages,
+      messages: hasActiveRealRoom
+        ? input.snapshot.chatMessages.map(toExtensionChatMessage)
+        : input.mock.messages,
     },
     footer: {
       primaryLabel:
@@ -73,6 +87,41 @@ export function buildExtensionSceneModel(input: {
       busyAction: input.busyAction,
       message: input.snapshot.message,
     },
+  };
+}
+
+function toViewerConnectionRow(viewer: ViewerRosterEntry): ViewerConnectionRow {
+  return {
+    id: viewer.viewerSessionId,
+    name: viewer.displayName,
+    online: viewer.online,
+    connType: viewer.online ? toConnectionLabel(viewer.connectionType) : "Offline",
+    ping: viewer.online && typeof viewer.pingMs === "number" ? `${viewer.pingMs}ms` : "--",
+    isGood:
+      viewer.online &&
+      viewer.connectionType === "direct" &&
+      typeof viewer.pingMs === "number" &&
+      viewer.pingMs <= 100,
+  };
+}
+
+function toConnectionLabel(connectionType: ViewerRosterEntry["connectionType"]) {
+  if (connectionType === "direct") {
+    return "P2P";
+  }
+
+  if (connectionType === "relay") {
+    return "Relay";
+  }
+
+  return "--";
+}
+
+function toExtensionChatMessage(message: RoomChatMessage): ExtensionChatMessage {
+  return {
+    id: message.messageId,
+    sender: message.senderRole === "host" ? "Host" : message.senderName,
+    text: message.text,
   };
 }
 
