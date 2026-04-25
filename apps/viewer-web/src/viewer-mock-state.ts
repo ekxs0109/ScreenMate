@@ -1,32 +1,41 @@
-import type { ViewerChatMessage } from "./viewer-scene-model";
+import {
+  buildRandomViewerUsername,
+  type ViewerLocale,
+} from "./i18n";
 
 export type ViewerMockState = {
-  language: string;
   username: string;
-  pingLabel: string;
-  connectionType: string;
+  pingMs: number;
+  connectionType: "direct-p2p";
   viewerCount: number;
-  messages: ViewerChatMessage[];
+  messages: ViewerMockChatMessage[];
 };
 
-export function createViewerMockState(): ViewerMockState {
+export type ViewerMockChatMessage = {
+  id: string;
+  senderKind: "host" | "system" | "self" | "named";
+  senderName?: string;
+  text: string | null;
+  textKey?: "hostStartedRoom";
+  timestamp: number;
+};
+
+export function createViewerMockState(
+  locale: ViewerLocale = "en",
+): ViewerMockState {
   return {
-    language: "en",
-    username: `User_${Math.floor(Math.random() * 10000)}`,
-    pingLabel: "22ms",
-    connectionType: "Direct (P2P)",
+    username: buildRandomViewerUsername(locale),
+    pingMs: 22,
+    connectionType: "direct-p2p",
     viewerCount: 3,
     messages: [
       {
         id: "system-1",
-        sender: "Host",
-        text: "Host started the room",
-        time: nowTime(),
+        senderKind: "host",
+        text: null,
+        textKey: "hostStartedRoom",
+        timestamp: Date.now(),
       },
     ],
   };
-}
-
-function nowTime() {
-  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }

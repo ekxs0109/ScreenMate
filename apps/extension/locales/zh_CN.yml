@@ -4,7 +4,7 @@ tabRoom: 房间设置
 tabChat: 房间群聊
 sourceSniff: 页面嗅探
 sourceScreen: 屏幕共享
-sourceUpload: 本地上传
+sourceUpload: 本地播放
 detected: 嗅探到的网页资源
 mockOrigin: 当前标签
 refreshSniff: 重新嗅探
@@ -15,7 +15,15 @@ captureButton: 选择共享内容
 screenReady: 屏幕已就绪
 screenReadyDescription: 内容捕获成功，请点击底部按钮开启共享房间。
 reselect: 重选
-uploadDropzone: 点击或拖拽视频文件
+captureEntireScreen: 整个屏幕
+captureEntireScreenDesc: 分享显示器上的所有内容
+captureWindow: 窗口
+captureWindowDesc: 分享特定的应用程序窗口
+captureTab: 标签页
+captureTabDesc: 分享浏览器的特定标签页
+openPlayer: 打开本地播放器
+playerDesc: 为超大本地文件优化的稳定播放模式
+uploadDropzone: 点击或拖拽文件开启播放器
 roomId: 房间号
 openRoom: 进入房间
 passwordPlaceholder: 留空则无密码

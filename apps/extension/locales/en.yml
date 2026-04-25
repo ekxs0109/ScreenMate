@@ -4,7 +4,7 @@ tabRoom: Room Settings
 tabChat: Room Chat
 sourceSniff: Site Sniffer
 sourceScreen: Screen Share
-sourceUpload: Local Upload
+sourceUpload: Local Player
 detected: Detected Video Resources
 mockOrigin: Tab
 refreshSniff: Rescan
@@ -15,7 +15,15 @@ captureButton: Select Content
 screenReady: Screen Ready
 screenReadyDescription: Source captured. Click the button below to start sharing.
 reselect: Reselect
-uploadDropzone: Click or drag video files
+captureEntireScreen: Entire Screen
+captureEntireScreenDesc: Share everything on your display
+captureWindow: App Window
+captureWindowDesc: Share a specific application window
+captureTab: Browser Tab
+captureTabDesc: Share a specific tab from this browser
+openPlayer: Open Local Player
+playerDesc: Stable high-quality playback for large local files.
+uploadDropzone: Click or drag to open player
 roomId: Room ID
 openRoom: Open Room
 passwordPlaceholder: Leave blank for none

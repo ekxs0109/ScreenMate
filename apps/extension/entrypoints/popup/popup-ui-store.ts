@@ -16,6 +16,8 @@ type PopupUiStore = ExtensionMockState & {
   setSelectedVideoId: (selectedVideoId: string | null) => void;
   setIsRefreshing: (isRefreshing: boolean) => void;
   toggleScreenReady: () => void;
+  setLocalFile: (file: { name: string; size: number; type: string } | null) => void;
+  clearLocalFile: () => void;
   setPasswordDraft: (passwordDraft: string) => void;
   markPasswordSaved: () => void;
   setActiveRoomTab: () => void;
@@ -38,6 +40,8 @@ export const usePopupUiStore = create<PopupUiStore>()(
       setIsRefreshing: (isRefreshing) => set({ isRefreshing }),
       toggleScreenReady: () =>
         set((state) => ({ screenReady: !state.screenReady })),
+      setLocalFile: (localFile) => set({ localFile, uploadReady: !!localFile }),
+      clearLocalFile: () => set({ localFile: null, uploadReady: false }),
       setPasswordDraft: (passwordDraft) =>
         set({ passwordDraft, passwordSaved: false }),
       markPasswordSaved: () => set({ passwordSaved: true }),
@@ -61,6 +65,7 @@ export const usePopupUiStore = create<PopupUiStore>()(
         activeSourceType: state.activeSourceType,
         screenReady: state.screenReady,
         uploadReady: state.uploadReady,
+        localFile: state.localFile,
         passwordDraft: state.passwordDraft,
         passwordSaved: state.passwordSaved,
         selectedVideoId: state.selectedVideoId,

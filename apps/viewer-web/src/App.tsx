@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ViewerShell } from "./components/ViewerShell";
 import {
+  buildRandomViewerUsername,
+  useViewerI18n,
+} from "./i18n";
+import {
   getViewerApiBaseUrl,
   getViewerRoomIdFromLocation,
 } from "./lib/config";
@@ -13,9 +17,10 @@ import { createViewerMockState, type ViewerMockState } from "./viewer-mock-state
 import { ViewerSession } from "./viewer-session";
 
 export default function App() {
+  const { copy, locale } = useViewerI18n();
   const initialRoomId = getViewerRoomIdFromLocation();
   const [session, setSession] = useState<ViewerSessionState>(initialViewerSessionState);
-  const [mock, setMock] = useState<ViewerMockState>(createViewerMockState);
+  const [mock, setMock] = useState<ViewerMockState>(() => createViewerMockState(locale));
   const [viewerSession] = useState(
     () =>
       new ViewerSession({
@@ -50,6 +55,7 @@ export default function App() {
   }
 
   const scene = buildViewerSceneModel({
+    locale,
     session,
     mock,
   });
@@ -58,8 +64,6 @@ export default function App() {
     <ViewerShell
       scene={scene}
       stream={session.remoteStream}
-      language={mock.language}
-      onLanguageChange={(language) => setMock((current) => ({ ...current, language }))}
       onJoin={handleJoin}
       onLeaveRoom={() => {
         viewerSession.destroy();
@@ -67,7 +71,7 @@ export default function App() {
         window.history.replaceState({}, "", "/");
       }}
       onJoinOtherRoom={() => {
-        const newRoomId = window.prompt("Enter Room ID:");
+        const newRoomId = window.prompt(copy.enterRoomIdPrompt);
         if (newRoomId) {
           void viewerSession.join(newRoomId);
           window.history.replaceState({}, "", `/rooms/${encodeURIComponent(newRoomId)}`);
@@ -76,7 +80,7 @@ export default function App() {
       onRandomizeUsername={() =>
         setMock((current) => ({
           ...current,
-          username: `User_${Math.floor(Math.random() * 10000)}`,
+          username: buildRandomViewerUsername(locale),
         }))
       }
       onSendMessage={(text) =>
@@ -86,9 +90,10 @@ export default function App() {
             ...current.messages,
             {
               id: `local-${Date.now()}`,
-              sender: "You",
+              senderKind: "self",
+              textKey: undefined,
               text,
-              time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              timestamp: Date.now(),
             },
           ],
         }))

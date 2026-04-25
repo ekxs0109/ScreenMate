@@ -35,7 +35,8 @@ export function buildExtensionSceneModel(input: {
     sourceTab: {
       activeSourceType: input.mock.activeSourceType,
       screenReady: input.mock.screenReady,
-      uploadReady: input.mock.uploadReady,
+      uploadReady: !!input.mock.localFile || input.mock.uploadReady,
+      localFile: input.mock.localFile ?? null,
       isRefreshing: input.mock.isRefreshing,
       sectionKinds: ["sniff", "screen", "upload"],
       sniffCards,
@@ -57,7 +58,11 @@ export function buildExtensionSceneModel(input: {
         input.isBusy && input.busyAction === "primary"
           ? "Working..."
           : viewModel.primaryActionLabel,
-      primaryDisabled: input.isBusy || input.selectedVideoId === null,
+      primaryDisabled:
+        input.isBusy ||
+        (input.mock.activeSourceType === "sniff" && input.selectedVideoId === null) ||
+        (input.mock.activeSourceType === "screen" && !input.mock.screenReady) ||
+        (input.mock.activeSourceType === "upload" && !input.mock.localFile),
       secondaryLabel:
         input.isBusy && input.busyAction === "stop" ? "Stopping room..." : "End Share",
       secondaryDisabled: input.isBusy || !viewModel.canStop,

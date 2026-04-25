@@ -59,6 +59,11 @@ export type ExtensionSceneModel = {
     sniffGroups: SniffVideoGroup[];
     screenReady: boolean;
     uploadReady: boolean;
+    localFile: {
+      name: string;
+      size: number;
+      type: string;
+    } | null;
     isRefreshing: boolean;
     sectionKinds: SourceType[];
   };

@@ -215,7 +215,7 @@ describe("viewer WebRTC logging", () => {
 
     expect(session.getSnapshot()).toMatchObject({
       status: "error",
-      error: "Direct peer connectivity failed.",
+      errorCode: "DIRECT_CONNECTIVITY_FAILED",
     });
     expect(getLoggerDouble("viewer:session").error).toHaveBeenCalledWith(
       "Viewer peer connectivity failed.",

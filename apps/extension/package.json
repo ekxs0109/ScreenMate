@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "wxt",
+    "dev:brave": "SCREENMATE_WXT_CHROMIUM=brave wxt -b chrome",
     "build": "wxt build",
     "typecheck": "wxt prepare && tsc --noEmit",
     "test": "wxt prepare && vitest run --passWithNoTests"

@@ -1,4 +1,5 @@
 import type { RoomSourceState, RoomState } from "@screenmate/shared";
+import type { ViewerErrorCode } from "../viewer-errors";
 
 export type ViewerStatus =
   | "idle"
@@ -17,8 +18,8 @@ export type ViewerSessionState = {
   roomState: RoomState | null;
   sourceState: RoomSourceState | null;
   status: ViewerStatus;
-  error: string | null;
-  endedReason: string | null;
+  errorCode: ViewerErrorCode | null;
+  endedReasonCode: ViewerErrorCode | null;
   remoteStream: MediaStream | null;
 };
 
@@ -30,7 +31,7 @@ export const initialViewerSessionState: ViewerSessionState = {
   roomState: null,
   sourceState: null,
   status: "idle",
-  error: null,
-  endedReason: null,
+  errorCode: null,
+  endedReasonCode: null,
   remoteStream: null,
 };

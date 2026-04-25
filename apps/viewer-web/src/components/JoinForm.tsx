@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
+import { useViewerI18n } from "../i18n";
 
 export function JoinForm({
   isBusy,
@@ -11,6 +12,7 @@ export function JoinForm({
   isBusy: boolean;
   onJoin: (roomCode: string) => void;
 }) {
+  const { copy } = useViewerI18n();
   const [roomCode, setRoomCode] = useState("");
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -22,7 +24,7 @@ export function JoinForm({
     <form className="grid gap-4" onSubmit={handleSubmit}>
       <div className="grid gap-2">
         <Label htmlFor="roomCode" className="text-slate-600 dark:text-slate-300">
-          Room code
+          {copy.roomCodeLabel}
         </Label>
         <Input
           id="roomCode"
@@ -42,10 +44,10 @@ export function JoinForm({
         {isBusy ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Joining...
+            {copy.joiningAction}
           </>
         ) : (
-          "Join room"
+          copy.joinRoomAction
         )}
       </Button>
     </form>

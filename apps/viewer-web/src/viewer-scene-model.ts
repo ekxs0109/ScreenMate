@@ -1,5 +1,6 @@
 export type ViewerChatMessage = {
   id: string;
+  senderKind: "host" | "system" | "self" | "named";
   sender: string;
   text: string;
   time: string;

@@ -211,7 +211,7 @@ describe("ViewerSession", () => {
 
     expect(session.getSnapshot()).toMatchObject({
       status: "ended",
-      endedReason: "The host ended the room.",
+      endedReasonCode: "HOST_ENDED_ROOM",
     });
   });
 
@@ -269,7 +269,7 @@ describe("ViewerSession", () => {
       roomState: "degraded",
       sourceState: "recovering",
       status: "waiting",
-      endedReason: null,
+      endedReasonCode: null,
     });
 
     socket.emitMessage(
@@ -370,7 +370,7 @@ describe("ViewerSession", () => {
       status: "waiting",
       roomState: "degraded",
       sourceState: "missing",
-      endedReason: null,
+      endedReasonCode: null,
     });
   });
 
@@ -438,7 +438,7 @@ describe("ViewerSession", () => {
     expect(statuses).not.toContain("ended");
     expect(session.getSnapshot()).toMatchObject({
       status: "connecting",
-      endedReason: null,
+      endedReasonCode: null,
     });
     expect(secondPeer.remoteDescription).toEqual({
       type: "offer",

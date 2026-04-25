@@ -2,6 +2,7 @@
 
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ViewerI18nProvider } from "../src/i18n";
 import type { ViewerSessionState } from "../src/lib/session-state";
 
 const constructorSpy = vi.fn();
@@ -53,7 +54,11 @@ describe("App room routing", () => {
   });
 
   it("uses the local Cloudflare worker as the default API base URL", async () => {
-    render(<App />);
+    render(
+      <ViewerI18nProvider initialLocale="en">
+        <App />
+      </ViewerI18nProvider>,
+    );
 
     await waitFor(() => {
       expect(constructorSpy).toHaveBeenCalledWith({
@@ -65,7 +70,11 @@ describe("App room routing", () => {
   it("auto-joins the room from the /rooms/:roomId path", async () => {
     window.history.replaceState({}, "", "/rooms/room_demo");
 
-    render(<App />);
+    render(
+      <ViewerI18nProvider initialLocale="en">
+        <App />
+      </ViewerI18nProvider>,
+    );
 
     await waitFor(() => {
       expect(joinSpy).toHaveBeenCalledWith("room_demo");

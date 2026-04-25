@@ -6,6 +6,7 @@ import { initialViewerSessionState } from "../src/lib/session-state";
 describe("buildViewerSceneModel", () => {
   it("keeps real session state while filling sidebar data from mock state", () => {
     const scene = buildViewerSceneModel({
+      locale: "ja",
       session: {
         ...initialViewerSessionState,
         roomId: "room_demo",
@@ -13,12 +14,12 @@ describe("buildViewerSceneModel", () => {
         roomState: "hosting",
         sourceState: "recovering",
       },
-      mock: createViewerMockState(),
+      mock: createViewerMockState("ja"),
     });
 
     expect(scene.header.roomId).toBe("room_demo");
-    expect(scene.player.waitingText).toBe("Waiting for host reconnect");
+    expect(scene.player.waitingText).toBe("ホストの再接続を待っています");
     expect(scene.sidebar.messages.length).toBeGreaterThan(0);
-    expect(scene.connection.typeLabel).toBe("Direct (P2P)");
+    expect(scene.connection.typeLabel).toBe("直接接続 (P2P)");
   });
 });

@@ -1,4 +1,5 @@
 import { errorCodes } from "@screenmate/shared";
+import { viewerErrorCodes } from "./viewer-errors";
 import {
   getRoomState,
   joinRoom,
@@ -19,6 +20,7 @@ import {
   type CreateWebSocket,
   type SignalEnvelope,
 } from "./lib/socket-client";
+import type { ViewerErrorCode } from "./viewer-errors";
 
 const viewerSessionLogger = createLogger("viewer:session");
 
@@ -88,7 +90,7 @@ export class ViewerSession {
           roomState: roomState.state,
           sourceState: roomState.sourceState,
           status: "ended",
-          endedReason: "The host has already ended this room.",
+          endedReasonCode: viewerErrorCodes.ROOM_ALREADY_CLOSED,
         });
         return;
       }
@@ -113,8 +115,8 @@ export class ViewerSession {
         roomState: roomState.state,
         sourceState: roomState.sourceState,
         status: "waiting",
-        error: null,
-        endedReason: null,
+        errorCode: null,
+        endedReasonCode: null,
         remoteStream: null,
       });
 
@@ -130,7 +132,7 @@ export class ViewerSession {
           });
           this.update({
             status: "waiting",
-            error: null,
+            errorCode: null,
           });
         },
         onClose: (event) => {
@@ -146,7 +148,7 @@ export class ViewerSession {
           ) {
             this.update({
               status: "ended",
-              endedReason: "The room connection closed.",
+              endedReasonCode: viewerErrorCodes.ROOM_CONNECTION_CLOSED,
             });
           }
         },
@@ -157,7 +159,7 @@ export class ViewerSession {
           });
           this.update({
             status: "error",
-            error: "The signaling connection failed.",
+            errorCode: viewerErrorCodes.SIGNALING_FAILED,
           });
         },
         onMessage: (message) => {
@@ -166,13 +168,15 @@ export class ViewerSession {
       });
     } catch (error) {
       const apiError = error as Partial<RoomApiError>;
-      const message =
-        error instanceof Error ? error.message : "We couldn’t join that room.";
+      const code =
+        typeof apiError.code === "string"
+          ? apiError.code
+          : viewerErrorCodes.ROOM_JOIN_FAILED;
 
       viewerSessionLogger.error("Viewer room join failed.", {
-        code: apiError.code ?? null,
+        code,
         details: apiError.details ?? null,
-        error: message,
+        error: error instanceof Error ? error.message : code,
         roomId,
         status: apiError.status ?? null,
       });
@@ -180,10 +184,20 @@ export class ViewerSession {
         ...initialViewerSessionState,
         roomId,
         status:
-          apiError.code === errorCodes.ROOM_EXPIRED ? "ended" : "error",
-        error: apiError.code === errorCodes.ROOM_EXPIRED ? null : message,
-        endedReason:
-          apiError.code === errorCodes.ROOM_EXPIRED ? message : null,
+          code === errorCodes.ROOM_EXPIRED ||
+          code === viewerErrorCodes.ROOM_ALREADY_CLOSED
+            ? "ended"
+            : "error",
+        errorCode:
+          code === errorCodes.ROOM_EXPIRED ||
+          code === viewerErrorCodes.ROOM_ALREADY_CLOSED
+            ? null
+            : (code as ViewerErrorCode),
+        endedReasonCode:
+          code === errorCodes.ROOM_EXPIRED ||
+          code === viewerErrorCodes.ROOM_ALREADY_CLOSED
+            ? (code as ViewerErrorCode)
+            : null,
       });
     }
   }
@@ -214,8 +228,8 @@ export class ViewerSession {
           remoteStream: stream,
           sourceState: "attached",
           status: "connected",
-          error: null,
-          endedReason: null,
+          errorCode: null,
+          endedReasonCode: null,
         });
       },
       onConnectionStateChange: (state) => {
@@ -237,7 +251,7 @@ export class ViewerSession {
           });
           this.update({
             status: "error",
-            error: "Direct peer connectivity failed.",
+            errorCode: errorCodes.DIRECT_CONNECTIVITY_FAILED,
           });
         }
 
@@ -298,8 +312,8 @@ export class ViewerSession {
           sourceState: "attached",
           status: "connecting",
           roomState: "streaming",
-          error: null,
-          endedReason: null,
+          errorCode: null,
+          endedReasonCode: null,
         });
         await this.peerClient?.acceptOffer(message.sessionId, message.payload.sdp);
         break;
@@ -337,7 +351,7 @@ export class ViewerSession {
         });
         if (message.payload.state === "closed") {
           this.update({
-            endedReason: "The host ended the room.",
+            endedReasonCode: viewerErrorCodes.HOST_ENDED_ROOM,
           });
           this.teardown(false);
         }
@@ -351,7 +365,7 @@ export class ViewerSession {
         });
         this.update({
           status: "ended",
-          endedReason: "The host ended the room.",
+          endedReasonCode: viewerErrorCodes.HOST_ENDED_ROOM,
           roomState: "closed",
         });
         this.teardown(false);
@@ -366,7 +380,7 @@ export class ViewerSession {
           });
           this.update({
             status: "error",
-            error: toNegotiationError(message.payload.code),
+            errorCode: toNegotiationError(message.payload.code),
           });
         }
         break;
@@ -407,10 +421,10 @@ export class ViewerSession {
   }
 }
 
-function toNegotiationError(code: string): string {
+function toNegotiationError(code: string) {
   if (code === errorCodes.DIRECT_CONNECTIVITY_FAILED) {
-    return "Your network could not establish a direct WebRTC connection.";
+    return errorCodes.DIRECT_CONNECTIVITY_FAILED;
   }
 
-  return "Peer negotiation failed.";
+  return errorCodes.NEGOTIATION_FAILED;
 }

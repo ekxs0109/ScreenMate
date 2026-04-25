@@ -18,6 +18,14 @@ export type ExtensionDictionary = {
   screenReady: string;
   screenReadyDescription: string;
   reselect: string;
+  captureEntireScreen: string;
+  captureEntireScreenDesc: string;
+  captureWindow: string;
+  captureWindowDesc: string;
+  captureTab: string;
+  captureTabDesc: string;
+  openPlayer: string;
+  playerDesc: string;
   uploadDropzone: string;
   roomId: string;
   openRoom: string;
@@ -61,6 +69,14 @@ export function getExtensionDictionary(): ExtensionDictionary {
     screenReady: i18n.t("screenReady"),
     screenReadyDescription: i18n.t("screenReadyDescription"),
     reselect: i18n.t("reselect"),
+    captureEntireScreen: i18n.t("captureEntireScreen"),
+    captureEntireScreenDesc: i18n.t("captureEntireScreenDesc"),
+    captureWindow: i18n.t("captureWindow"),
+    captureWindowDesc: i18n.t("captureWindowDesc"),
+    captureTab: i18n.t("captureTab"),
+    captureTabDesc: i18n.t("captureTabDesc"),
+    openPlayer: i18n.t("openPlayer"),
+    playerDesc: i18n.t("playerDesc"),
     uploadDropzone: i18n.t("uploadDropzone"),
     roomId: i18n.t("roomId"),
     openRoom: i18n.t("openRoom"),

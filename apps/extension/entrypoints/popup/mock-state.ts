@@ -10,6 +10,11 @@ export type ExtensionMockState = {
   activeSourceType: SourceType;
   screenReady: boolean;
   uploadReady: boolean;
+  localFile: {
+    name: string;
+    size: number;
+    type: string;
+  } | null;
   passwordDraft: string;
   passwordSaved: boolean;
   copiedLink: boolean;
@@ -25,6 +30,7 @@ export function createExtensionMockState(): ExtensionMockState {
     activeSourceType: "sniff",
     screenReady: false,
     uploadReady: false,
+    localFile: null,
     passwordDraft: "",
     passwordSaved: false,
     copiedLink: false,

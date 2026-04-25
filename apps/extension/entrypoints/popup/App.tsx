@@ -35,6 +35,12 @@ function App() {
     (state) => state.setSelectedVideoId,
   );
   const setSniffScrollTop = usePopupUiStore((state) => state.setSniffScrollTop);
+  const setLocalFile = usePopupUiStore((state) => state.setLocalFile);
+  const clearLocalFile = usePopupUiStore((state) => state.clearLocalFile);
+  const localFile = usePopupUiStore((state) => state.localFile);
+
+  const [language, setLanguage] = useState("en");
+
   const {
     snapshot,
     sniffTabs,
@@ -84,6 +90,7 @@ function App() {
           isRefreshing,
           messages,
           viewerDetails,
+          localFile,
         },
       }),
     [
@@ -103,6 +110,7 @@ function App() {
       videos,
       viewerDetails,
       viewerRoomUrl,
+      localFile,
     ],
   );
 
@@ -118,6 +126,8 @@ function App() {
         windowMode={windowMode}
         scene={scene}
         copy={copy}
+        language={language}
+        onLanguageChange={setLanguage}
         themeMode={theme === "light" || theme === "dark" ? theme : "system"}
         resolvedThemeMode={resolvedTheme === "light" ? "light" : "dark"}
         sniffScrollTop={sniffScrollTop}
@@ -150,7 +160,47 @@ function App() {
           await refreshVideos();
         }}
         onSniffScrollChange={setSniffScrollTop}
+        onOpenPlayer={() => {
+          browser.tabs.create({ url: browser.runtime.getURL("/player.html") });
+        }}
+        onCaptureScreen={async (type) => {
+          try {
+            const constraints: DisplayMediaStreamOptions = {
+              video: {
+                // displaySurface is part of modern spec but might not be in all type defs
+                displaySurface: type === "window" ? "window" : type === "tab" ? "browser" : "monitor",
+              },
+              audio: {
+                // Enable audio toggle in the picker
+                echoCancellation: true,
+                noiseSuppression: true,
+              },
+            };
+
+            const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+            
+            console.log(`Captured video stream (${type}):`, stream);
+            console.log("Video tracks:", stream.getVideoTracks());
+            console.log("Audio tracks:", stream.getAudioTracks());
+
+            // Listen for the user stopping the share via the browser's "Stop sharing" bar
+            stream.getVideoTracks()[0].onended = () => {
+              console.log("Screen sharing ended by user/browser.");
+              toggleScreenReady(); // Toggle back to initial state
+            };
+
+            toggleScreenReady();
+          } catch (error) {
+            if ((error as Error).name === "NotAllowedError") {
+              console.warn("User cancelled screen capture picker.");
+            } else {
+              console.error("Failed to get display media:", error);
+            }
+          }
+        }}
         onToggleScreenReady={toggleScreenReady}
+        onSelectLocalFile={setLocalFile}
+        onClearLocalFile={clearLocalFile}
         onStartOrAttach={async () => {
           await startOrAttach();
           setActiveRoomTab();

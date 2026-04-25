@@ -3,6 +3,7 @@ import {
   type RoomSourceState,
   type RoomState,
 } from "@screenmate/shared";
+import { viewerErrorCodes } from "../viewer-errors";
 
 export type JoinRoomResponse = {
   roomId: string;
@@ -86,17 +87,17 @@ function toErrorMessage(
   code: string,
   details?: Record<string, unknown>,
 ): string {
+  if (details?.state === "closed") {
+    return viewerErrorCodes.ROOM_ALREADY_CLOSED;
+  }
+
   if (code === errorCodes.ROOM_NOT_FOUND) {
-    return "That room code is not active.";
+    return errorCodes.ROOM_NOT_FOUND;
   }
 
   if (code === errorCodes.ROOM_EXPIRED) {
-    return "That room has expired.";
+    return errorCodes.ROOM_EXPIRED;
   }
 
-  if (details?.state === "closed") {
-    return "The host has already ended this room.";
-  }
-
-  return "We couldn’t join that room.";
+  return code;
 }
