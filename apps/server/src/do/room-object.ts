@@ -334,7 +334,7 @@ export class RoomState {
       return;
     }
 
-    if (this.isReplacedConnection(connection)) {
+    if (!this.isCurrentConnection(connection)) {
       return;
     }
 
@@ -465,13 +465,12 @@ export class RoomState {
     return this.viewers.get(sessionId) ?? null;
   }
 
-  private isReplacedConnection(connection: RoomConnection) {
+  private isCurrentConnection(connection: RoomConnection) {
     if (connection.role === "host") {
-      return this.hostConnection !== null && this.hostConnection !== connection;
+      return this.hostConnection === connection;
     }
 
-    const currentViewer = this.viewers.get(connection.sessionId);
-    return currentViewer !== undefined && currentViewer !== connection;
+    return this.viewers.get(connection.sessionId) === connection;
   }
 
   private ensureViewerProfile(viewerSessionId: string) {
