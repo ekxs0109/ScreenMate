@@ -72,4 +72,35 @@ describe("createHostRoomStore", () => {
       }),
     );
   });
+
+  it("defaults legacy persisted activity fields when opening a room", () => {
+    const store = createHostRoomStore(() => 1_000);
+
+    store.openRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: ["viewer_1"],
+      viewerCount: 1,
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    } as never);
+
+    expect(store.getSnapshot()).toEqual(
+      createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "unattached",
+        roomId: "room_123",
+        activeTabId: 42,
+        activeFrameId: 0,
+        viewerCount: 1,
+        viewerRoster: [],
+        chatMessages: [],
+      }),
+    );
+  });
 });

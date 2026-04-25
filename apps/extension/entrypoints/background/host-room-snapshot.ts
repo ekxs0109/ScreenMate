@@ -83,13 +83,15 @@ export function createHostRoomStore(
   return {
     getSnapshot: () => snapshot,
     openRoom(session: PersistedHostRoomSession) {
+      const viewerRoster = session.viewerRoster ?? [];
+      const chatMessages = session.chatMessages ?? [];
       snapshot = createHostRoomSnapshot({
         roomLifecycle: "open",
         sourceState: "unattached",
         roomId: session.roomId,
         viewerCount: countOnlineViewers(session.viewerRoster, session.viewerCount),
-        viewerRoster: session.viewerRoster,
-        chatMessages: session.chatMessages,
+        viewerRoster,
+        chatMessages,
         activeTabId: session.activeTabId,
         activeFrameId: session.activeFrameId,
       });
@@ -165,10 +167,10 @@ export function createHostRoomStore(
 }
 
 function countOnlineViewers(
-  viewerRoster: ViewerRosterEntry[],
+  viewerRoster: ViewerRosterEntry[] | undefined,
   fallbackViewerCount: number,
 ) {
-  if (viewerRoster.length === 0) {
+  if (!viewerRoster) {
     return Math.max(0, fallbackViewerCount);
   }
 

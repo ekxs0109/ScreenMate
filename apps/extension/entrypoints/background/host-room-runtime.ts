@@ -523,7 +523,9 @@ export function createHostRoomRuntime(options: {
 
           if (envelope.messageType === "chat-message-created") {
             await applyChatMessages([
-              ...session.chatMessages,
+              ...session.chatMessages.filter(
+                (message) => message.messageId !== envelope.payload.messageId,
+              ),
               envelope.payload,
             ]);
             return;

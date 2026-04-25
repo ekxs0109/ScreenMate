@@ -55,7 +55,18 @@ describe("createHostRoomRuntime", () => {
           activeFrameId: 0,
           viewerSessionIds: ["viewer_1"],
           viewerCount: 1,
-          viewerRoster: [],
+          viewerRoster: [
+            {
+              viewerSessionId: "viewer_1",
+              displayName: "Mina",
+              online: true,
+              connectionType: "direct",
+              pingMs: 24,
+              joinedAt: 1,
+              profileUpdatedAt: 2,
+              metricsUpdatedAt: 3,
+            },
+          ],
           chatMessages: [],
           sourceFingerprint: null,
           recoverByTimestamp: 5_000,
@@ -94,7 +105,18 @@ describe("createHostRoomRuntime", () => {
           activeFrameId: 0,
           viewerSessionIds: ["viewer_1"],
           viewerCount: 1,
-          viewerRoster: [],
+          viewerRoster: [
+            {
+              viewerSessionId: "viewer_1",
+              displayName: "Mina",
+              online: true,
+              connectionType: "direct",
+              pingMs: 24,
+              joinedAt: 1,
+              profileUpdatedAt: 2,
+              metricsUpdatedAt: 3,
+            },
+          ],
           chatMessages: [],
           sourceFingerprint: null,
           recoverByTimestamp: 900,
@@ -836,6 +858,172 @@ describe("createHostRoomRuntime", () => {
     expect(onSnapshotUpdated).toHaveBeenCalledTimes(3);
   });
 
+  it("clears viewer count when signaling sends an empty viewer roster", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const sockets: MockHostSocket[] = [];
+    const runtime = createHostRoomRuntime({
+      storage,
+      WebSocketImpl: class {
+        constructor(_url: string) {
+          const socket = new MockHostSocket();
+          sockets.push(socket);
+          return socket as never;
+        }
+      } as never,
+    });
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: ["viewer_1"],
+      viewerCount: 1,
+      viewerRoster: [
+        {
+          viewerSessionId: "viewer_1",
+          displayName: "Mina",
+          online: true,
+          connectionType: "direct",
+          pingMs: 24,
+          joinedAt: 1,
+          profileUpdatedAt: 2,
+          metricsUpdatedAt: 3,
+        },
+      ],
+      chatMessages: [],
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    const connectPromise = runtime.connectSignaling(vi.fn());
+    sockets[0]!.readyState = 1;
+    sockets[0]?.emit("open");
+    await connectPromise;
+
+    emitSocketMessage(sockets[0]!, {
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "viewer-roster",
+      timestamp: 10,
+      payload: {
+        viewers: [],
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      viewerCount: 0,
+      viewerRoster: [],
+    });
+    expect(storage.set).toHaveBeenLastCalledWith({
+      screenmateHostRoomSession: expect.objectContaining({
+        viewerSessionIds: [],
+        viewerCount: 0,
+        viewerRoster: [],
+      }),
+    });
+  });
+
+  it("replaces existing chat messages when canonical chat has the same id", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const sockets: MockHostSocket[] = [];
+    const runtime = createHostRoomRuntime({
+      storage,
+      WebSocketImpl: class {
+        constructor(_url: string) {
+          const socket = new MockHostSocket();
+          sockets.push(socket);
+          return socket as never;
+        }
+      } as never,
+    });
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    const connectPromise = runtime.connectSignaling(vi.fn());
+    sockets[0]!.readyState = 1;
+    sockets[0]?.emit("open");
+    await connectPromise;
+
+    emitSocketMessage(sockets[0]!, {
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "chat-history",
+      timestamp: 11,
+      payload: {
+        messages: [
+          {
+            messageId: "msg_1",
+            senderSessionId: "viewer_1",
+            senderRole: "viewer",
+            senderName: "Mina",
+            text: "old text",
+            sentAt: 11,
+          },
+        ],
+      },
+    });
+    emitSocketMessage(sockets[0]!, {
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "chat-message-created",
+      timestamp: 12,
+      payload: {
+        messageId: "msg_1",
+        senderSessionId: "viewer_1",
+        senderRole: "viewer",
+        senderName: "Mina",
+        text: "new text",
+        sentAt: 12,
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runtime.getSnapshot().chatMessages).toEqual([
+      {
+        messageId: "msg_1",
+        senderSessionId: "viewer_1",
+        senderRole: "viewer",
+        senderName: "Mina",
+        text: "new text",
+        sentAt: 12,
+      },
+    ]);
+  });
+
   it("sends host chat messages over an open signaling socket", async () => {
     const storage = {
       get: vi.fn().mockResolvedValue({}),
@@ -924,7 +1112,18 @@ describe("createHostRoomRuntime", () => {
       activeFrameId: 0,
       viewerSessionIds: ["viewer_1"],
       viewerCount: 1,
-      viewerRoster: [],
+      viewerRoster: [
+        {
+          viewerSessionId: "viewer_1",
+          displayName: "Mina",
+          online: true,
+          connectionType: "direct",
+          pingMs: 24,
+          joinedAt: 1,
+          profileUpdatedAt: 2,
+          metricsUpdatedAt: 3,
+        },
+      ],
       chatMessages: [],
       sourceFingerprint: null,
       recoverByTimestamp: null,
