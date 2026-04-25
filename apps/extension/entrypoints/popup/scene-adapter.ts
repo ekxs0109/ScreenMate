@@ -97,11 +97,7 @@ function toViewerConnectionRow(viewer: ViewerRosterEntry): ViewerConnectionRow {
     online: viewer.online,
     connType: viewer.online ? toConnectionLabel(viewer.connectionType) : "Offline",
     ping: viewer.online && typeof viewer.pingMs === "number" ? `${viewer.pingMs}ms` : "--",
-    isGood:
-      viewer.online &&
-      viewer.connectionType === "direct" &&
-      typeof viewer.pingMs === "number" &&
-      viewer.pingMs <= 100,
+    isGood: viewer.online && (viewer.pingMs === null || viewer.pingMs < 120),
   };
 }
 
