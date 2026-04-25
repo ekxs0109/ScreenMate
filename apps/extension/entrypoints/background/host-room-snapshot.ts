@@ -35,8 +35,8 @@ export type PersistedHostRoomSession = {
   activeFrameId: number;
   viewerSessionIds: string[];
   viewerCount: number;
-  viewerRoster: ViewerRosterEntry[];
-  chatMessages: RoomChatMessage[];
+  viewerRoster?: ViewerRosterEntry[];
+  chatMessages?: RoomChatMessage[];
   sourceFingerprint: SourceFingerprint | null;
   recoverByTimestamp: number | null;
 };

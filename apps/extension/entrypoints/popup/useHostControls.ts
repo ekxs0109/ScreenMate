@@ -90,6 +90,12 @@ export function buildStopSharingRequest(): Extract<
   return { type: "screenmate:stop-room" };
 }
 
+export function buildSendChatMessageRequest(
+  text: string,
+): Extract<HostMessage, { type: "screenmate:send-chat-message" }> {
+  return { type: "screenmate:send-chat-message", text };
+}
+
 export function useHostControls({
   persistedSelectedVideoId,
   onSelectedVideoChange,
@@ -467,6 +473,25 @@ export function useHostControls({
     }
   };
 
+  const sendChatMessage = async (text: string) => {
+    try {
+      const response = await browser.runtime.sendMessage(
+        buildSendChatMessageRequest(text),
+      );
+
+      if (isRecord(response) && "snapshot" in response) {
+        setSnapshot(normalizeSnapshot(response.snapshot));
+      }
+
+      return isRecord(response) && response.ok === true;
+    } catch (error) {
+      popupLogger.warn("Could not send room chat message.", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  };
+
   return {
     snapshot,
     sniffTabs,
@@ -483,6 +508,7 @@ export function useHostControls({
     clearVideoPreview,
     startOrAttach,
     stopRoom,
+    sendChatMessage,
     isBusy: busyAction !== null,
     busyAction,
     isRefreshing: isSniffRefreshing || isManualRefreshPending,

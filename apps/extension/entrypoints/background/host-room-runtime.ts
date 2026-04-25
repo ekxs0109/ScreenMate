@@ -292,18 +292,24 @@ export function createHostRoomRuntime(options: {
     return true;
   }
 
+  function normalizePersistedSession(
+    input: PersistedHostRoomSession,
+  ): PersistedHostRoomSession {
+    return {
+      ...input,
+      viewerRoster: input.viewerRoster ?? [],
+      chatMessages: input.chatMessages ?? [],
+    };
+  }
+
   return {
     getSnapshot(): HostRoomSnapshot {
       return store.getSnapshot();
     },
     async startRoom(input: PersistedHostRoomSession) {
       closeSocket();
-      session = {
-        ...input,
-        viewerRoster: input.viewerRoster ?? [],
-        chatMessages: input.chatMessages ?? [],
-      };
-      store.openRoom(session);
+      session = normalizePersistedSession(input);
+      store.openRoom(input);
       await persist();
       return store.getSnapshot();
     },
@@ -523,7 +529,7 @@ export function createHostRoomRuntime(options: {
 
           if (envelope.messageType === "chat-message-created") {
             await applyChatMessages([
-              ...session.chatMessages.filter(
+              ...(session.chatMessages ?? []).filter(
                 (message) => message.messageId !== envelope.payload.messageId,
               ),
               envelope.payload,
@@ -617,12 +623,8 @@ export function createHostRoomRuntime(options: {
         return store.getSnapshot();
       }
 
-      session = {
-        ...stored,
-        viewerRoster: stored.viewerRoster ?? [],
-        chatMessages: stored.chatMessages ?? [],
-      };
-      store.openRoom(session);
+      session = normalizePersistedSession(stored);
+      store.openRoom(stored);
       if (stored.recoverByTimestamp && stored.recoverByTimestamp > now()) {
         store.markRecovering(
           "Recovering video source after background restart.",

@@ -466,7 +466,7 @@ export function ExtensionPopupPresenter({
                           <span className="font-bold">{copy.viewerList}</span>
                         </div>
                         <span className="px-2 py-0.5 rounded-full bg-blue-100/80 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10px] font-bold border border-blue-200 dark:border-blue-800/30 tabular-nums">
-                          {scene.roomTab.viewerDetails.length}
+                          {scene.roomTab.viewerCount}
                         </span>
                       </div>
                       <div className="grid grid-cols-[1fr_70px_50px] gap-2 px-3 py-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest items-center border-b border-border/50 bg-zinc-50 dark:bg-zinc-900/30 transition-colors">
@@ -481,7 +481,14 @@ export function ExtensionPopupPresenter({
                         {scene.roomTab.viewerDetails.map((viewer) => (
                           <div key={viewer.id} className="grid grid-cols-[1fr_70px_50px] gap-2 px-3 py-2.5 items-center hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
                             <div className="font-bold text-xs flex items-center gap-2 min-w-0 pr-1">
-                              <div className="size-1.5 rounded-full bg-green-500 shrink-0 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
+                              <div
+                                className={cn(
+                                  "size-1.5 rounded-full shrink-0",
+                                  viewer.online
+                                    ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]"
+                                    : "bg-zinc-300 dark:bg-zinc-600",
+                                )}
+                              />
                               <span className="truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{viewer.name}</span>
                             </div>
                             <div className="flex justify-center">

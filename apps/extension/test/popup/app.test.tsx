@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const messages = {
@@ -351,5 +351,154 @@ describe("ExtensionPopupPresenter", () => {
     expect(
       screen.getByText("标签 1 - Bilibili").closest(".popup-scroll-area"),
     ).toBeTruthy();
+  });
+
+  it("shows the online viewer count and offline presence state from the room scene", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        viewerCount: 1,
+        viewerRoster: [
+          {
+            viewerSessionId: "viewer_1",
+            displayName: "Mina",
+            online: true,
+            connectionType: "direct",
+            pingMs: 24,
+            joinedAt: 1,
+            profileUpdatedAt: 2,
+            metricsUpdatedAt: 3,
+          },
+          {
+            viewerSessionId: "viewer_2",
+            displayName: "Noor",
+            online: false,
+            connectionType: "relay",
+            pingMs: null,
+            joinedAt: 4,
+            profileUpdatedAt: null,
+            metricsUpdatedAt: null,
+          },
+        ],
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: {
+        ...createExtensionMockState(),
+        activeTab: "room",
+      },
+    });
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={vi.fn()}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onSelectLocalFile={vi.fn()}
+        onClearLocalFile={vi.fn()}
+        onStartOrAttach={vi.fn()}
+        onStopRoom={vi.fn()}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={vi.fn()}
+      />,
+    );
+
+    const viewerListHeader = screen
+      .getByText("Conexiones de Espectadores")
+      .closest("div")?.parentElement;
+    const offlineRow = screen.getByText("Noor").closest("div.group");
+
+    expect(viewerListHeader).toBeTruthy();
+    expect(offlineRow).toBeTruthy();
+    expect(within(viewerListHeader as HTMLElement).getByText("1")).toBeTruthy();
+    expect(offlineRow?.innerHTML).toContain("bg-zinc-300");
+    expect(offlineRow?.innerHTML).not.toContain("bg-green-500");
+  });
+
+  it("preserves the chat draft when async send returns false", async () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: {
+        ...createExtensionMockState(),
+        activeTab: "chat",
+      },
+    });
+    const onSendChat = vi.fn().mockResolvedValue(false);
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={vi.fn()}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onSelectLocalFile={vi.fn()}
+        onClearLocalFile={vi.fn()}
+        onStartOrAttach={vi.fn()}
+        onStopRoom={vi.fn()}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={onSendChat}
+      />,
+    );
+
+    const messageInput = screen.getByPlaceholderText("Di algo...") as HTMLInputElement;
+
+    fireEvent.change(messageInput, { target: { value: "hello room" } });
+    fireEvent.submit(messageInput.closest("form")!);
+
+    await waitFor(() => {
+      expect(onSendChat).toHaveBeenCalledWith("hello room");
+    });
+    expect(messageInput.value).toBe("hello room");
   });
 });

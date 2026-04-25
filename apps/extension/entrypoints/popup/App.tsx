@@ -53,6 +53,7 @@ function App() {
     clearVideoPreview,
     startOrAttach,
     stopRoom,
+    sendChatMessage,
     isBusy,
     busyAction,
     isRefreshing,
@@ -112,6 +113,7 @@ function App() {
       viewerDetails,
       viewerRoomUrl,
       localFile,
+      sendChatMessage,
     ],
   );
 
@@ -229,11 +231,7 @@ function App() {
         }}
         onSendChat={async (text) => {
           if (snapshot.roomId && snapshot.roomLifecycle !== "closed") {
-            const result = await browser.runtime.sendMessage({
-              type: "screenmate:send-chat-message",
-              text,
-            });
-            return Boolean(result?.ok);
+            return sendChatMessage(text);
           }
 
           appendLocalMessage(text);

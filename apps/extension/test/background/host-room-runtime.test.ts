@@ -141,6 +141,44 @@ describe("createHostRoomRuntime", () => {
     });
   });
 
+  it("preserves legacy viewer count when restoring without a stored roster", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({
+        screenmateHostRoomSession: {
+          roomId: "room_123",
+          hostSessionId: "host_1",
+          hostToken: "host-token",
+          signalingUrl: "/rooms/room_123/ws",
+          iceServers: [],
+          activeTabId: 42,
+          activeFrameId: 0,
+          viewerSessionIds: ["viewer_1", "viewer_2"],
+          viewerCount: 2,
+          sourceFingerprint: null,
+          recoverByTimestamp: null,
+        },
+      }),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    const runtime = createHostRoomRuntime({
+      storage,
+      now: () => 1_000,
+    });
+
+    await runtime.restoreFromStorage();
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      roomLifecycle: "open",
+      sourceState: "missing",
+      roomId: "room_123",
+      viewerCount: 2,
+      viewerRoster: [],
+      chatMessages: [],
+    });
+  });
+
   it("ignores late source updates after the room has been closed", async () => {
     const storage = {
       get: vi.fn().mockResolvedValue({}),
