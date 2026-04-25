@@ -205,6 +205,7 @@ describe("viewer WebRTC logging", () => {
       },
       createWebSocket: () => socket as never,
       createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
     });
 
     await session.join("room_demo");

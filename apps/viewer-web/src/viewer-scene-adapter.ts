@@ -57,7 +57,7 @@ export function buildViewerSceneModel(input: {
                   : "named",
             sender:
               message.senderRole === "host"
-                ? message.senderName
+                ? copy.senderHost
                 : message.senderSessionId === input.session.sessionId
                   ? copy.senderYou
                   : message.senderName,

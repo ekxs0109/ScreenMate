@@ -27,7 +27,7 @@ const viewerSessionLogger = createLogger("viewer:session");
 
 type ViewerSessionOptions = {
   apiBaseUrl: string;
-  initialDisplayName?: string;
+  initialDisplayName: string;
   metricsIntervalMs?: number;
   fetchFn?: typeof fetch;
   createWebSocket?: CreateWebSocket;
@@ -65,7 +65,7 @@ export class ViewerSession {
     });
     const displayName =
       this.snapshot.displayName.trim() ||
-      this.options.initialDisplayName?.trim() ||
+      this.options.initialDisplayName.trim() ||
       "";
     this.teardown(false);
     this.update({
@@ -470,7 +470,7 @@ export class ViewerSession {
     if (resetSnapshot) {
       const displayName =
         this.snapshot.displayName.trim() ||
-        this.options.initialDisplayName?.trim() ||
+        this.options.initialDisplayName.trim() ||
         "";
       this.snapshot = {
         ...initialViewerSessionState,

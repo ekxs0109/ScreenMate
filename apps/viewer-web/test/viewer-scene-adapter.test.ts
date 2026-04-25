@@ -51,7 +51,7 @@ describe("buildViewerSceneModel", () => {
             messageId: "msg_1",
             senderSessionId: "host_1",
             senderRole: "host",
-            senderName: "Host",
+            senderName: "Presenter Mina",
             text: "Welcome",
             sentAt: 1_776_000_000_000,
           },

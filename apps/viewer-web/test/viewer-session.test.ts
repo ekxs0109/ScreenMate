@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ViewerSession } from "../src/viewer-session";
 
+// @ts-expect-error initialDisplayName is required for viewer identity wiring.
+const viewerSessionOptionsMissingDisplayName: ConstructorParameters<typeof ViewerSession>[0] = {
+  apiBaseUrl: "https://api.example",
+};
+void viewerSessionOptionsMissingDisplayName;
+
 class FakeWebSocket {
   static readonly OPEN = 1;
   readyState = FakeWebSocket.OPEN;
@@ -159,6 +165,7 @@ describe("ViewerSession", () => {
       fetchFn,
       createWebSocket: () => socket as never,
       createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
       now: () => 42,
       metricsIntervalMs: 60_000,
     });
@@ -569,6 +576,7 @@ describe("ViewerSession", () => {
       },
       createWebSocket: () => socket as never,
       createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
       metricsIntervalMs: 60_000,
     });
 
@@ -622,6 +630,7 @@ describe("ViewerSession", () => {
       },
       createWebSocket: () => socket as never,
       createPeerConnection: () => peers.shift() as never,
+      initialDisplayName: "Mina",
       metricsIntervalMs: 60_000,
     });
 
@@ -700,6 +709,7 @@ describe("ViewerSession", () => {
       },
       createWebSocket: () => socket as never,
       createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
       metricsIntervalMs: 60_000,
     });
 
@@ -787,6 +797,7 @@ describe("ViewerSession", () => {
       },
       createWebSocket: () => socket as never,
       createPeerConnection: () => peers.shift() as never,
+      initialDisplayName: "Mina",
       metricsIntervalMs: 60_000,
     });
     const statuses: string[] = [];
