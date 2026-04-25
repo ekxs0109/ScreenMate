@@ -147,6 +147,172 @@ describe("signalEnvelopeSchema", () => {
     ).toBe(true);
   });
 
+  it("accepts room activity envelopes", () => {
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "viewer_1",
+        role: "viewer",
+        messageType: "viewer-profile",
+        timestamp: 1,
+        payload: {
+          viewerSessionId: "viewer_1",
+          displayName: "Mina",
+        },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "viewer_1",
+        role: "viewer",
+        messageType: "viewer-metrics",
+        timestamp: 2,
+        payload: {
+          viewerSessionId: "viewer_1",
+          connectionType: "relay",
+          pingMs: 142,
+        },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "viewer_1",
+        role: "viewer",
+        messageType: "chat-message",
+        timestamp: 3,
+        payload: {
+          text: "hello room",
+        },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "viewer-roster",
+        timestamp: 4,
+        payload: {
+          viewers: [
+            {
+              viewerSessionId: "viewer_1",
+              displayName: "Mina",
+              online: true,
+              connectionType: "direct",
+              pingMs: 24,
+              joinedAt: 1,
+              profileUpdatedAt: 2,
+              metricsUpdatedAt: 3,
+            },
+          ],
+        },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "chat-history",
+        timestamp: 5,
+        payload: {
+          messages: [
+            {
+              messageId: "msg_1",
+              senderSessionId: "viewer_1",
+              senderRole: "viewer",
+              senderName: "Mina",
+              text: "hello room",
+              sentAt: 3,
+            },
+          ],
+        },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "chat-message-created",
+        timestamp: 6,
+        payload: {
+          messageId: "msg_1",
+          senderSessionId: "viewer_1",
+          senderRole: "viewer",
+          senderName: "Mina",
+          text: "hello room",
+          sentAt: 3,
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects invalid room activity payloads", () => {
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "viewer_1",
+        role: "viewer",
+        messageType: "viewer-profile",
+        timestamp: 1,
+        payload: {
+          viewerSessionId: "",
+          displayName: "",
+        },
+      }).success,
+    ).toBe(false);
+
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "viewer_1",
+        role: "viewer",
+        messageType: "viewer-metrics",
+        timestamp: 2,
+        payload: {
+          viewerSessionId: "viewer_1",
+          connectionType: "satellite",
+          pingMs: -1,
+        },
+      }).success,
+    ).toBe(false);
+
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "chat-message",
+        timestamp: 3,
+        payload: {
+          text: "x".repeat(501),
+        },
+      }).success,
+    ).toBe(false);
+
+    expect(
+      signalEnvelopeSchema.safeParse({
+        roomId: "room_123",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "chat-message-created",
+        timestamp: 4,
+        payload: {
+          messageId: "msg_1",
+          text: "missing sender fields",
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects a viewer pretending to send a host-only message", () => {
     const result = signalEnvelopeSchema.safeParse({
       roomId: "room_123",

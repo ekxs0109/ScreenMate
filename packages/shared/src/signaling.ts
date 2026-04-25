@@ -60,6 +60,54 @@ const roomStatePayloadSchema = z.object({
   viewerCount: z.number().int().nonnegative(),
 });
 
+export const roomConnectionTypeSchema = z.enum(["direct", "relay", "unknown"]);
+
+export const viewerRosterEntrySchema = z.object({
+  viewerSessionId: z.string().min(1),
+  displayName: z.string().trim().min(1).max(80),
+  online: z.boolean(),
+  connectionType: roomConnectionTypeSchema,
+  pingMs: z.number().int().nonnegative().nullable(),
+  joinedAt: z.number().int().nonnegative(),
+  profileUpdatedAt: z.number().int().nonnegative().nullable(),
+  metricsUpdatedAt: z.number().int().nonnegative().nullable(),
+});
+
+export const roomChatMessageSchema = z.object({
+  messageId: z.string().min(1),
+  senderSessionId: z.string().min(1),
+  senderRole: signalingRoleSchema,
+  senderName: z.string().trim().min(1).max(80),
+  text: z.string().trim().min(1).max(500),
+  sentAt: z.number().int().nonnegative(),
+});
+
+const viewerProfilePayloadSchema = z.object({
+  viewerSessionId: z.string().min(1),
+  displayName: z.string().trim().min(1).max(80),
+});
+
+const viewerMetricsPayloadSchema = z.object({
+  viewerSessionId: z.string().min(1),
+  connectionType: roomConnectionTypeSchema,
+  pingMs: z.number().int().nonnegative().nullable().optional(),
+});
+
+const chatMessagePayloadSchema = z.object({
+  clientMessageId: z.string().min(1).max(120).optional(),
+  text: z.string().trim().min(1).max(500),
+});
+
+const chatMessageCreatedPayloadSchema = roomChatMessageSchema;
+
+const viewerRosterPayloadSchema = z.object({
+  viewers: z.array(viewerRosterEntrySchema),
+});
+
+const chatHistoryPayloadSchema = z.object({
+  messages: z.array(roomChatMessageSchema).max(100),
+});
+
 export const signalEnvelopeSchema = z.discriminatedUnion("messageType", [
   z.object({
     ...envelopeBaseSchema,
@@ -133,4 +181,45 @@ export const signalEnvelopeSchema = z.discriminatedUnion("messageType", [
     messageType: z.literal("room-state"),
     payload: roomStatePayloadSchema,
   }),
+  z.object({
+    ...envelopeBaseSchema,
+    role: z.literal("viewer"),
+    messageType: z.literal("viewer-profile"),
+    payload: viewerProfilePayloadSchema,
+  }),
+  z.object({
+    ...envelopeBaseSchema,
+    role: z.literal("viewer"),
+    messageType: z.literal("viewer-metrics"),
+    payload: viewerMetricsPayloadSchema,
+  }),
+  z.object({
+    ...envelopeBaseSchema,
+    role: signalingRoleSchema,
+    messageType: z.literal("chat-message"),
+    payload: chatMessagePayloadSchema,
+  }),
+  z.object({
+    ...envelopeBaseSchema,
+    role: z.literal("host"),
+    messageType: z.literal("chat-message-created"),
+    payload: chatMessageCreatedPayloadSchema,
+  }),
+  z.object({
+    ...envelopeBaseSchema,
+    role: z.literal("host"),
+    messageType: z.literal("viewer-roster"),
+    payload: viewerRosterPayloadSchema,
+  }),
+  z.object({
+    ...envelopeBaseSchema,
+    role: z.literal("host"),
+    messageType: z.literal("chat-history"),
+    payload: chatHistoryPayloadSchema,
+  }),
 ]);
+
+export type RoomConnectionType = z.infer<typeof roomConnectionTypeSchema>;
+export type ViewerRosterEntry = z.infer<typeof viewerRosterEntrySchema>;
+export type RoomChatMessage = z.infer<typeof roomChatMessageSchema>;
+export type SignalEnvelope = z.infer<typeof signalEnvelopeSchema>;
