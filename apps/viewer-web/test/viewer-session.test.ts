@@ -627,6 +627,219 @@ describe("ViewerSession", () => {
     expect(newGetStats.mock.calls.length).toBeGreaterThan(1);
   });
 
+  it("ignores a pending join after destroy", async () => {
+    const roomState = createDeferred<Response>();
+    const socket = new FakeWebSocket();
+    const createWebSocket = vi.fn(() => socket as never);
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+
+        if (url.endsWith("/rooms/room_demo") && !init?.method) {
+          return roomState.promise;
+        }
+
+        if (url.endsWith("/rooms/room_demo/join") && init?.method === "POST") {
+          return Response.json({
+            roomId: "room_demo",
+            sessionId: "viewer_1",
+            viewerToken: "viewer-token",
+            wsUrl: "ws://signal.example/rooms/room_demo/ws",
+            iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
+          });
+        }
+
+        throw new Error(`unexpected request: ${url}`);
+      },
+      createWebSocket,
+      createPeerConnection: () => new FakePeerConnection() as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    const joinPromise = session.join("room_demo");
+    await Promise.resolve();
+    session.updateDisplayName("Noa");
+    session.destroy();
+
+    roomState.resolve(
+      Response.json({
+        roomId: "room_demo",
+        state: "hosting",
+        sourceState: "missing",
+        hostConnected: true,
+        hostSessionId: null,
+        viewerCount: 0,
+      }),
+    );
+    await joinPromise;
+
+    expect(session.getSnapshot()).toMatchObject({
+      status: "idle",
+      displayName: "Noa",
+      roomId: null,
+      sessionId: null,
+    });
+    expect(createWebSocket).not.toHaveBeenCalled();
+  });
+
+  it("keeps the newest join when an older pending join resolves later", async () => {
+    const roomAState = createDeferred<Response>();
+    const roomAJoin = createDeferred<Response>();
+    const sockets: FakeWebSocket[] = [];
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+
+        if (url.endsWith("/rooms/room_a") && !init?.method) {
+          return roomAState.promise;
+        }
+
+        if (url.endsWith("/rooms/room_a/join") && init?.method === "POST") {
+          return roomAJoin.promise;
+        }
+
+        if (url.endsWith("/rooms/room_b") && !init?.method) {
+          return Response.json({
+            roomId: "room_b",
+            state: "hosting",
+            sourceState: "missing",
+            hostConnected: true,
+            hostSessionId: null,
+            viewerCount: 0,
+          });
+        }
+
+        if (url.endsWith("/rooms/room_b/join") && init?.method === "POST") {
+          return Response.json({
+            roomId: "room_b",
+            sessionId: "viewer_b",
+            viewerToken: "viewer-token-b",
+            wsUrl: "ws://signal.example/rooms/room_b/ws",
+            iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
+          });
+        }
+
+        throw new Error(`unexpected request: ${url}`);
+      },
+      createWebSocket: () => {
+        const socket = new FakeWebSocket();
+        sockets.push(socket);
+        return socket as never;
+      },
+      createPeerConnection: () => new FakePeerConnection() as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    const firstJoin = session.join("room_a");
+    await Promise.resolve();
+    const secondJoin = session.join("room_b");
+    await secondJoin;
+    sockets[0]?.emitOpen();
+
+    roomAState.resolve(
+      Response.json({
+        roomId: "room_a",
+        state: "hosting",
+        sourceState: "missing",
+        hostConnected: true,
+        hostSessionId: null,
+        viewerCount: 0,
+      }),
+    );
+    roomAJoin.resolve(
+      Response.json({
+        roomId: "room_a",
+        sessionId: "viewer_a",
+        viewerToken: "viewer-token-a",
+        wsUrl: "ws://signal.example/rooms/room_a/ws",
+        iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
+      }),
+    );
+    await firstJoin;
+
+    expect(session.getSnapshot()).toMatchObject({
+      status: "waiting",
+      roomId: "room_b",
+      sessionId: "viewer_b",
+    });
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.sentMessages.map((message) => JSON.parse(message))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          roomId: "room_b",
+          sessionId: "viewer_b",
+          messageType: "viewer-profile",
+        }),
+      ]),
+    );
+  });
+
+  it("does not send stale peer answers through a new socket after rejoin", async () => {
+    const oldSocket = new FakeWebSocket("defer");
+    const newSocket = new FakeWebSocket();
+    const sockets = [oldSocket, newSocket];
+    const initialOldPeer = new FakePeerConnection();
+    const answeringOldPeer = new FakePeerConnection();
+    const newPeer = new FakePeerConnection();
+    const peers = [initialOldPeer, answeringOldPeer, newPeer];
+    const answer = createDeferred<RTCSessionDescriptionInit>();
+    answeringOldPeer.createAnswer = () => answer.promise;
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => sockets.shift() as never,
+      createPeerConnection: () => peers.shift() as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    oldSocket.emitOpen();
+    oldSocket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "offer",
+        timestamp: 10,
+        payload: { targetSessionId: "viewer_1", sdp: "host-offer" },
+      }),
+    );
+    await Promise.resolve();
+
+    session.destroy();
+    await session.join("room_demo");
+    newSocket.emitOpen();
+    const answerMessagesBeforeAnswer = newSocket.sentMessages
+      .map((message) => JSON.parse(message))
+      .filter((message) => message.messageType === "answer").length;
+
+    answer.resolve({ type: "answer", sdp: "old-answer" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const parsedNewSocketMessages = newSocket.sentMessages.map((message) =>
+      JSON.parse(message),
+    );
+    expect(
+      parsedNewSocketMessages.filter((message) => message.messageType === "answer"),
+    ).toHaveLength(answerMessagesBeforeAnswer);
+    expect(parsedNewSocketMessages).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          messageType: "answer",
+          payload: expect.objectContaining({
+            sdp: "old-answer",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("caps overlong display names before sending viewer-profile", async () => {
     const socket = new FakeWebSocket();
     const session = new ViewerSession({
@@ -1011,4 +1224,15 @@ function createJoinFetch(
 
     throw new Error(`unexpected request: ${url}`);
   };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
 }

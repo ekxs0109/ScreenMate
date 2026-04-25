@@ -44,6 +44,7 @@ export class ViewerSession {
   private peerClient: ReturnType<typeof createViewerPeerConnection> | null = null;
   private joinResponse: JoinRoomResponse | null = null;
   private metricsTimer: ReturnType<typeof setInterval> | null = null;
+  private generation = 0;
 
   constructor(private readonly options: ViewerSessionOptions) {}
 
@@ -69,7 +70,8 @@ export class ViewerSession {
       normalizeDisplayName(this.snapshot.displayName) ||
       normalizeDisplayName(this.options.initialDisplayName) ||
       "";
-    this.teardown(false);
+    const generation = this.nextGeneration();
+    this.teardown(false, false);
     this.update({
       ...initialViewerSessionState,
       displayName,
@@ -83,6 +85,10 @@ export class ViewerSession {
         roomId,
         this.options.fetchFn,
       );
+      if (!this.isCurrentGeneration(generation)) {
+        return;
+      }
+
       viewerSessionLogger.info("Viewer loaded room state.", {
         hostConnected: roomState.hostConnected,
         hostSessionId: roomState.hostSessionId,
@@ -112,6 +118,10 @@ export class ViewerSession {
         roomId,
         this.options.fetchFn,
       );
+      if (!this.isCurrentGeneration(generation)) {
+        return;
+      }
+
       viewerSessionLogger.info("Viewer joined the room signaling session.", {
         iceServerCount: joined.iceServers.length,
         roomId: joined.roomId,
@@ -134,13 +144,12 @@ export class ViewerSession {
       });
 
       this.joinResponse = joined;
-      this.peerClient = this.createPeerClient(joined);
 
       let socketClient: ReturnType<typeof createSocketClient>;
       socketClient = createSocketClient(joined.wsUrl, joined.viewerToken, {
         createWebSocket: this.options.createWebSocket,
         onOpen: () => {
-          if (!this.isCurrentSocket(joined, socketClient)) {
+          if (!this.isCurrentSocket(generation, joined, socketClient)) {
             return;
           }
 
@@ -156,7 +165,7 @@ export class ViewerSession {
           this.startMetricsTimer();
         },
         onClose: (event) => {
-          if (!this.isCurrentSocket(joined, socketClient)) {
+          if (!this.isCurrentSocket(generation, joined, socketClient)) {
             return;
           }
 
@@ -178,7 +187,7 @@ export class ViewerSession {
           }
         },
         onError: () => {
-          if (!this.isCurrentSocket(joined, socketClient)) {
+          if (!this.isCurrentSocket(generation, joined, socketClient)) {
             return;
           }
 
@@ -193,15 +202,20 @@ export class ViewerSession {
           });
         },
         onMessage: (message) => {
-          if (!this.isCurrentSocket(joined, socketClient)) {
+          if (!this.isCurrentSocket(generation, joined, socketClient)) {
             return;
           }
 
-          void this.handleSignal(message);
+          void this.handleSignal(message, generation, joined, socketClient);
         },
       });
       this.socketClient = socketClient;
+      this.peerClient = this.createPeerClient(joined, generation, socketClient);
     } catch (error) {
+      if (!this.isCurrentGeneration(generation)) {
+        return;
+      }
+
       const apiError = error as Partial<RoomApiError>;
       const code =
         typeof apiError.code === "string"
@@ -274,13 +288,23 @@ export class ViewerSession {
     );
   }
 
-  private createPeerClient(joined: JoinRoomResponse) {
+  private createPeerClient(
+    joined: JoinRoomResponse,
+    generation: number,
+    socketClient: ReturnType<typeof createSocketClient>,
+  ) {
     const peerClient = createViewerPeerConnection({
       iceServers: joined.iceServers,
       sessionId: joined.sessionId,
       roomId: joined.roomId,
       getTargetSessionId: () => this.snapshot.hostSessionId,
-      sendSignal: (message) => this.socketClient?.send(message),
+      sendSignal: (message) => {
+        if (!this.isCurrentSocket(generation, joined, socketClient)) {
+          return false;
+        }
+
+        return socketClient.send(message);
+      },
       onRemoteStream: (stream) => {
         viewerSessionLogger.info("Viewer received a remote stream.", {
           roomId: joined.roomId,
@@ -288,7 +312,10 @@ export class ViewerSession {
           streamId: typeof stream.id === "string" ? stream.id : null,
         });
 
-        if (this.peerClient !== peerClient) {
+        if (
+          this.peerClient !== peerClient ||
+          !this.isCurrentSocket(generation, joined, socketClient)
+        ) {
           return;
         }
 
@@ -307,7 +334,10 @@ export class ViewerSession {
           state,
         });
 
-        if (this.peerClient !== peerClient) {
+        if (
+          this.peerClient !== peerClient ||
+          !this.isCurrentSocket(generation, joined, socketClient)
+        ) {
           return;
         }
 
@@ -344,7 +374,16 @@ export class ViewerSession {
     return peerClient;
   }
 
-  private async handleSignal(message: SignalEnvelope) {
+  private async handleSignal(
+    message: SignalEnvelope,
+    generation: number,
+    joined: JoinRoomResponse,
+    socketClient: ReturnType<typeof createSocketClient>,
+  ) {
+    if (!this.isCurrentSocket(generation, joined, socketClient)) {
+      return;
+    }
+
     viewerSessionLogger.debug("Viewer received a signaling message.", {
       messageType: message.messageType,
       roomId: message.roomId,
@@ -367,6 +406,10 @@ export class ViewerSession {
         const previousPeerClient = this.peerClient;
         this.peerClient = null;
         previousPeerClient?.close();
+        if (!this.isCurrentSocket(generation, joined, socketClient)) {
+          break;
+        }
+
         if (!this.joinResponse) {
           viewerSessionLogger.warn("Viewer ignored an offer before join state was ready.", {
             hostSessionId: message.sessionId,
@@ -374,7 +417,7 @@ export class ViewerSession {
           });
           break;
         }
-        this.peerClient = this.createPeerClient(this.joinResponse);
+        this.peerClient = this.createPeerClient(joined, generation, socketClient);
         this.update({
           hostSessionId: message.sessionId,
           sourceState: "attached",
@@ -386,7 +429,10 @@ export class ViewerSession {
         await this.peerClient?.acceptOffer(message.sessionId, message.payload.sdp);
         break;
       case "ice-candidate":
-        if (message.payload.targetSessionId === this.snapshot.sessionId) {
+        if (
+          message.payload.targetSessionId === this.snapshot.sessionId &&
+          this.isCurrentSocket(generation, joined, socketClient)
+        ) {
           viewerSessionLogger.debug("Viewer received a remote ICE candidate.", {
             roomId: message.roomId,
             sessionId: message.sessionId,
@@ -472,7 +518,11 @@ export class ViewerSession {
     }
   }
 
-  private teardown(resetSnapshot: boolean) {
+  private teardown(resetSnapshot: boolean, invalidate = true) {
+    if (invalidate) {
+      this.nextGeneration();
+    }
+
     viewerSessionLogger.info("Tearing down viewer session resources.", {
       resetSnapshot,
       roomId: this.snapshot.roomId,
@@ -561,11 +611,13 @@ export class ViewerSession {
     }
 
     const joined = this.joinResponse;
+    const socketClient = this.socketClient;
+    const generation = this.generation;
 
     try {
       const metrics = await this.peerClient.collectMetrics();
 
-      if (this.joinResponse !== joined || !this.socketClient) {
+      if (!this.isCurrentSocket(generation, joined, socketClient)) {
         return false;
       }
 
@@ -574,7 +626,7 @@ export class ViewerSession {
         localPingMs: metrics.pingMs,
       });
 
-      return this.socketClient.send(
+      return socketClient.send(
         signalEnvelopeSchema.parse({
           roomId: joined.roomId,
           sessionId: joined.sessionId,
@@ -602,11 +654,25 @@ export class ViewerSession {
     return this.options.now?.() ?? Date.now();
   }
 
+  private nextGeneration() {
+    this.generation += 1;
+    return this.generation;
+  }
+
+  private isCurrentGeneration(generation: number) {
+    return this.generation === generation;
+  }
+
   private isCurrentSocket(
+    generation: number,
     joined: JoinRoomResponse,
     socketClient: ReturnType<typeof createSocketClient>,
   ) {
-    return this.joinResponse === joined && this.socketClient === socketClient;
+    return (
+      this.isCurrentGeneration(generation) &&
+      this.joinResponse === joined &&
+      this.socketClient === socketClient
+    );
   }
 }
 
