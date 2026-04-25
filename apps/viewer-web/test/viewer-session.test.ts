@@ -18,6 +18,8 @@ class FakeWebSocket {
     error: new Set<() => void>(),
   };
 
+  constructor(private readonly closeBehavior: "emit" | "defer" = "emit") {}
+
   addEventListener(
     type: "open" | "message" | "close" | "error",
     listener: (() => void) | ((event: { data: string }) => void) | ((event: { reason?: string }) => void),
@@ -30,6 +32,11 @@ class FakeWebSocket {
   }
 
   close() {
+    this.readyState = 3;
+    if (this.closeBehavior === "defer") {
+      return;
+    }
+
     for (const listener of this.listeners.close) {
       listener({ reason: "closed" });
     }
@@ -541,6 +548,137 @@ describe("ViewerSession", () => {
           payload: {
             viewerSessionId: "viewer_1",
             displayName: "Noa",
+          },
+        }),
+      ]),
+    );
+  });
+
+  it("ignores deferred close from a destroyed socket", async () => {
+    const socket = new FakeWebSocket("defer");
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => new FakePeerConnection() as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    session.updateDisplayName("Noa");
+    session.destroy();
+
+    expect(session.getSnapshot()).toMatchObject({
+      status: "idle",
+      displayName: "Noa",
+      endedReasonCode: null,
+      errorCode: null,
+    });
+
+    socket.emitClose();
+
+    expect(session.getSnapshot()).toMatchObject({
+      status: "idle",
+      displayName: "Noa",
+      endedReasonCode: null,
+      errorCode: null,
+    });
+  });
+
+  it("ignores stale socket callbacks after rejoining with a new socket", async () => {
+    vi.useFakeTimers();
+    const oldSocket = new FakeWebSocket("defer");
+    const newSocket = new FakeWebSocket();
+    const sockets = [oldSocket, newSocket];
+    const oldPeer = new FakePeerConnection();
+    const newPeer = new FakePeerConnection();
+    const newGetStats = vi.spyOn(newPeer, "getStats");
+    const peers = [oldPeer, newPeer];
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => sockets.shift() as never,
+      createPeerConnection: () => peers.shift() as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 100,
+    });
+
+    await session.join("room_demo");
+    oldSocket.emitOpen();
+    session.destroy();
+    await session.join("room_demo");
+    newSocket.emitOpen();
+    await Promise.resolve();
+
+    expect(newGetStats).toHaveBeenCalledTimes(1);
+
+    oldSocket.emitClose();
+    oldSocket.emitError();
+    oldSocket.emitOpen();
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(session.getSnapshot()).toMatchObject({
+      status: "waiting",
+      errorCode: null,
+      endedReasonCode: null,
+    });
+    expect(newGetStats.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("caps overlong display names before sending viewer-profile", async () => {
+    const socket = new FakeWebSocket();
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => new FakePeerConnection() as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+
+    expect(() => session.updateDisplayName("N".repeat(120))).not.toThrow();
+
+    expect(session.getSnapshot().displayName).toHaveLength(80);
+    expect(socket.sentMessages.map((message) => JSON.parse(message))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          messageType: "viewer-profile",
+          payload: expect.objectContaining({
+            displayName: "N".repeat(80),
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("caps overlong chat messages before sending", async () => {
+    const socket = new FakeWebSocket();
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => new FakePeerConnection() as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+
+    expect(() => session.sendChatMessage("h".repeat(700))).not.toThrow();
+    expect(session.sendChatMessage("h".repeat(700))).toBe(true);
+
+    expect(socket.sentMessages.map((message) => JSON.parse(message))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          messageType: "chat-message",
+          payload: {
+            text: "h".repeat(500),
           },
         }),
       ]),

@@ -24,6 +24,8 @@ import {
 import type { ViewerErrorCode } from "./viewer-errors";
 
 const viewerSessionLogger = createLogger("viewer:session");
+const maxDisplayNameLength = 80;
+const maxChatMessageLength = 500;
 
 type ViewerSessionOptions = {
   apiBaseUrl: string;
@@ -64,8 +66,8 @@ export class ViewerSession {
       roomId,
     });
     const displayName =
-      this.snapshot.displayName.trim() ||
-      this.options.initialDisplayName.trim() ||
+      normalizeDisplayName(this.snapshot.displayName) ||
+      normalizeDisplayName(this.options.initialDisplayName) ||
       "";
     this.teardown(false);
     this.update({
@@ -134,9 +136,14 @@ export class ViewerSession {
       this.joinResponse = joined;
       this.peerClient = this.createPeerClient(joined);
 
-      this.socketClient = createSocketClient(joined.wsUrl, joined.viewerToken, {
+      let socketClient: ReturnType<typeof createSocketClient>;
+      socketClient = createSocketClient(joined.wsUrl, joined.viewerToken, {
         createWebSocket: this.options.createWebSocket,
         onOpen: () => {
+          if (!this.isCurrentSocket(joined, socketClient)) {
+            return;
+          }
+
           viewerSessionLogger.info("Viewer signaling channel is ready.", {
             roomId: joined.roomId,
             sessionId: joined.sessionId,
@@ -149,6 +156,10 @@ export class ViewerSession {
           this.startMetricsTimer();
         },
         onClose: (event) => {
+          if (!this.isCurrentSocket(joined, socketClient)) {
+            return;
+          }
+
           viewerSessionLogger.warn("Viewer signaling channel closed.", {
             code: "code" in event ? event.code : null,
             reason: event.reason ?? null,
@@ -167,6 +178,10 @@ export class ViewerSession {
           }
         },
         onError: () => {
+          if (!this.isCurrentSocket(joined, socketClient)) {
+            return;
+          }
+
           viewerSessionLogger.error("Viewer signaling channel failed.", {
             roomId: joined.roomId,
             sessionId: joined.sessionId,
@@ -178,9 +193,14 @@ export class ViewerSession {
           });
         },
         onMessage: (message) => {
+          if (!this.isCurrentSocket(joined, socketClient)) {
+            return;
+          }
+
           void this.handleSignal(message);
         },
       });
+      this.socketClient = socketClient;
     } catch (error) {
       const apiError = error as Partial<RoomApiError>;
       const code =
@@ -223,7 +243,7 @@ export class ViewerSession {
   }
 
   updateDisplayName(displayName: string) {
-    const trimmedDisplayName = displayName.trim();
+    const trimmedDisplayName = normalizeDisplayName(displayName);
 
     if (!trimmedDisplayName) {
       return;
@@ -234,7 +254,7 @@ export class ViewerSession {
   }
 
   sendChatMessage(text: string) {
-    const trimmedText = text.trim();
+    const trimmedText = normalizeChatMessage(text);
 
     if (!trimmedText || !this.joinResponse || !this.socketClient) {
       return false;
@@ -460,8 +480,9 @@ export class ViewerSession {
       status: this.snapshot.status,
     });
     this.stopMetricsTimer();
-    this.socketClient?.close();
+    const socketClient = this.socketClient;
     this.socketClient = null;
+    socketClient?.close();
     const peerClient = this.peerClient;
     this.peerClient = null;
     peerClient?.close();
@@ -469,8 +490,8 @@ export class ViewerSession {
 
     if (resetSnapshot) {
       const displayName =
-        this.snapshot.displayName.trim() ||
-        this.options.initialDisplayName.trim() ||
+        normalizeDisplayName(this.snapshot.displayName) ||
+        normalizeDisplayName(this.options.initialDisplayName) ||
         "";
       this.snapshot = {
         ...initialViewerSessionState,
@@ -492,10 +513,12 @@ export class ViewerSession {
   }
 
   private sendViewerProfile() {
+    const displayName = normalizeDisplayName(this.snapshot.displayName);
+
     if (
       !this.joinResponse ||
       !this.socketClient ||
-      !this.snapshot.displayName.trim()
+      !displayName
     ) {
       return false;
     }
@@ -509,7 +532,7 @@ export class ViewerSession {
         messageType: "viewer-profile",
         payload: {
           viewerSessionId: this.joinResponse.sessionId,
-          displayName: this.snapshot.displayName.trim(),
+          displayName,
         },
       }),
     );
@@ -578,6 +601,21 @@ export class ViewerSession {
   private now() {
     return this.options.now?.() ?? Date.now();
   }
+
+  private isCurrentSocket(
+    joined: JoinRoomResponse,
+    socketClient: ReturnType<typeof createSocketClient>,
+  ) {
+    return this.joinResponse === joined && this.socketClient === socketClient;
+  }
+}
+
+function normalizeDisplayName(displayName: string) {
+  return displayName.trim().slice(0, maxDisplayNameLength);
+}
+
+function normalizeChatMessage(text: string) {
+  return text.trim().slice(0, maxChatMessageLength);
 }
 
 function appendChatMessage(

@@ -61,6 +61,42 @@ describe("collectViewerPeerMetrics", () => {
     });
   });
 
+  it("prefers an explicitly selected pair over an earlier succeeded pair", async () => {
+    await expect(
+      collectViewerPeerMetrics(
+        createPeerConnectionWithStats([
+          {
+            id: "local_relay",
+            type: "local-candidate",
+            candidateType: "relay",
+          },
+          {
+            id: "local_host",
+            type: "local-candidate",
+            candidateType: "host",
+          },
+          {
+            id: "pair_succeeded",
+            type: "candidate-pair",
+            state: "succeeded",
+            localCandidateId: "local_relay",
+            currentRoundTripTime: 0.024,
+          },
+          {
+            id: "pair_selected",
+            type: "candidate-pair",
+            selected: true,
+            localCandidateId: "local_host",
+            currentRoundTripTime: 0.012,
+          },
+        ]),
+      ),
+    ).resolves.toEqual({
+      connectionType: "direct",
+      pingMs: 12,
+    });
+  });
+
   it("reports direct metrics for a non-relay selected local candidate", async () => {
     await expect(
       collectViewerPeerMetrics(

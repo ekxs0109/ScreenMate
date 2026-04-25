@@ -75,6 +75,27 @@ describe("ViewerShell", () => {
     expect(onDisplayNameChange).toHaveBeenCalledWith("Ira");
   });
 
+  it("limits display name and chat input length", () => {
+    const scene = buildViewerSceneModel({
+      locale: "en",
+      session: initialViewerSessionState,
+      mock: {
+        ...createViewerMockState("en"),
+        username: "Mina",
+      },
+    });
+
+    renderViewerShell(scene);
+
+    const nameInput = screen.getByDisplayValue("Mina") as HTMLInputElement;
+    const messageInput = screen.getByPlaceholderText(
+      /Send a message|发送消息/,
+    ) as HTMLInputElement;
+
+    expect(nameInput.maxLength).toBe(80);
+    expect(messageInput.maxLength).toBe(500);
+  });
+
   it("restores the current display name when a blank edit blurs", () => {
     const onDisplayNameChange = vi.fn();
     const scene = buildViewerSceneModel({

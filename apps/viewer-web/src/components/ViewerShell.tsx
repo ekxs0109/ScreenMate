@@ -223,6 +223,7 @@ export function ViewerShell({
                <div className="flex min-w-0 flex-1 items-center gap-1.5 pr-2">
                  <input
                    aria-label={copy.nameLabel}
+                   maxLength={80}
                    value={displayNameDraft}
                    onBlur={(event) => commitDisplayNameDraft(event.currentTarget.value)}
                    onChange={(event) => setDisplayNameDraft(event.currentTarget.value)}
@@ -255,6 +256,7 @@ export function ViewerShell({
             >
               <input 
                 name="message"
+                maxLength={500}
                 type="text" 
                 placeholder={copy.messagePlaceholder}
                 className="w-full bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground"
