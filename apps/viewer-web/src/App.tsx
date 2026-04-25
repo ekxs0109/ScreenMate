@@ -92,24 +92,22 @@ export default function App() {
           username: nextDisplayName,
         }));
       }}
-      onSendMessage={(text) => {
-        if (viewerSession.sendChatMessage(text)) {
+      onDisplayNameChange={(nextName) => {
+        const nextDisplayName = nextName.trim();
+
+        if (!nextDisplayName) {
           return;
         }
 
+        setDisplayName(nextDisplayName);
+        viewerSession.updateDisplayName(nextDisplayName);
         setMock((current) => ({
           ...current,
-          messages: [
-            ...current.messages,
-            {
-              id: `local-${Date.now()}`,
-              senderKind: "self",
-              textKey: undefined,
-              text,
-              timestamp: Date.now(),
-            },
-          ],
+          username: nextDisplayName,
         }));
+      }}
+      onSendMessage={(text) => {
+        return viewerSession.sendChatMessage(text);
       }}
     />
   );

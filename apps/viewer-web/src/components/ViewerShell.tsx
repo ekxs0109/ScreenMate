@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, LogIn, LogOut, Pause, Radio, Send, Shuffle, Users } from "lucide-react";
 import { useTheme } from "next-themes";
 import { JoinForm } from "./JoinForm";
@@ -14,6 +14,7 @@ export function ViewerShell({
   onLeaveRoom,
   onJoinOtherRoom,
   onRandomizeUsername,
+  onDisplayNameChange,
   onSendMessage,
 }: {
   scene: ViewerSceneModel;
@@ -22,11 +23,19 @@ export function ViewerShell({
   onLeaveRoom: () => void;
   onJoinOtherRoom: () => void;
   onRandomizeUsername: () => void;
-  onSendMessage: (text: string) => void;
+  onDisplayNameChange: (displayName: string) => void;
+  onSendMessage: (text: string) => boolean;
 }) {
   const { resolvedTheme, setTheme, theme } = useTheme();
   const { copy, locale, setLocale } = useViewerI18n();
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [displayNameDraft, setDisplayNameDraft] = useState(
+    scene.sidebar.username,
+  );
+
+  useEffect(() => {
+    setDisplayNameDraft(scene.sidebar.username);
+  }, [scene.sidebar.username]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -202,8 +211,20 @@ export function ViewerShell({
           {/* Chat Input & Identity Area */}
           <div className="p-3 border-t border-border bg-card flex flex-col gap-2">
             <div className="flex items-center justify-between px-1">
-               <div className="text-[10px] font-medium text-muted-foreground flex items-center gap-1">
-                 {copy.nameLabel}: <span className="text-foreground">{scene.sidebar.username}</span>
+               <div className="flex min-w-0 flex-1 items-center gap-1.5 pr-2">
+                 <input
+                   aria-label={copy.nameLabel}
+                   value={displayNameDraft}
+                   onBlur={(event) => onDisplayNameChange(event.currentTarget.value)}
+                   onChange={(event) => setDisplayNameDraft(event.currentTarget.value)}
+                   onKeyDown={(event) => {
+                     if (event.key === "Enter") {
+                       event.preventDefault();
+                       event.currentTarget.blur();
+                     }
+                   }}
+                   className="h-7 min-w-0 max-w-[190px] rounded-md border border-border bg-white px-2 text-xs font-medium text-foreground shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 dark:bg-zinc-950"
+                 />
                </div>
                <button onClick={onRandomizeUsername} className="text-[10px] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1 hover:text-blue-700 transition">
                   <Shuffle className="w-3 h-3" />
@@ -215,8 +236,10 @@ export function ViewerShell({
                 const fd = new FormData(e.currentTarget);
                 const text = String(fd.get("message") || "").trim();
                 if (text) {
-                  onSendMessage(text);
-                  e.currentTarget.reset();
+                  const sent = onSendMessage(text);
+                  if (sent) {
+                    e.currentTarget.reset();
+                  }
                 }
               }} 
               className="flex items-center gap-2 relative shadow-sm rounded-full bg-white dark:bg-zinc-900 border border-border focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-blue-500 transition-all p-1 pl-4"
