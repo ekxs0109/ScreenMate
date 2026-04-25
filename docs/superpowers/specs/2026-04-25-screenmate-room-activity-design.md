@@ -64,7 +64,10 @@ The server could introduce a generic room activity storage interface that later 
 - `chat-message`
   - Sent by host or viewer as a text message request.
   - Client payload should include text only plus optional local correlation id.
-  - The Durable Object assigns the canonical `messageId`, sender fields, and `sentAt`.
+- `chat-message-created`
+  - Sent only by the Durable Object after accepting a chat request.
+  - Payload contains the canonical `messageId`, sender fields, text, and `sentAt`.
+  - Clients must treat this as the only event that appends a room chat message.
 - `viewer-roster`
   - Sent by the Durable Object to host and viewers.
   - Payload contains current viewer rows with display name, online state, connection type, ping, and last update timestamps.
@@ -72,7 +75,7 @@ The server could introduce a generic room activity storage interface that later 
   - Sent by the Durable Object on connection and after recovery.
   - Payload contains the most recent room chat messages.
 
-Chat messages should be capped to 500 characters after trimming. Empty messages are rejected or ignored. The room stores the latest 100 chat messages.
+Chat messages should be capped to 500 characters after trimming. Empty messages are rejected or ignored. The room stores the latest 100 chat messages. User-visible viewer counts should count online viewers only; retained offline roster rows are presence history, not active viewers.
 
 ## Server Design
 
@@ -124,9 +127,10 @@ On `chat-message`:
 - Normalize sender identity from the active session rather than trusting client-provided sender fields.
 - Trim and validate message text.
 - Append a canonical message to the latest 100 messages.
-- Persist and broadcast the canonical `chat-message`.
+- Persist the activity state before broadcasting.
+- Broadcast the canonical message as `chat-message-created`.
 
-The activity state should be persisted in Durable Object storage with the room record or a nearby storage key. Room close and expiry do not need separate cleanup beyond the current room lifecycle.
+The activity state should be persisted in Durable Object storage with the room record or a nearby storage key. Stored activity must be normalized on load so older or malformed records fall back to safe defaults instead of breaking WebSocket setup. Room close and expiry should delete or tombstone room activity storage so chat and roster data do not outlive the room lifecycle.
 
 ## Viewer Web Design
 
@@ -143,7 +147,7 @@ The activity state should be persisted in Durable Object storage with the room r
 - Send `viewer-profile` after the signaling socket opens.
 - Expose a method to update the display name and send another `viewer-profile`.
 - Send `chat-message` when the viewer submits chat.
-- Consume `viewer-roster`, `chat-history`, and canonical `chat-message`.
+- Consume `viewer-roster`, `chat-history`, and canonical `chat-message-created`.
 - Derive metrics from `RTCPeerConnection.getStats()` where available.
 
 For metrics:
@@ -151,6 +155,7 @@ For metrics:
 - `connectionType` should be `relay` when the selected candidate pair uses a relay candidate, otherwise `direct` when the connection is established.
 - `pingMs` should use WebRTC round-trip time when available.
 - If RTT is unavailable, the UI should display a neutral unknown value such as `--` rather than fake latency.
+- Offline viewer rows should not display stale metrics as current. The UI should either show an explicit offline label with `--` metrics or a clearly labeled last-seen state.
 
 `viewer-mock-state.ts` should stop providing joined-room viewer count, ping, connection type, and chat data. It may remain for pre-join default identity if useful, but joined room UI should come from `ViewerSessionState`.
 
@@ -158,22 +163,24 @@ For metrics:
 
 `HostRoomSnapshot` should include:
 
-- `viewerDetails`
+- `viewerRoster`
 - `chatMessages`
+- enough presence data to distinguish online and offline retained roster rows
 
 `host-room-runtime` should:
 
-- Consume `viewer-roster`, `chat-history`, and canonical `chat-message` from the host signaling socket.
+- Consume `viewer-roster`, `chat-history`, and canonical `chat-message-created` from the host signaling socket.
 - Persist the latest activity with the room session.
-- Expose viewer details and chat messages through `getSnapshot()`.
+- Expose viewer roster and chat messages through `getSnapshot()`.
 - Provide a method for sending host chat messages over the existing WebSocket.
 
 `background.ts` should add popup-facing messages for host chat send and, if needed, snapshot refresh. It should route host chat through `host-room-runtime` rather than local popup state.
 
 `popup/scene-adapter.ts` should:
 
-- Prefer real `snapshot.viewerDetails` over mock viewer rows.
+- Prefer real `snapshot.viewerRoster` over mock viewer rows and map it to popup row labels.
 - Prefer real `snapshot.chatMessages` over mock chat messages.
+- Preserve online/offline state from the roster instead of deriving presence from connection quality.
 - Preserve the presenter contract so `presenter.tsx` does not need to know whether activity is real or temporary.
 
 `popup/App.tsx` should route chat sends to the background/runtime once a room is active. Local-only message append should be removed from the real room path.
@@ -197,8 +204,9 @@ Chat flow:
 2. Client sends a `chat-message` request over WebSocket.
 3. Durable Object validates and canonicalizes the message.
 4. Durable Object appends it to room history.
-5. Durable Object broadcasts the canonical `chat-message`.
-6. Host popup and viewer append the canonical message to their local session state.
+5. Durable Object persists the updated history.
+6. Durable Object broadcasts the canonical `chat-message-created`.
+7. Host popup and viewer append the canonical message to their local session state.
 
 Reconnect flow:
 
@@ -212,13 +220,16 @@ Reconnect flow:
 - Unauthorized profile or metrics updates should close with `message-type-not-allowed` or `session-mismatch`.
 - Oversized or empty chat text should be ignored with no broadcast, or rejected by closing the socket only if the payload is malformed.
 - If metrics collection fails, the viewer remains connected and sends no metrics until the next successful sample.
-- If host chat is submitted without an active room socket, the popup should show a clear transient failure through the existing room message surface or keep the send button disabled.
+- If host or viewer chat is submitted without an active room socket, the UI should report send failure and preserve the draft, or keep the send button disabled.
+- Token-bearing URLs and chat text must not be logged. Logs should use redacted URLs and privacy-safe metadata such as message type, room/session ids, counts, and close reasons.
+- The first pass should include small abuse budgets for activity writes: per-session chat rate, display-name update rate, metrics minimum interval, maximum retained offline viewers, and a maximum active viewer count.
+- Production deployments should not issue room tokens from arbitrary origins. Keep permissive CORS only for local development and tests, and document the allowed-origin configuration.
 
 ## Testing Strategy
 
 Shared package:
 
-- Add schema tests for `viewer-profile`, `viewer-metrics`, `chat-message`, `viewer-roster`, and `chat-history`.
+- Add schema tests for `viewer-profile`, `viewer-metrics`, `chat-message`, `chat-message-created`, `viewer-roster`, and `chat-history`.
 - Cover invalid display names, invalid metrics, and oversized chat payloads.
 
 Server:
@@ -228,6 +239,10 @@ Server:
 - Test that host and viewer chat messages are canonicalized and broadcast.
 - Test that new host/viewer connections receive roster and chat history snapshots.
 - Test that viewer disconnect marks the roster entry offline while retaining recent activity.
+- Test that same-session reconnect flips the retained roster row back online without duplicating it.
+- Test that stale close events after reconnect do not mark the active roster row offline.
+- Test that malformed persisted activity is normalized or dropped before snapshots are sent.
+- Test that concurrent activity writes cannot overwrite newer chat/profile state with an older storage snapshot.
 
 Viewer web:
 
@@ -236,12 +251,16 @@ Viewer web:
 - Test that incoming roster/history/chat update the scene model.
 - Test that chat submission sends a message request.
 - Test that unknown RTT renders as unknown rather than mock latency.
+- Test that failed chat sends preserve the draft and do not report success.
+- Test relay, direct, unknown, missing RTT, and `getStats()` failure metrics cases.
 
 Extension:
 
 - Test that host runtime stores roster and chat snapshots.
 - Test that popup scene adapter uses real roster and chat when present.
 - Test that host chat send is routed through the background runtime.
+- Test that host chat send failure returns a failure result and the popup preserves the draft.
+- Test that offline roster rows remain visible and are labeled offline.
 - Keep existing source attach and WebRTC tests passing.
 
 Manual smoke:
