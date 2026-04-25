@@ -59,6 +59,11 @@ export default function App() {
 
   async function handleJoin(roomCode: string) {
     await viewerSession.join(roomCode);
+    window.history.replaceState(
+      {},
+      "",
+      `/rooms/${encodeURIComponent(roomCode)}`,
+    );
   }
 
   const scene = buildViewerSceneModel({

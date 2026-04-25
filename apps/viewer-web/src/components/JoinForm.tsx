@@ -27,6 +27,7 @@ export function JoinForm({
           {copy.roomCodeLabel}
         </Label>
         <Input
+          data-testid="viewer-room-code-input"
           id="roomCode"
           value={roomCode}
           onChange={(event) => setRoomCode(event.target.value)}
@@ -37,6 +38,7 @@ export function JoinForm({
         />
       </div>
       <Button 
+        data-testid="viewer-join-submit"
         disabled={isBusy || !roomCode.trim()} 
         type="submit" 
         className="w-full bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white border-0"

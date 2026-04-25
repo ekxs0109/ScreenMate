@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ScreenMate E2E Host</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 32%),
+          linear-gradient(180deg, #09090b, #111827 58%, #030712);
+        color: #f8fafc;
+      }
+
+      main {
+        box-sizing: border-box;
+        min-height: 100vh;
+        padding: 32px;
+        display: grid;
+        place-items: center;
+      }
+
+      .shell {
+        width: min(1120px, 100%);
+        display: grid;
+        gap: 20px;
+      }
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .eyebrow {
+        margin: 0 0 6px;
+        color: #67e8f9;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(28px, 4vw, 42px);
+        line-height: 1.05;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border: 1px solid rgba(103, 232, 249, 0.24);
+        border-radius: 999px;
+        background: rgba(8, 47, 73, 0.4);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .status::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #22c55e;
+        box-shadow: 0 0 14px rgba(34, 197, 94, 0.55);
+      }
+
+      .stage {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 24px;
+        background: rgba(15, 23, 42, 0.72);
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.45);
+      }
+
+      video {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        display: block;
+        background: #000;
+        object-fit: cover;
+      }
+
+      .overlay {
+        position: absolute;
+        inset: auto 20px 20px auto;
+        padding: 12px 16px;
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.74);
+        backdrop-filter: blur(14px);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        max-width: min(360px, calc(100% - 40px));
+      }
+
+      .overlay strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 14px;
+      }
+
+      .overlay p {
+        margin: 0;
+        color: #cbd5e1;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="shell">
+        <div class="header">
+          <div>
+            <p class="eyebrow">ScreenMate E2E Harness</p>
+            <h1>Stable host video surface for extension sniff + attach</h1>
+          </div>
+          <div class="status" data-testid="e2e-host-status">Streaming canvas loop</div>
+        </div>
+
+        <div class="stage">
+          <video
+            id="e2e-host-video"
+            data-testid="e2e-host-video"
+            autoplay
+            muted
+            playsinline
+          ></video>
+          <div class="overlay">
+            <strong>Host Media Fixture</strong>
+            <p>
+              This page renders a deterministic in-browser stream so the extension can
+              discover a visible video source without relying on external media.
+            </p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script type="module">
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;
+      canvas.height = 720;
+
+      const context = canvas.getContext("2d");
+      const video = document.querySelector("#e2e-host-video");
+
+      if (!context || !video) {
+        throw new Error("Could not initialize ScreenMate E2E host fixture.");
+      }
+
+      const stream = canvas.captureStream(24);
+      video.srcObject = stream;
+
+      const startTime = performance.now();
+
+      function frame(now) {
+        const elapsed = (now - startTime) / 1000;
+
+        context.fillStyle = "#020617";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+        gradient.addColorStop(0, "#06b6d4");
+        gradient.addColorStop(0.5, "#2563eb");
+        gradient.addColorStop(1, "#0f172a");
+
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        context.globalAlpha = 0.18;
+        for (let i = 0; i < 6; i += 1) {
+          const x = ((elapsed * 80) + i * 220) % (canvas.width + 220) - 110;
+          const y = 120 + i * 84;
+          context.fillStyle = i % 2 === 0 ? "#f8fafc" : "#0ea5e9";
+          context.beginPath();
+          context.arc(x, y, 78, 0, Math.PI * 2);
+          context.fill();
+        }
+        context.globalAlpha = 1;
+
+        context.fillStyle = "rgba(2, 6, 23, 0.32)";
+        context.fillRect(56, 56, 1168, 128);
+
+        context.fillStyle = "#e2e8f0";
+        context.font = "700 64px Inter, ui-sans-serif, system-ui, sans-serif";
+        context.fillText("ScreenMate Room Activity E2E", 84, 132);
+
+        context.fillStyle = "#bae6fd";
+        context.font = "500 28px Inter, ui-sans-serif, system-ui, sans-serif";
+        context.fillText("Deterministic host stream via canvas.captureStream()", 86, 180);
+
+        context.fillStyle = "rgba(15, 23, 42, 0.72)";
+        context.fillRect(84, 514, 420, 118);
+
+        context.fillStyle = "#f8fafc";
+        context.font = "600 30px Inter, ui-sans-serif, system-ui, sans-serif";
+        context.fillText("Frame clock", 110, 564);
+
+        context.fillStyle = "#67e8f9";
+        context.font = "700 42px ui-monospace, SFMono-Regular, monospace";
+        context.fillText(elapsed.toFixed(2), 110, 618);
+
+        context.strokeStyle = "rgba(226, 232, 240, 0.26)";
+        context.lineWidth = 2;
+        context.strokeRect(84, 514, 420, 118);
+
+        context.strokeStyle = "rgba(186, 230, 253, 0.45)";
+        context.lineWidth = 3;
+        context.beginPath();
+        context.moveTo(760, 520);
+        context.lineTo(1088, 360);
+        context.lineTo(1180, 540);
+        context.stroke();
+
+        context.fillStyle = "#dbeafe";
+        context.beginPath();
+        context.arc(988, 356, 24, 0, Math.PI * 2);
+        context.fill();
+
+        requestAnimationFrame(frame);
+      }
+
+      requestAnimationFrame(frame);
+      void video.play().catch(() => {});
+    </script>
+  </body>
+</html>

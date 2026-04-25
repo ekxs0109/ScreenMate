@@ -1,5 +1,19 @@
 # Manual Room Streaming Checklist
 
+## E2E Coverage Boundary
+
+The Playwright smoke suite in `tests/e2e/room-activity-smoke.spec.ts` now covers these room activity checks with a real local server, real viewer web app, and built extension:
+
+- host popup discovers a visible page video source
+- host starts a room and attaches the selected source
+- viewer joins from the viewer web app
+- host and viewer exchange chat messages
+- viewer display name changes propagate to the popup roster
+- popup refresh restores room id, roster rows, and recent popup chat history
+- viewer join flow persists the `/rooms/:roomId` route for refresh-driven re-entry
+
+Keep the checklist below for everything the smoke suite does not prove reliably, especially real screen share, TURN/relay verification, unsupported capture states, and failure-mode behavior.
+
 - [ ] Start the Cloudflare worker with a real `ROOM_TOKEN_SECRET`.
 - [ ] Start local TURN with `docker compose -f docker-compose.turn.yml up -d`.
 - [ ] Confirm the worker has `TURN_AUTH_SECRET`, `TURN_REALM`, and `TURN_URLS` configured.

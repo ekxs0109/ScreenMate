@@ -120,7 +120,11 @@ describe("ExtensionPopupPresenter", () => {
     expect(screen.getByText("Medios detectados")).toBeTruthy();
     expect(screen.getByText("Big Buck Bunny")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
-    expect(screen.queryByText("Room open · attached")).toBeNull();
+    expect(
+      screen.queryByText("Room open · attached", {
+        selector: ":not([data-testid='popup-room-status'])",
+      }),
+    ).toBeNull();
   });
 
   it("previews sniff cards on hover without selecting them", () => {

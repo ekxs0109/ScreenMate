@@ -450,6 +450,69 @@ describe("RoomObject", () => {
     }
   });
 
+  it("allows an immediate manual rename after the initial viewer profile sync", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const { state } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+      await initializeRoomObject(roomObject);
+      const roomState = getRoomStateInstance(roomObject);
+      const host = createSocketPair().client;
+      const viewer = createSocketPair().client;
+
+      connectTestSocket(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        client: host,
+      });
+      const viewerConnection = connectTestSocket(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        client: viewer,
+      });
+
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: viewerConnection,
+        messageType: "viewer-profile",
+        payload: {
+          viewerSessionId: "viewer_1",
+          displayName: "Random Seed",
+        },
+      });
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: viewerConnection,
+        messageType: "viewer-profile",
+        payload: {
+          viewerSessionId: "viewer_1",
+          displayName: "QA Viewer",
+        },
+      });
+
+      const rosters = host.messages.filter(
+        (message) =>
+          (message as { messageType?: string }).messageType === "viewer-roster",
+      );
+      expect(rosters.at(-1)).toMatchObject({
+        messageType: "viewer-roster",
+        payload: {
+          viewers: [
+            expect.objectContaining({
+              viewerSessionId: "viewer_1",
+              displayName: "QA Viewer",
+            }),
+          ],
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps room activity deleted after host-left when an activity persist was queued", async () => {
     const storage = new DelayedActivityStorage();
     const { state } = createDurableObjectState(storage);

@@ -524,6 +524,7 @@ export class RoomState {
     displayName: string,
   ) {
     const now = this.now();
+    const current = this.ensureViewerProfile(viewerSessionId);
     const lastUpdatedAt = this.lastProfileUpdates.get(viewerSessionId);
     if (
       lastUpdatedAt !== undefined &&
@@ -532,13 +533,15 @@ export class RoomState {
       return;
     }
 
-    const current = this.ensureViewerProfile(viewerSessionId);
+    const isBootstrapProfileSync = current.profileUpdatedAt === null;
     this.viewerProfiles.set(viewerSessionId, {
       ...current,
       displayName: displayName.trim(),
       profileUpdatedAt: now,
     });
-    this.lastProfileUpdates.set(viewerSessionId, now);
+    if (!isBootstrapProfileSync) {
+      this.lastProfileUpdates.set(viewerSessionId, now);
+    }
     await this.persistActivity();
     this.broadcast(this.viewerRosterEnvelope());
   }

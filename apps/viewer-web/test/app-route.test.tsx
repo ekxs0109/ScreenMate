@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ViewerI18nProvider } from "../src/i18n";
 import type { ViewerSessionState } from "../src/lib/session-state";
@@ -79,6 +79,23 @@ describe("App room routing", () => {
 
     await waitFor(() => {
       expect(joinSpy).toHaveBeenCalledWith("room_demo");
+    });
+  });
+
+  it("updates the location to /rooms/:roomId after joining from the form", async () => {
+    render(
+      <ViewerI18nProvider initialLocale="en">
+        <App />
+      </ViewerI18nProvider>,
+    );
+
+    const roomCodeInput = screen.getByTestId("viewer-room-code-input");
+    fireEvent.change(roomCodeInput, { target: { value: "room_form_join" } });
+    fireEvent.click(screen.getByTestId("viewer-join-submit"));
+
+    await waitFor(() => {
+      expect(joinSpy).toHaveBeenCalledWith("room_form_join");
+      expect(window.location.pathname).toBe("/rooms/room_form_join");
     });
   });
 });

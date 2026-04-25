@@ -124,6 +124,7 @@ export function ViewerShell({
         <div className="w-full lg:flex-[3] aspect-video lg:aspect-auto flex flex-col relative shrink-0 z-10 bg-black lg:border-r border-border/10">
           <div className="absolute inset-0 w-full h-full flex items-center justify-center group overflow-hidden bg-black">
             <video
+              data-testid="viewer-video"
               ref={videoRef}
               className="absolute inset-0 w-full h-full object-contain outline-none"
               controls={false}
@@ -171,7 +172,7 @@ export function ViewerShell({
           <div className="p-4 border-b border-border bg-zinc-50/80 dark:bg-zinc-900/80 flex flex-col gap-3 shrink-0">
              <div className="flex items-center justify-between">
                <h2 className="font-semibold text-[15px]">{copy.syncStatus}</h2>
-               <div className="flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-md border border-blue-100 dark:border-blue-800/50">
+             <div data-testid="viewer-viewer-count" className="flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-md border border-blue-100 dark:border-blue-800/50">
                  <Users className="w-4 h-4" />
                  {copy.viewingCount(scene.sidebar.viewerCount)}
                </div>
@@ -192,7 +193,7 @@ export function ViewerShell({
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4 font-sans text-sm pb-10 xl:pb-4 relative bg-[url('/patterns/cubes.png')] dark:bg-zinc-950/50">
             {scene.sidebar.messages.map(msg => (
-              <div key={msg.id} className="flex flex-col gap-1">
+              <div key={msg.id} data-testid={`viewer-chat-message-${msg.id}`} className="flex flex-col gap-1">
                 <div className="flex items-baseline gap-2">
                   <span className={cn(
                     "font-medium", 
@@ -222,6 +223,7 @@ export function ViewerShell({
             <div className="flex items-center justify-between px-1">
                <div className="flex min-w-0 flex-1 items-center gap-1.5 pr-2">
                  <input
+                   data-testid="viewer-display-name-input"
                    aria-label={copy.nameLabel}
                    maxLength={80}
                    value={displayNameDraft}
@@ -255,6 +257,7 @@ export function ViewerShell({
               className="flex items-center gap-2 relative shadow-sm rounded-full bg-white dark:bg-zinc-900 border border-border focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-blue-500 transition-all p-1 pl-4"
             >
               <input 
+                data-testid="viewer-chat-input"
                 name="message"
                 maxLength={500}
                 type="text" 
@@ -262,12 +265,16 @@ export function ViewerShell({
                 className="w-full bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground"
               />
               <button 
+                data-testid="viewer-chat-send"
                 type="submit"
                 className="w-8 h-8 flex items-center justify-center rounded-full bg-blue-600 text-white transition-colors shrink-0"
               >
                 <Send className="w-3.5 h-3.5 -ml-0.5" />
               </button>
             </form>
+            <div data-testid="viewer-connection-state" data-status={scene.header.statusText} className="sr-only">
+              {scene.header.statusText}
+            </div>
           </div>
         </div>
       </main>

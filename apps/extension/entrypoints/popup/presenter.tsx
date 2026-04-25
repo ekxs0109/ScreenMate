@@ -141,7 +141,12 @@ export function ExtensionPopupPresenter({
       )}
     >
       <header className="shrink-0 flex items-center justify-between p-4 border-b border-border bg-zinc-50/80 dark:bg-zinc-950/80 backdrop-blur transition-colors">
-        <span className="font-bold text-lg tracking-tight">{copy.appName}</span>
+        <div className="min-w-0">
+          <span className="font-bold text-lg tracking-tight">{copy.appName}</span>
+          <span data-testid="popup-room-status" className="sr-only">
+            {scene.header.statusText}
+          </span>
+        </div>
         <div className="flex items-center gap-1.5">
           <button
             aria-label={copy.themeLabel}
@@ -173,15 +178,15 @@ export function ExtensionPopupPresenter({
         onValueChange={(value) => onSelectTab(value as PopupTab)}
       >
         <TabsList className="mx-3 mt-3 shrink-0 h-auto justify-start gap-1 rounded-none border-b border-border bg-transparent p-0">
-          <TabsTrigger className="rounded-none border-b-[3px] border-transparent px-4 pb-2.5 pt-0 text-sm font-semibold shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors" value="source">
+          <TabsTrigger data-testid="popup-tab-source" className="rounded-none border-b-[3px] border-transparent px-4 pb-2.5 pt-0 text-sm font-semibold shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors" value="source">
             {copy.tabSource}
           </TabsTrigger>
-          <TabsTrigger className="rounded-none border-b-[3px] border-transparent px-4 pb-2.5 pt-0 text-sm font-semibold shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors" value="room">
+          <TabsTrigger data-testid="popup-tab-room" className="rounded-none border-b-[3px] border-transparent px-4 pb-2.5 pt-0 text-sm font-semibold shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors" value="room">
             {copy.tabRoom}
             {scene.tabs.hasShared && <span className="ml-2 inline-block size-2 rounded-full bg-green-500 animate-pulse" />}
           </TabsTrigger>
           {scene.tabs.hasShared && (
-            <TabsTrigger className="rounded-none border-b-[3px] border-transparent px-4 pb-2.5 pt-0 text-sm font-semibold shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors" value="chat">
+            <TabsTrigger data-testid="popup-tab-chat" className="rounded-none border-b-[3px] border-transparent px-4 pb-2.5 pt-0 text-sm font-semibold shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors" value="chat">
               {copy.tabChat}
             </TabsTrigger>
           )}
@@ -217,7 +222,7 @@ export function ExtensionPopupPresenter({
                     initialScrollTop={sniffScrollTop}
                     onScrollTopChange={onSniffScrollChange}
                   >
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-4" data-testid="popup-sniff-groups">
                       {scene.sourceTab.sniffGroups.length > 0 ? scene.sourceTab.sniffGroups.map((group) => (
                         <section key={group.id} className="flex flex-col gap-2">
                           {(() => {
@@ -243,6 +248,8 @@ export function ExtensionPopupPresenter({
                                   group.cards.length > 0 ? group.cards.map((card) => (
                                     <button
                                       key={card.id}
+                                      data-testid={`popup-sniff-card-${card.id}`}
+                                      data-selected={card.selected ? "true" : "false"}
                                       type="button"
                                       onClick={() => onSelectSource(card.id)}
                                       onPointerEnter={() => onPreviewSource(card.id)}
@@ -384,7 +391,7 @@ export function ExtensionPopupPresenter({
               )}
               <div className="shrink-0 border-t border-border bg-card/95 p-4 backdrop-blur-md">
                 {!scene.tabs.hasShared ? (
-                  <button onClick={onStartOrAttach} className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none" disabled={scene.footer.primaryDisabled} type="button">
+                  <button data-testid="popup-start-or-attach" onClick={onStartOrAttach} className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none" disabled={scene.footer.primaryDisabled} type="button">
                     <Play className="w-4 h-4 fill-current" />
                     {copy.generateShare}
                   </button>
@@ -415,11 +422,13 @@ export function ExtensionPopupPresenter({
                   </div>
                 ) : (
                   <>
-                    <div className="bg-white dark:bg-zinc-900 border border-border rounded-xl shadow-sm text-sm overflow-hidden animate-in slide-in-from-bottom-2 duration-300">
+                    <div className="bg-white dark:bg-zinc-900 border border-border rounded-xl shadow-sm text-sm overflow-hidden animate-in slide-in-from-bottom-2 duration-300" data-testid="popup-room-card">
                       <div className="p-3 border-b border-border bg-zinc-50/50 dark:bg-zinc-950/50 flex justify-between items-center transition-colors">
                         <div className="flex items-center gap-2">
                           <Hash className="w-4 h-4 text-blue-500" />
-                          <span className="font-bold">{copy.roomId}: {scene.roomTab.roomId}</span>
+                          <span className="font-bold">
+                            {copy.roomId}: <span data-testid="popup-room-id-value">{scene.roomTab.roomId}</span>
+                          </span>
                         </div>
                         <div className="flex items-center gap-2">
                           <button className="rounded-md p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors" onClick={onCopyRoomId} aria-label="Copy Room ID" type="button">
@@ -459,13 +468,13 @@ export function ExtensionPopupPresenter({
                       </div>
                     </div>
 
-                    <div className="bg-white dark:bg-zinc-900 border border-border rounded-xl shadow-sm text-sm overflow-hidden flex flex-col animate-in slide-in-from-bottom-3 duration-400">
+                    <div className="bg-white dark:bg-zinc-900 border border-border rounded-xl shadow-sm text-sm overflow-hidden flex flex-col animate-in slide-in-from-bottom-3 duration-400" data-testid="popup-viewer-roster">
                       <div className="p-3 border-b border-border bg-zinc-50/50 dark:bg-zinc-950/50 flex justify-between items-center transition-colors">
                         <div className="flex items-center gap-2">
                           <Users className="w-4 h-4 text-blue-500" />
                           <span className="font-bold">{copy.viewerList}</span>
                         </div>
-                        <span className="px-2 py-0.5 rounded-full bg-blue-100/80 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10px] font-bold border border-blue-200 dark:border-blue-800/30 tabular-nums">
+                        <span data-testid="popup-viewer-count" className="px-2 py-0.5 rounded-full bg-blue-100/80 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10px] font-bold border border-blue-200 dark:border-blue-800/30 tabular-nums">
                           {scene.roomTab.viewerCount}
                         </span>
                       </div>
@@ -479,7 +488,7 @@ export function ExtensionPopupPresenter({
                       </div>
                       <div className="divide-y divide-border/50">
                         {scene.roomTab.viewerDetails.map((viewer) => (
-                          <div key={viewer.id} className="grid grid-cols-[1fr_70px_50px] gap-2 px-3 py-2.5 items-center hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
+                          <div key={viewer.id} data-testid={`popup-viewer-row-${viewer.id}`} data-online={viewer.online ? "true" : "false"} className="grid grid-cols-[1fr_70px_50px] gap-2 px-3 py-2.5 items-center hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
                             <div className="font-bold text-xs flex items-center gap-2 min-w-0 pr-1">
                               <div
                                 className={cn(
@@ -489,7 +498,7 @@ export function ExtensionPopupPresenter({
                                     : "bg-zinc-300 dark:bg-zinc-600",
                                 )}
                               />
-                              <span className="truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{viewer.name}</span>
+                              <span data-testid={`popup-viewer-name-${viewer.id}`} className="truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{viewer.name}</span>
                             </div>
                             <div className="flex justify-center">
                               <span className="text-[9px] font-bold text-muted-foreground bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md border border-border whitespace-nowrap transition-colors group-hover:border-zinc-300 dark:group-hover:border-zinc-700">
@@ -660,6 +669,7 @@ function ChatPaneInner({ messages, onSend, placeholder, roundedBottom = false }:
   return (
     <>
       <PopupScrollArea
+        data-testid="popup-chat-messages"
         className="flex-1"
         contentClassName="p-4 flex flex-col gap-4 relative min-h-full bg-zinc-50/50 dark:bg-zinc-950/30"
       >
@@ -668,7 +678,7 @@ function ChatPaneInner({ messages, onSend, placeholder, roundedBottom = false }:
           style={{ backgroundImage: `url(${cubesPattern})` }}
         />
         {messages.map((message) => (
-          <div key={message.id} className="flex flex-col gap-1 animate-in fade-in slide-in-from-bottom-1 duration-200 relative z-10">
+          <div key={message.id} data-testid={`popup-chat-message-${message.id}`} className="flex flex-col gap-1 animate-in fade-in slide-in-from-bottom-1 duration-200 relative z-10">
             <span className={cn("text-[10px] font-bold tracking-widest uppercase", message.sender === "System" ? "text-gray-400" : "text-blue-500")}>
               {message.sender}
             </span>
@@ -696,12 +706,13 @@ function ChatPaneInner({ messages, onSend, placeholder, roundedBottom = false }:
         }}
       >
         <input
+          data-testid="popup-chat-input"
           name="message"
           type="text"
           placeholder={placeholder}
           className="flex-1 min-w-0 bg-zinc-100 dark:bg-zinc-900 border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-[background-color,ring] font-medium"
         />
-        <button type="submit" className="w-12 bg-blue-600 text-white rounded-xl flex items-center justify-center transition-[background-color,transform] hover:bg-blue-700 active:scale-90 shadow-sm shrink-0">
+        <button data-testid="popup-chat-send" type="submit" className="w-12 bg-blue-600 text-white rounded-xl flex items-center justify-center transition-[background-color,transform] hover:bg-blue-700 active:scale-90 shadow-sm shrink-0">
           <Send className="w-4 h-4" />
         </button>
       </form>
@@ -715,12 +726,14 @@ function PopupScrollArea({
   contentClassName,
   initialScrollTop = 0,
   onScrollTopChange,
+  "data-testid": dataTestId,
 }: {
   children: ReactNode;
   className?: string;
   contentClassName?: string;
   initialScrollTop?: number;
   onScrollTopChange?: (scrollTop: number) => void;
+  "data-testid"?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hasRestoredScrollRef = useRef(false);
@@ -740,6 +753,7 @@ function PopupScrollArea({
   return (
     <div
       ref={containerRef}
+      data-testid={dataTestId}
       className={cn("popup-scroll-area min-h-0 flex-1 overflow-y-auto overflow-x-hidden", className)}
       onScroll={(event) => {
         onScrollTopChange?.(event.currentTarget.scrollTop);
