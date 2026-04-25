@@ -17,6 +17,7 @@ import {
 } from "./lib/session-state";
 import {
   createSocketClient,
+  redactUrlToken,
   type CreateWebSocket,
   type SignalEnvelope,
 } from "./lib/socket-client";
@@ -62,10 +63,14 @@ export class ViewerSession {
       apiBaseUrl: this.options.apiBaseUrl,
       roomId,
     });
+    const displayName =
+      this.snapshot.displayName.trim() ||
+      this.options.initialDisplayName?.trim() ||
+      "";
     this.teardown(false);
     this.update({
       ...initialViewerSessionState,
-      displayName: this.options.initialDisplayName?.trim() ?? "",
+      displayName,
       roomId,
       status: "joining",
     });
@@ -109,7 +114,7 @@ export class ViewerSession {
         iceServerCount: joined.iceServers.length,
         roomId: joined.roomId,
         sessionId: joined.sessionId,
-        wsUrl: joined.wsUrl,
+        wsUrl: redactUrlToken(joined.wsUrl),
       });
 
       this.update({

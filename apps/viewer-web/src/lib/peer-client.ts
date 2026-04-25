@@ -238,7 +238,9 @@ export async function collectViewerPeerMetrics(
     }
   }
 
-  const selectedPair = candidatePairs.find((pair) => pair.selected === true);
+  const selectedPair = candidatePairs.find(
+    (pair) => pair.selected === true || pair.state === "succeeded",
+  );
 
   if (!selectedPair) {
     return {

@@ -37,6 +37,30 @@ describe("collectViewerPeerMetrics", () => {
     });
   });
 
+  it("treats a succeeded candidate pair as selected", async () => {
+    await expect(
+      collectViewerPeerMetrics(
+        createPeerConnectionWithStats([
+          {
+            id: "local_1",
+            type: "local-candidate",
+            candidateType: "relay",
+          },
+          {
+            id: "pair_1",
+            type: "candidate-pair",
+            state: "succeeded",
+            localCandidateId: "local_1",
+            currentRoundTripTime: 0.024,
+          },
+        ]),
+      ),
+    ).resolves.toEqual({
+      connectionType: "relay",
+      pingMs: 24,
+    });
+  });
+
   it("reports direct metrics for a non-relay selected local candidate", async () => {
     await expect(
       collectViewerPeerMetrics(

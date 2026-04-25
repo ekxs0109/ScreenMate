@@ -227,6 +227,61 @@ describe("ViewerSession", () => {
     );
   });
 
+  it("uses pre-join display name updates when sending viewer-profile", async () => {
+    const socket = new FakeWebSocket();
+    const peer = new FakePeerConnection();
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    session.updateDisplayName("Noa");
+    await session.join("room_demo");
+    socket.emitOpen();
+
+    expect(socket.sentMessages.map((message) => JSON.parse(message))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          messageType: "viewer-profile",
+          payload: {
+            viewerSessionId: "viewer_1",
+            displayName: "Noa",
+          },
+        }),
+      ]),
+    );
+  });
+
+  it("redacts token-bearing signaling URLs in session logs", async () => {
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    const socket = new FakeWebSocket();
+    const peer = new FakePeerConnection();
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch({
+        wsUrl: "ws://signal.example/rooms/room_demo/ws?token=server-secret",
+      }),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+
+    const logs = consoleLog.mock.calls
+      .map((call) => JSON.stringify(call))
+      .join("\n");
+    consoleLog.mockRestore();
+
+    expect(logs).not.toContain("server-secret");
+    expect(logs).toContain("token=%5Bredacted%5D");
+  });
+
   it("stores roster, chat history, and created chat messages in the snapshot", async () => {
     const socket = new FakeWebSocket();
     const peer = new FakePeerConnection();
@@ -675,7 +730,15 @@ describe("ViewerSession", () => {
   });
 });
 
-function createJoinFetch() {
+function createJoinFetch(
+  joinOverrides: Partial<{
+    roomId: string;
+    sessionId: string;
+    viewerToken: string;
+    wsUrl: string;
+    iceServers: Array<{ urls: string[] }>;
+  }> = {},
+) {
   return async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = input.toString();
 
@@ -697,6 +760,7 @@ function createJoinFetch() {
         viewerToken: "viewer-token",
         wsUrl: "ws://signal.example/rooms/room_demo/ws",
         iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
+        ...joinOverrides,
       });
     }
 
