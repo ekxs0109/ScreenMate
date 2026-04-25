@@ -340,6 +340,17 @@ export class RoomState {
       return;
     }
 
+    if (this.isClosed()) {
+      connection.socket.close(4002, "room-closed");
+      return;
+    }
+
+    if (this.isExpired()) {
+      await this.closeRoom("expired");
+      connection.socket.close(4001, "room-expired");
+      return;
+    }
+
     if (isServerAuthoredActivityMessage(parsedJson)) {
       connection.socket.close(1008, "message-type-not-allowed");
       return;

@@ -1070,7 +1070,7 @@ describe("RoomObject", () => {
   });
 
   it("ignores empty chat without broadcasting or persisting", async () => {
-    const { state } = createDurableObjectState();
+    const { state, storage } = createDurableObjectState();
     const roomObject = new RoomObject(state, {} as never);
     await initializeRoomObject(roomObject);
     const roomState = getRoomStateInstance(roomObject);
@@ -1080,6 +1080,7 @@ describe("RoomObject", () => {
       sessionId: "host_1",
       client: host,
     });
+    const activityBefore = await storage.get("room-activity");
 
     await sendEnvelope(roomState, {
       role: "host",
@@ -1094,8 +1095,9 @@ describe("RoomObject", () => {
         (message) =>
           (message as { messageType?: string }).messageType ===
           "chat-message-created",
-      ),
+        ),
     ).toBe(false);
+    expect(await storage.get("room-activity")).toEqual(activityBefore);
   });
 
   it("normalizes malformed persisted activity before sending snapshots", async () => {
@@ -1322,6 +1324,109 @@ describe("RoomObject", () => {
       expect(body.state).toBe("closed");
       expect(body.sourceState).toBe("missing");
       expect(stored?.closedReason).toBe("expired");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores host chat after the room expires", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(200_000);
+      const { state, storage } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+
+      await roomObject.fetch(
+        new Request("https://room.internal/internal/initialize", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            roomId: "room_demo",
+            hostSessionId: "host_1",
+            createdAt: 0,
+            expiresAt: 300_000,
+            maxExpiresAt: 5_000_000,
+          }),
+        }),
+      );
+      const roomState = getRoomStateInstance(roomObject);
+      const host = createSocketPair().client;
+      const hostConnection = connectTestSocket(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        client: host,
+      });
+
+      vi.setSystemTime(300_000);
+      await roomState.expireIfNeeded();
+      expect(await storage.get("room-activity")).toBeNull();
+
+      await sendEnvelope(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        connection: hostConnection,
+        messageType: "chat-message",
+        payload: { text: "after close" },
+      });
+
+      expect(
+        host.messages.some(
+          (message) =>
+            (message as { messageType?: string }).messageType ===
+            "chat-message-created",
+        ),
+      ).toBe(false);
+      expect(await storage.get("room-activity")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores host room-state after the room expires", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(200_000);
+      const { state } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+
+      await roomObject.fetch(
+        new Request("https://room.internal/internal/initialize", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            roomId: "room_demo",
+            hostSessionId: "host_1",
+            createdAt: 0,
+            expiresAt: 300_000,
+            maxExpiresAt: 5_000_000,
+          }),
+        }),
+      );
+      const roomState = getRoomStateInstance(roomObject);
+      const hostConnection = connectTestSocket(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        client: createSocketPair().client,
+      });
+
+      vi.setSystemTime(300_000);
+      await roomState.expireIfNeeded();
+      await sendEnvelope(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        connection: hostConnection,
+        messageType: "room-state",
+        payload: {
+          state: "streaming",
+          sourceState: "attached",
+          viewerCount: 0,
+        },
+      });
+
+      expect(roomState.getStateSnapshot()).toMatchObject({
+        state: "closed",
+        sourceState: "missing",
+      });
     } finally {
       vi.useRealTimers();
     }
