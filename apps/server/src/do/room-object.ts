@@ -334,6 +334,10 @@ export class RoomState {
       return;
     }
 
+    if (this.isReplacedConnection(connection)) {
+      return;
+    }
+
     if (isServerAuthoredActivityMessage(parsedJson)) {
       connection.socket.close(1008, "message-type-not-allowed");
       return;
@@ -461,6 +465,15 @@ export class RoomState {
     return this.viewers.get(sessionId) ?? null;
   }
 
+  private isReplacedConnection(connection: RoomConnection) {
+    if (connection.role === "host") {
+      return this.hostConnection !== null && this.hostConnection !== connection;
+    }
+
+    const currentViewer = this.viewers.get(connection.sessionId);
+    return currentViewer !== undefined && currentViewer !== connection;
+  }
+
   private ensureViewerProfile(viewerSessionId: string) {
     const existing = this.viewerProfiles.get(viewerSessionId);
     if (existing) {
@@ -555,7 +568,6 @@ export class RoomState {
     const now = this.now();
     const lastSentAt = this.lastChatMessages.get(connection.sessionId);
     if (
-      connection.role === "viewer" &&
       lastSentAt !== undefined &&
       now - lastSentAt < MIN_CHAT_INTERVAL_MS
     ) {
@@ -821,6 +833,7 @@ export class RoomObject {
   private roomState: RoomState | null = null;
   private record: PersistedRoomRecord | null = null;
   private activity: PersistedRoomActivity | null = null;
+  private activityPersistenceGeneration = 0;
   private loaded = false;
 
   constructor(
@@ -840,6 +853,7 @@ export class RoomObject {
       };
 
       this.record = record;
+      this.activityPersistenceGeneration += 1;
       this.activity = {
         viewerProfiles: [],
         viewerMetrics: [],
@@ -923,10 +937,23 @@ export class RoomObject {
         await this.state.storage.put(ROOM_RECORD_KEY, nextRecord);
       },
       onPersistActivity: async (nextActivity) => {
+        const generation = this.activityPersistenceGeneration;
+        if (this.activity === null) {
+          return;
+        }
+
         this.activity = nextActivity;
         await this.state.storage.put(ROOM_ACTIVITY_KEY, nextActivity);
+
+        if (
+          this.activity === null ||
+          generation !== this.activityPersistenceGeneration
+        ) {
+          await this.state.storage.delete(ROOM_ACTIVITY_KEY);
+        }
       },
       onClose: async () => {
+        this.activityPersistenceGeneration += 1;
         this.activity = null;
         await this.state.storage.delete(ROOM_ACTIVITY_KEY);
       },

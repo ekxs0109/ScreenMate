@@ -147,6 +147,66 @@ class MemoryStorage {
   }
 }
 
+class DelayedActivityStorage extends MemoryStorage {
+  private delayActivityPuts = false;
+  private roomActivityDeleteCount = 0;
+  private deleteWaiter: (() => void) | null = null;
+  private readonly delayedPuts: Array<{
+    release: () => void;
+    completed: Promise<void>;
+  }> = [];
+
+  delayRoomActivityPuts() {
+    this.delayActivityPuts = true;
+  }
+
+  async put<T>(key: string, value: T): Promise<void> {
+    if (key !== "room-activity" || !this.delayActivityPuts) {
+      await super.put(key, value);
+      return;
+    }
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const completed = gate.then(() => super.put(key, value));
+    this.delayedPuts.push({ release, completed });
+    await completed;
+  }
+
+  async delete(key: string): Promise<void> {
+    await super.delete(key);
+
+    if (key === "room-activity") {
+      this.roomActivityDeleteCount += 1;
+      this.deleteWaiter?.();
+      this.deleteWaiter = null;
+    }
+  }
+
+  async waitForRoomActivityDelete() {
+    if (this.roomActivityDeleteCount > 0) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      this.deleteWaiter = resolve;
+    });
+  }
+
+  async releaseDelayedPuts() {
+    const delayed = [...this.delayedPuts];
+    this.delayedPuts.length = 0;
+
+    for (const put of delayed) {
+      put.release();
+    }
+
+    await Promise.all(delayed.map((put) => put.completed));
+  }
+}
+
 function createDurableObjectState(storage = new MemoryStorage()): {
   state: DurableObjectState;
   storage: MemoryStorage;
@@ -316,6 +376,61 @@ describe("RoomObject", () => {
     }
   });
 
+  it("keeps room activity deleted after host-left when an activity persist was queued", async () => {
+    const storage = new DelayedActivityStorage();
+    const { state } = createDurableObjectState(storage);
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    const roomState = getRoomStateInstance(roomObject);
+    const host = createSocketPair().client;
+    const hostConnection = connectTestSocket(roomState, {
+      role: "host",
+      sessionId: "host_1",
+      client: host,
+    });
+
+    storage.delayRoomActivityPuts();
+    connectTestSocket(roomState, {
+      role: "viewer",
+      sessionId: "viewer_1",
+      client: createSocketPair().client,
+    });
+
+    roomState.disconnectSession(hostConnection);
+    await storage.waitForRoomActivityDelete();
+    await storage.releaseDelayedPuts();
+
+    expect(await storage.get("room-activity")).toBeNull();
+  });
+
+  it("keeps room activity deleted after expiry when an activity persist was queued", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const storage = new DelayedActivityStorage();
+      const { state } = createDurableObjectState(storage);
+      const roomObject = new RoomObject(state, {} as never);
+      await initializeRoomObject(roomObject);
+      const roomState = getRoomStateInstance(roomObject);
+
+      storage.delayRoomActivityPuts();
+      connectTestSocket(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        client: createSocketPair().client,
+      });
+
+      vi.setSystemTime(Date.now() + 43_200_001);
+      await roomState.expireIfNeeded();
+      await storage.waitForRoomActivityDelete();
+      await storage.releaseDelayedPuts();
+
+      expect(await storage.get("room-activity")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("canonicalizes chat messages and replays chat history to new connections", async () => {
     vi.useFakeTimers();
     try {
@@ -393,6 +508,180 @@ describe("RoomObject", () => {
           ],
         },
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores stale viewer messages after the same session reconnects", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10_000);
+      const { state } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+      await initializeRoomObject(roomObject);
+      const roomState = getRoomStateInstance(roomObject);
+      const host = createSocketPair().client;
+      const firstViewer = createSocketPair().client;
+      const secondViewer = createSocketPair().client;
+
+      connectTestSocket(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        client: host,
+      });
+      const staleViewerConnection = connectTestSocket(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        client: firstViewer,
+      });
+      const currentViewerConnection = connectTestSocket(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        client: secondViewer,
+      });
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: currentViewerConnection,
+        messageType: "viewer-profile",
+        payload: {
+          viewerSessionId: "viewer_1",
+          displayName: "Current",
+        },
+      });
+
+      vi.setSystemTime(12_000);
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: staleViewerConnection,
+        messageType: "viewer-profile",
+        payload: {
+          viewerSessionId: "viewer_1",
+          displayName: "Stale",
+        },
+      });
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: staleViewerConnection,
+        messageType: "chat-message",
+        payload: { text: "stale chat" },
+      });
+
+      const rosters = host.messages.filter(
+        (message) =>
+          (message as { messageType?: string }).messageType === "viewer-roster",
+      ) as Array<{ payload: { viewers: Array<{ displayName: string }> } }>;
+      expect(rosters.at(-1)?.payload.viewers[0]?.displayName).toBe("Current");
+      expect(
+        host.messages.some(
+          (message) =>
+            (message as { messageType?: string }).messageType ===
+              "chat-message-created" &&
+            (message as { payload?: { text?: string } }).payload?.text ===
+              "stale chat",
+        ),
+      ).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores stale host messages after the host reconnects", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    const roomState = getRoomStateInstance(roomObject);
+    const firstHost = createSocketPair().client;
+    const secondHost = createSocketPair().client;
+    const viewer = createSocketPair().client;
+
+    const staleHostConnection = connectTestSocket(roomState, {
+      role: "host",
+      sessionId: "host_1",
+      client: firstHost,
+    });
+    connectTestSocket(roomState, {
+      role: "host",
+      sessionId: "host_1",
+      client: secondHost,
+    });
+    connectTestSocket(roomState, {
+      role: "viewer",
+      sessionId: "viewer_1",
+      client: viewer,
+    });
+
+    await sendEnvelope(roomState, {
+      role: "host",
+      sessionId: "host_1",
+      connection: staleHostConnection,
+      messageType: "room-state",
+      payload: {
+        state: "streaming",
+        sourceState: "attached",
+        viewerCount: 1,
+      },
+    });
+    await sendEnvelope(roomState, {
+      role: "host",
+      sessionId: "host_1",
+      connection: staleHostConnection,
+      messageType: "chat-message",
+      payload: { text: "stale host chat" },
+    });
+
+    expect(roomState.getStateSnapshot().sourceState).toBe("missing");
+    expect(
+      secondHost.messages.some(
+        (message) =>
+          (message as { messageType?: string }).messageType ===
+            "chat-message-created" &&
+          (message as { payload?: { text?: string } }).payload?.text ===
+            "stale host chat",
+      ),
+    ).toBe(false);
+  });
+
+  it("rate-limits host chat messages", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(20_000);
+      const { state } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+      await initializeRoomObject(roomObject);
+      const roomState = getRoomStateInstance(roomObject);
+      const host = createSocketPair().client;
+      const hostConnection = connectTestSocket(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        client: host,
+      });
+
+      await sendEnvelope(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        connection: hostConnection,
+        messageType: "chat-message",
+        payload: { text: "first" },
+      });
+      await sendEnvelope(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        connection: hostConnection,
+        messageType: "chat-message",
+        payload: { text: "second" },
+      });
+
+      expect(
+        host.messages.filter(
+          (message) =>
+            (message as { messageType?: string }).messageType ===
+            "chat-message-created",
+        ),
+      ).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
@@ -652,6 +941,7 @@ describe("RoomObject", () => {
           messageType: "chat-message",
           payload: { text: `message ${i}` },
         });
+        vi.advanceTimersByTime(500);
       }
 
       const viewer = createSocketPair().client;
