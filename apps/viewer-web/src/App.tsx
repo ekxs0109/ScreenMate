@@ -29,9 +29,10 @@ export default function App() {
   }));
   const [viewerSession] = useState(
     () =>
-      new ViewerSession(
-        createViewerSessionOptions(getViewerApiBaseUrl(), displayName),
-      ),
+      new ViewerSession({
+        apiBaseUrl: getViewerApiBaseUrl(),
+        initialDisplayName: displayName,
+      }),
   );
   const autoJoinedRoomIdRef = useRef<string | null>(null);
 
@@ -111,20 +112,4 @@ export default function App() {
       }}
     />
   );
-}
-
-function createViewerSessionOptions(
-  apiBaseUrl: string,
-  initialDisplayName: string,
-) {
-  const options = {
-    apiBaseUrl,
-  };
-
-  Object.defineProperty(options, "initialDisplayName", {
-    enumerable: false,
-    value: initialDisplayName,
-  });
-
-  return options as ConstructorParameters<typeof ViewerSession>[0];
 }

@@ -15,7 +15,7 @@ vi.mock("../src/viewer-session", async () => {
 
   return {
     ViewerSession: class ViewerSession {
-      constructor(options: { apiBaseUrl: string }) {
+      constructor(options: { apiBaseUrl: string; initialDisplayName: string }) {
         constructorSpy(options);
       }
 
@@ -63,6 +63,7 @@ describe("App room routing", () => {
     await waitFor(() => {
       expect(constructorSpy).toHaveBeenCalledWith({
         apiBaseUrl: "http://127.0.0.1:8787",
+        initialDisplayName: expect.any(String),
       });
     });
   });
