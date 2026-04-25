@@ -5,8 +5,6 @@ import {
 
 export type ViewerMockState = {
   username: string;
-  pingMs: number;
-  connectionType: "direct-p2p";
   viewerCount: number;
   messages: ViewerMockChatMessage[];
 };
@@ -25,8 +23,6 @@ export function createViewerMockState(
 ): ViewerMockState {
   return {
     username: buildRandomViewerUsername(locale),
-    pingMs: 22,
-    connectionType: "direct-p2p",
     viewerCount: 3,
     messages: [
       {

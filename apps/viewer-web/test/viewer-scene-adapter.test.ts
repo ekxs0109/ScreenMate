@@ -4,6 +4,17 @@ import { createViewerMockState } from "../src/viewer-mock-state";
 import { initialViewerSessionState } from "../src/lib/session-state";
 
 describe("buildViewerSceneModel", () => {
+  it("uses fixed pre-join connection defaults before room activity exists", () => {
+    const scene = buildViewerSceneModel({
+      locale: "en",
+      session: initialViewerSessionState,
+      mock: createViewerMockState("en"),
+    });
+
+    expect(scene.connection.typeLabel).toBe("Direct (P2P)");
+    expect(scene.connection.pingLabel).toBe("--");
+  });
+
   it("keeps real session state and renders empty real activity after joining", () => {
     const scene = buildViewerSceneModel({
       locale: "ja",

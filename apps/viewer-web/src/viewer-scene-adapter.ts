@@ -36,7 +36,7 @@ export function buildViewerSceneModel(input: {
         : copy.connectionTypeDirectP2P,
       pingLabel: useRealActivity
         ? formatPing(input.session.localPingMs)
-        : `${input.mock.pingMs}ms`,
+        : formatPing(null),
     },
     sidebar: {
       viewerCount: useRealActivity

@@ -17,9 +17,10 @@
 - [ ] In the popup `Room` tab, confirm room ID, share link, password row, and viewer connection table all render together.
 - [ ] Join Viewer A and Viewer B from the viewer web app with the room code.
 - [ ] In the popup `Chat` tab, confirm host and viewer messages appear on both sides after sending.
-- [ ] In the viewer sidebar, edit both random viewer names and confirm the popup viewer table updates.
+- [ ] Join Viewer A and Viewer B, edit both random names, and confirm the popup viewer table updates.
 - [ ] Refresh the host popup and one viewer, then confirm the current roster and recent chat history are restored.
 - [ ] Disconnect one viewer and confirm an offline row remains visible without counting as an online viewer.
+- [ ] Try sending while the host signaling socket is unavailable and confirm the draft is preserved or a clear failure is shown.
 - [ ] Confirm the viewer transitions from joining/waiting to connected.
 - [ ] Verify the viewer web app uses the migrated `ui_test` shell: live header, connection pills, custom player chrome, right sidebar timeline, identity row, and send box.
 - [ ] Refresh the host page and confirm the room code remains visible.

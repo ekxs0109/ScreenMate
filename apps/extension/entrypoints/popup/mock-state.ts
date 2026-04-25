@@ -20,7 +20,9 @@ export type ExtensionMockState = {
   copiedLink: boolean;
   copiedRoomId: boolean;
   isRefreshing: boolean;
+  // Used only before real room activity arrives.
   messages: ExtensionChatMessage[];
+  // Used only before real room activity arrives.
   viewerDetails: ViewerConnectionRow[];
 };
 
