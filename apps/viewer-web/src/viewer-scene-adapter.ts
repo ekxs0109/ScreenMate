@@ -15,6 +15,7 @@ export function buildViewerSceneModel(input: {
 }): ViewerSceneModel {
   const copy = getViewerDictionary(input.locale);
   const joined = input.session.status !== "idle";
+  const useRealActivity = input.session.roomId !== null && joined;
   const waitingText =
     input.session.roomState === "closed"
       ? copy.hostEndedRoom
@@ -30,32 +31,56 @@ export function buildViewerSceneModel(input: {
       statusText: input.session.status,
     },
     connection: {
-      typeLabel: copy.connectionTypeDirectP2P,
-      pingLabel: `${input.mock.pingMs}ms`,
+      typeLabel: useRealActivity
+        ? formatConnectionType(input.session.localConnectionType, copy)
+        : copy.connectionTypeDirectP2P,
+      pingLabel: useRealActivity
+        ? formatPing(input.session.localPingMs)
+        : `${input.mock.pingMs}ms`,
     },
     sidebar: {
-      viewerCount:
-        input.session.roomId !== null
-          ? Math.max(input.mock.viewerCount, 1)
-          : input.mock.viewerCount,
-      username: input.mock.username,
-      messages: input.mock.messages.map((message) => ({
-        id: message.id,
-        senderKind: message.senderKind,
-        sender:
-          message.senderKind === "host"
-            ? copy.senderHost
-            : message.senderKind === "system"
-              ? copy.senderSystem
-              : message.senderKind === "self"
-                ? copy.senderYou
-                : message.senderName ?? "",
-        text:
-          message.textKey === "hostStartedRoom"
-            ? copy.hostStartedRoom
-            : message.text ?? "",
-        time: formatViewerTime(message.timestamp, input.locale),
-      })),
+      viewerCount: useRealActivity
+        ? Math.max(
+            input.session.viewerRoster.filter((viewer) => viewer.online).length,
+            1,
+          )
+        : input.mock.viewerCount,
+      username: input.session.displayName || input.mock.username,
+      messages: useRealActivity
+        ? input.session.chatMessages.map((message) => ({
+            id: message.messageId,
+            senderKind:
+              message.senderRole === "host"
+                ? "host"
+                : message.senderSessionId === input.session.sessionId
+                  ? "self"
+                  : "named",
+            sender:
+              message.senderRole === "host"
+                ? message.senderName
+                : message.senderSessionId === input.session.sessionId
+                  ? copy.senderYou
+                  : message.senderName,
+            text: message.text,
+            time: formatViewerTime(message.sentAt, input.locale),
+          }))
+        : input.mock.messages.map((message) => ({
+            id: message.id,
+            senderKind: message.senderKind,
+            sender:
+              message.senderKind === "host"
+                ? copy.senderHost
+                : message.senderKind === "system"
+                  ? copy.senderSystem
+                  : message.senderKind === "self"
+                    ? copy.senderYou
+                    : message.senderName ?? "",
+            text:
+              message.textKey === "hostStartedRoom"
+                ? copy.hostStartedRoom
+                : message.text ?? "",
+            time: formatViewerTime(message.timestamp, input.locale),
+          })),
     },
     player: {
       showWaitingOverlay: input.session.remoteStream === null,
@@ -72,4 +97,23 @@ export function buildViewerSceneModel(input: {
       endedReason: translateViewerError(input.session.endedReasonCode, input.locale),
     },
   };
+}
+
+function formatConnectionType(
+  connectionType: ViewerSessionState["localConnectionType"],
+  copy: ReturnType<typeof getViewerDictionary>,
+) {
+  switch (connectionType) {
+    case "direct":
+      return copy.connectionTypeDirectP2P;
+    case "relay":
+      return "Relay";
+    case "unknown":
+    default:
+      return "--";
+  }
+}
+
+function formatPing(pingMs: number | null) {
+  return pingMs === null ? "--" : `${pingMs}ms`;
 }

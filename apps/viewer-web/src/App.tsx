@@ -19,13 +19,19 @@ import { ViewerSession } from "./viewer-session";
 export default function App() {
   const { copy, locale } = useViewerI18n();
   const initialRoomId = getViewerRoomIdFromLocation();
+  const [displayName, setDisplayName] = useState(() =>
+    buildRandomViewerUsername(locale),
+  );
   const [session, setSession] = useState<ViewerSessionState>(initialViewerSessionState);
-  const [mock, setMock] = useState<ViewerMockState>(() => createViewerMockState(locale));
+  const [mock, setMock] = useState<ViewerMockState>(() => ({
+    ...createViewerMockState(locale),
+    username: displayName,
+  }));
   const [viewerSession] = useState(
     () =>
-      new ViewerSession({
-        apiBaseUrl: getViewerApiBaseUrl(),
-      }),
+      new ViewerSession(
+        createViewerSessionOptions(getViewerApiBaseUrl(), displayName),
+      ),
   );
   const autoJoinedRoomIdRef = useRef<string | null>(null);
 
@@ -77,13 +83,20 @@ export default function App() {
           window.history.replaceState({}, "", `/rooms/${encodeURIComponent(newRoomId)}`);
         }
       }}
-      onRandomizeUsername={() =>
+      onRandomizeUsername={() => {
+        const nextDisplayName = buildRandomViewerUsername(locale);
+        setDisplayName(nextDisplayName);
+        viewerSession.updateDisplayName(nextDisplayName);
         setMock((current) => ({
           ...current,
-          username: buildRandomViewerUsername(locale),
-        }))
-      }
-      onSendMessage={(text) =>
+          username: nextDisplayName,
+        }));
+      }}
+      onSendMessage={(text) => {
+        if (viewerSession.sendChatMessage(text)) {
+          return;
+        }
+
         setMock((current) => ({
           ...current,
           messages: [
@@ -96,8 +109,24 @@ export default function App() {
               timestamp: Date.now(),
             },
           ],
-        }))
-      }
+        }));
+      }}
     />
   );
+}
+
+function createViewerSessionOptions(
+  apiBaseUrl: string,
+  initialDisplayName: string,
+) {
+  const options = {
+    apiBaseUrl,
+  };
+
+  Object.defineProperty(options, "initialDisplayName", {
+    enumerable: false,
+    value: initialDisplayName,
+  });
+
+  return options as ConstructorParameters<typeof ViewerSession>[0];
 }

@@ -1,4 +1,4 @@
-import { errorCodes } from "@screenmate/shared";
+import { errorCodes, signalEnvelopeSchema } from "@screenmate/shared";
 import { viewerErrorCodes } from "./viewer-errors";
 import {
   getRoomState,
@@ -26,6 +26,8 @@ const viewerSessionLogger = createLogger("viewer:session");
 
 type ViewerSessionOptions = {
   apiBaseUrl: string;
+  initialDisplayName?: string;
+  metricsIntervalMs?: number;
   fetchFn?: typeof fetch;
   createWebSocket?: CreateWebSocket;
   createPeerConnection?: (config: RTCConfiguration) => PeerConnectionLike;
@@ -38,6 +40,7 @@ export class ViewerSession {
   private socketClient: ReturnType<typeof createSocketClient> | null = null;
   private peerClient: ReturnType<typeof createViewerPeerConnection> | null = null;
   private joinResponse: JoinRoomResponse | null = null;
+  private metricsTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly options: ViewerSessionOptions) {}
 
@@ -62,6 +65,7 @@ export class ViewerSession {
     this.teardown(false);
     this.update({
       ...initialViewerSessionState,
+      displayName: this.options.initialDisplayName?.trim() ?? "",
       roomId,
       status: "joining",
     });
@@ -86,6 +90,7 @@ export class ViewerSession {
         });
         this.update({
           ...initialViewerSessionState,
+          displayName: this.snapshot.displayName,
           roomId,
           roomState: roomState.state,
           sourceState: roomState.sourceState,
@@ -118,6 +123,7 @@ export class ViewerSession {
         errorCode: null,
         endedReasonCode: null,
         remoteStream: null,
+        displayName: this.snapshot.displayName,
       });
 
       this.joinResponse = joined;
@@ -134,6 +140,8 @@ export class ViewerSession {
             status: "waiting",
             errorCode: null,
           });
+          this.sendViewerProfile();
+          this.startMetricsTimer();
         },
         onClose: (event) => {
           viewerSessionLogger.warn("Viewer signaling channel closed.", {
@@ -182,6 +190,7 @@ export class ViewerSession {
       });
       this.update({
         ...initialViewerSessionState,
+        displayName: this.snapshot.displayName,
         roomId,
         status:
           code === errorCodes.ROOM_EXPIRED ||
@@ -204,6 +213,38 @@ export class ViewerSession {
 
   destroy() {
     this.teardown(true);
+  }
+
+  updateDisplayName(displayName: string) {
+    const trimmedDisplayName = displayName.trim();
+
+    if (!trimmedDisplayName) {
+      return;
+    }
+
+    this.update({ displayName: trimmedDisplayName });
+    this.sendViewerProfile();
+  }
+
+  sendChatMessage(text: string) {
+    const trimmedText = text.trim();
+
+    if (!trimmedText || !this.joinResponse || !this.socketClient) {
+      return false;
+    }
+
+    return this.socketClient.send(
+      signalEnvelopeSchema.parse({
+        roomId: this.joinResponse.roomId,
+        sessionId: this.joinResponse.sessionId,
+        timestamp: this.now(),
+        role: "viewer",
+        messageType: "chat-message",
+        payload: {
+          text: trimmedText,
+        },
+      }),
+    );
   }
 
   private createPeerClient(joined: JoinRoomResponse) {
@@ -356,6 +397,21 @@ export class ViewerSession {
           this.teardown(false);
         }
         break;
+      case "viewer-roster":
+        this.update({
+          viewerRoster: message.payload.viewers,
+        });
+        break;
+      case "chat-history":
+        this.update({
+          chatMessages: message.payload.messages,
+        });
+        break;
+      case "chat-message-created":
+        this.update({
+          chatMessages: appendChatMessage(this.snapshot.chatMessages, message.payload),
+        });
+        break;
       case "host-left":
       case "room-closed":
         viewerSessionLogger.warn("Viewer received room termination from signaling.", {
@@ -396,6 +452,7 @@ export class ViewerSession {
       sessionId: this.snapshot.sessionId,
       status: this.snapshot.status,
     });
+    this.stopMetricsTimer();
     this.socketClient?.close();
     this.socketClient = null;
     const peerClient = this.peerClient;
@@ -404,7 +461,10 @@ export class ViewerSession {
     this.joinResponse = null;
 
     if (resetSnapshot) {
-      this.snapshot = initialViewerSessionState;
+      this.snapshot = {
+        ...initialViewerSessionState,
+        displayName: this.options.initialDisplayName?.trim() ?? "",
+      };
       this.emit();
     }
   }
@@ -419,6 +479,105 @@ export class ViewerSession {
       listener(this.snapshot);
     }
   }
+
+  private sendViewerProfile() {
+    if (
+      !this.joinResponse ||
+      !this.socketClient ||
+      !this.snapshot.displayName.trim()
+    ) {
+      return false;
+    }
+
+    return this.socketClient.send(
+      signalEnvelopeSchema.parse({
+        roomId: this.joinResponse.roomId,
+        sessionId: this.joinResponse.sessionId,
+        timestamp: this.now(),
+        role: "viewer",
+        messageType: "viewer-profile",
+        payload: {
+          viewerSessionId: this.joinResponse.sessionId,
+          displayName: this.snapshot.displayName.trim(),
+        },
+      }),
+    );
+  }
+
+  private startMetricsTimer() {
+    this.stopMetricsTimer();
+    void this.sendViewerMetrics();
+    this.metricsTimer = setInterval(() => {
+      void this.sendViewerMetrics();
+    }, this.options.metricsIntervalMs ?? 5000);
+  }
+
+  private stopMetricsTimer() {
+    if (!this.metricsTimer) {
+      return;
+    }
+
+    clearInterval(this.metricsTimer);
+    this.metricsTimer = null;
+  }
+
+  private async sendViewerMetrics() {
+    if (!this.joinResponse || !this.socketClient || !this.peerClient) {
+      return false;
+    }
+
+    const joined = this.joinResponse;
+
+    try {
+      const metrics = await this.peerClient.collectMetrics();
+
+      if (this.joinResponse !== joined || !this.socketClient) {
+        return false;
+      }
+
+      this.update({
+        localConnectionType: metrics.connectionType,
+        localPingMs: metrics.pingMs,
+      });
+
+      return this.socketClient.send(
+        signalEnvelopeSchema.parse({
+          roomId: joined.roomId,
+          sessionId: joined.sessionId,
+          timestamp: this.now(),
+          role: "viewer",
+          messageType: "viewer-metrics",
+          payload: {
+            viewerSessionId: joined.sessionId,
+            connectionType: metrics.connectionType,
+            pingMs: metrics.pingMs,
+          },
+        }),
+      );
+    } catch (error) {
+      viewerSessionLogger.warn("Viewer metrics collection failed.", {
+        error: error instanceof Error ? error.message : "Unknown error",
+        roomId: joined.roomId,
+        sessionId: joined.sessionId,
+      });
+      return false;
+    }
+  }
+
+  private now() {
+    return this.options.now?.() ?? Date.now();
+  }
+}
+
+function appendChatMessage(
+  messages: ViewerSessionState["chatMessages"],
+  message: ViewerSessionState["chatMessages"][number],
+) {
+  const dedupedMessages = messages.filter(
+    (existingMessage) => existingMessage.messageId !== message.messageId,
+  );
+
+  return [...dedupedMessages, message];
 }
 
 function toNegotiationError(code: string) {

@@ -27,6 +27,11 @@ export type PeerConnectionLike = Pick<
   onconnectionstatechange: (() => void) | null;
 };
 
+export type ViewerPeerMetrics = {
+  connectionType: "direct" | "relay" | "unknown";
+  pingMs: number | null;
+};
+
 export function createViewerPeerConnection(
   options: {
     iceServers: RTCIceServer[];
@@ -187,6 +192,77 @@ export function createViewerPeerConnection(
       });
       peerConnection.close();
     },
+    collectMetrics() {
+      return collectViewerPeerMetrics(peerConnection);
+    },
+  };
+}
+
+export async function collectViewerPeerMetrics(
+  peerConnection: PeerConnectionLike,
+): Promise<ViewerPeerMetrics> {
+  const stats = await peerConnection.getStats();
+  const localCandidates = new Map<string, { candidateType: string | null }>();
+  const candidatePairs: Array<{
+    currentRoundTripTime: number | null;
+    localCandidateId: string | null;
+    nominated: boolean | null;
+    selected: boolean | null;
+    state: string | null;
+  }> = [];
+
+  for (const report of stats.values()) {
+    if (!report || typeof report !== "object") {
+      continue;
+    }
+
+    const rawReport = report as Record<string, unknown>;
+    const reportType = readString(rawReport.type);
+    const id = readString(rawReport.id);
+
+    if (reportType === "local-candidate" && id) {
+      localCandidates.set(id, {
+        candidateType: readString(rawReport.candidateType),
+      });
+      continue;
+    }
+
+    if (reportType === "candidate-pair") {
+      candidatePairs.push({
+        currentRoundTripTime: readNumber(rawReport.currentRoundTripTime),
+        localCandidateId: readString(rawReport.localCandidateId),
+        nominated: readBoolean(rawReport.nominated),
+        selected: readBoolean(rawReport.selected),
+        state: readString(rawReport.state),
+      });
+    }
+  }
+
+  const selectedPair = candidatePairs.find((pair) => pair.selected === true);
+
+  if (!selectedPair) {
+    return {
+      connectionType: "unknown",
+      pingMs: null,
+    };
+  }
+
+  const localCandidate = selectedPair.localCandidateId
+    ? localCandidates.get(selectedPair.localCandidateId)
+    : null;
+  const candidateType = localCandidate?.candidateType ?? null;
+
+  return {
+    connectionType:
+      candidateType === "relay"
+        ? "relay"
+        : candidateType
+          ? "direct"
+          : "unknown",
+    pingMs:
+      selectedPair.currentRoundTripTime === null
+        ? null
+        : Math.round(selectedPair.currentRoundTripTime * 1000),
   };
 }
 

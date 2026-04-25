@@ -9,6 +9,7 @@ export type SocketLike = Pick<
 export type CreateWebSocket = (url: string) => SocketLike;
 
 const signalLogger = createLogger("viewer:signal");
+const websocketOpenState = 1;
 
 export function createSocketClient(
   wsUrl: string,
@@ -26,10 +27,11 @@ export function createSocketClient(
 
   const socket =
     options.createWebSocket?.(url.toString()) ?? new WebSocket(url);
+  const redactedWsUrl = redactUrlToken(url.toString());
 
   socket.addEventListener("open", () => {
     signalLogger.info("Viewer signaling socket opened.", {
-      wsUrl: url.toString(),
+      wsUrl: redactedWsUrl,
     });
     options.onOpen?.();
   });
@@ -48,7 +50,7 @@ export function createSocketClient(
       parsedJson = JSON.parse(event.data);
     } catch {
       signalLogger.warn("Viewer signaling socket received invalid JSON.", {
-        rawDataPreview: event.data.slice(0, 200),
+        payloadLength: event.data.length,
       });
       return;
     }
@@ -65,7 +67,7 @@ export function createSocketClient(
     }
 
     signalLogger.warn("Viewer signaling socket received an invalid envelope.", {
-      rawDataPreview: event.data.slice(0, 200),
+      payloadLength: event.data.length,
     });
   });
   socket.addEventListener("close", (event) => {
@@ -77,7 +79,7 @@ export function createSocketClient(
   });
   socket.addEventListener("error", () => {
     signalLogger.error("Viewer signaling socket errored.", {
-      wsUrl: url.toString(),
+      wsUrl: redactedWsUrl,
     });
     options.onError?.();
   });
@@ -86,11 +88,21 @@ export function createSocketClient(
     socket,
     close() {
       signalLogger.info("Closing viewer signaling socket.", {
-        wsUrl: url.toString(),
+        wsUrl: redactedWsUrl,
       });
       socket.close();
     },
     send(message: SignalEnvelope) {
+      if (socket.readyState !== websocketOpenState) {
+        signalLogger.warn("Viewer signaling socket skipped sending while not open.", {
+          messageType: message.messageType,
+          readyState: socket.readyState,
+          roomId: message.roomId,
+          sessionId: message.sessionId,
+        });
+        return false;
+      }
+
       signalLogger.debug("Viewer signaling socket sent a message.", {
         messageType: message.messageType,
         roomId: message.roomId,
@@ -101,6 +113,17 @@ export function createSocketClient(
             : null,
       });
       socket.send(JSON.stringify(message));
+      return true;
     },
   };
+}
+
+export function redactUrlToken(rawUrl: string) {
+  const redactedUrl = new URL(rawUrl);
+
+  if (redactedUrl.searchParams.has("token")) {
+    redactedUrl.searchParams.set("token", "[redacted]");
+  }
+
+  return redactedUrl.toString();
 }

@@ -1,4 +1,9 @@
-import type { RoomSourceState, RoomState } from "@screenmate/shared";
+import type {
+  RoomChatMessage,
+  RoomSourceState,
+  RoomState,
+  ViewerRosterEntry,
+} from "@screenmate/shared";
 import type { ViewerErrorCode } from "../viewer-errors";
 
 export type ViewerStatus =
@@ -21,6 +26,11 @@ export type ViewerSessionState = {
   errorCode: ViewerErrorCode | null;
   endedReasonCode: ViewerErrorCode | null;
   remoteStream: MediaStream | null;
+  displayName: string;
+  viewerRoster: ViewerRosterEntry[];
+  chatMessages: RoomChatMessage[];
+  localConnectionType: ViewerRosterEntry["connectionType"];
+  localPingMs: number | null;
 };
 
 export const initialViewerSessionState: ViewerSessionState = {
@@ -34,4 +44,9 @@ export const initialViewerSessionState: ViewerSessionState = {
   errorCode: null,
   endedReasonCode: null,
   remoteStream: null,
+  displayName: "",
+  viewerRoster: [],
+  chatMessages: [],
+  localConnectionType: "unknown",
+  localPingMs: null,
 };

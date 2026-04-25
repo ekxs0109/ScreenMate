@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ViewerSession } from "../src/viewer-session";
 
 class FakeWebSocket {
@@ -44,6 +44,8 @@ class FakeWebSocket {
 
 class FakePeerConnection {
   connectionState = "new";
+  iceConnectionState = "new";
+  iceGatheringState = "new";
   localDescription: { type: string; sdp: string } | null = null;
   remoteDescription: { type: string; sdp: string } | null = null;
   onicecandidate: ((event: { candidate: RTCIceCandidate | null }) => void) | null =
@@ -72,6 +74,29 @@ class FakePeerConnection {
     return;
   }
 
+  async getStats() {
+    return new Map([
+      [
+        "local_1",
+        {
+          id: "local_1",
+          type: "local-candidate",
+          candidateType: "relay",
+        },
+      ],
+      [
+        "pair_1",
+        {
+          id: "pair_1",
+          type: "candidate-pair",
+          selected: true,
+          localCandidateId: "local_1",
+          currentRoundTripTime: 0.024,
+        },
+      ],
+    ]);
+  }
+
   close() {
     this.connectionState = "closed";
   }
@@ -84,6 +109,10 @@ class FakePeerConnection {
 }
 
 describe("ViewerSession", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("joins a room, answers a host offer, and transitions to connected", async () => {
     const socket = new FakeWebSocket();
     const peer = new FakePeerConnection();
@@ -119,6 +148,7 @@ describe("ViewerSession", () => {
       createWebSocket: () => socket as never,
       createPeerConnection: () => peer as never,
       now: () => 42,
+      metricsIntervalMs: 60_000,
     });
 
     await session.join("room_demo");
@@ -144,16 +174,20 @@ describe("ViewerSession", () => {
       type: "answer",
       sdp: "viewer-answer",
     });
-    expect(JSON.parse(socket.sentMessages[0])).toMatchObject({
-      roomId: "room_demo",
-      sessionId: "viewer_1",
-      role: "viewer",
-      messageType: "answer",
-      payload: {
-        targetSessionId: "host_1",
-        sdp: "viewer-answer",
-      },
-    });
+    expect(socket.sentMessages.map((message) => JSON.parse(message))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          roomId: "room_demo",
+          sessionId: "viewer_1",
+          role: "viewer",
+          messageType: "answer",
+          payload: {
+            targetSessionId: "host_1",
+            sdp: "viewer-answer",
+          },
+        }),
+      ]),
+    );
 
     peer.emitTrack({ id: "stream_demo" } as never);
 
@@ -163,6 +197,196 @@ describe("ViewerSession", () => {
       sessionId: "viewer_1",
       hostSessionId: "host_1",
     });
+  });
+
+  it("sends viewer-profile when the signaling socket opens", async () => {
+    const socket = new FakeWebSocket();
+    const peer = new FakePeerConnection();
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+
+    expect(socket.sentMessages.map((message) => JSON.parse(message))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          messageType: "viewer-profile",
+          payload: {
+            viewerSessionId: "viewer_1",
+            displayName: "Mina",
+          },
+        }),
+      ]),
+    );
+  });
+
+  it("stores roster, chat history, and created chat messages in the snapshot", async () => {
+    const socket = new FakeWebSocket();
+    const peer = new FakePeerConnection();
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "viewer-roster",
+        timestamp: 10,
+        payload: {
+          viewers: [
+            {
+              viewerSessionId: "viewer_1",
+              displayName: "Mina",
+              online: true,
+              connectionType: "relay",
+              pingMs: 24,
+              joinedAt: 1,
+              profileUpdatedAt: 2,
+              metricsUpdatedAt: 3,
+            },
+          ],
+        },
+      }),
+    );
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "chat-history",
+        timestamp: 11,
+        payload: {
+          messages: [
+            {
+              messageId: "msg_1",
+              senderSessionId: "host_1",
+              senderRole: "host",
+              senderName: "Host",
+              text: "Welcome",
+              sentAt: 11,
+            },
+          ],
+        },
+      }),
+    );
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "chat-message-created",
+        timestamp: 12,
+        payload: {
+          messageId: "msg_2",
+          senderSessionId: "viewer_1",
+          senderRole: "viewer",
+          senderName: "Mina",
+          text: "Hi",
+          sentAt: 12,
+        },
+      }),
+    );
+
+    expect(session.getSnapshot()).toMatchObject({
+      viewerRoster: [
+        expect.objectContaining({
+          viewerSessionId: "viewer_1",
+          displayName: "Mina",
+          connectionType: "relay",
+          pingMs: 24,
+        }),
+      ],
+      chatMessages: [
+        expect.objectContaining({ text: "Welcome" }),
+        expect.objectContaining({ text: "Hi" }),
+      ],
+    });
+  });
+
+  it("sends display name updates and chat messages", async () => {
+    const socket = new FakeWebSocket();
+    const peer = new FakePeerConnection();
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    session.updateDisplayName("Noa");
+    const sent = session.sendChatMessage("hello host");
+
+    expect(sent).toBe(true);
+    expect(socket.sentMessages.map((message) => JSON.parse(message))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          messageType: "viewer-profile",
+          payload: {
+            viewerSessionId: "viewer_1",
+            displayName: "Noa",
+          },
+        }),
+        expect.objectContaining({
+          messageType: "chat-message",
+          payload: {
+            text: "hello host",
+          },
+        }),
+      ]),
+    );
+  });
+
+  it("keeps the session alive when metrics collection fails and clears the timer on teardown", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeWebSocket();
+    const peer = new FakePeerConnection();
+    peer.getStats = async () => {
+      throw new Error("stats unavailable");
+    };
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 100,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(session.getSnapshot()).toMatchObject({
+      status: "waiting",
+      errorCode: null,
+      endedReasonCode: null,
+    });
+
+    const sentBeforeDestroy = socket.sentMessages.length;
+    session.destroy();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(socket.sentMessages).toHaveLength(sentBeforeDestroy);
   });
 
   it("moves to an ended state when the room closes", async () => {
@@ -194,6 +418,7 @@ describe("ViewerSession", () => {
       },
       createWebSocket: () => socket as never,
       createPeerConnection: () => peer as never,
+      metricsIntervalMs: 60_000,
     });
 
     await session.join("room_demo");
@@ -246,6 +471,7 @@ describe("ViewerSession", () => {
       },
       createWebSocket: () => socket as never,
       createPeerConnection: () => peers.shift() as never,
+      metricsIntervalMs: 60_000,
     });
 
     await session.join("room_demo");
@@ -323,6 +549,7 @@ describe("ViewerSession", () => {
       },
       createWebSocket: () => socket as never,
       createPeerConnection: () => peer as never,
+      metricsIntervalMs: 60_000,
     });
 
     await session.join("room_demo");
@@ -409,6 +636,7 @@ describe("ViewerSession", () => {
       },
       createWebSocket: () => socket as never,
       createPeerConnection: () => peers.shift() as never,
+      metricsIntervalMs: 60_000,
     });
     const statuses: string[] = [];
     session.subscribe((snapshot) => {
@@ -446,3 +674,32 @@ describe("ViewerSession", () => {
     });
   });
 });
+
+function createJoinFetch() {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = input.toString();
+
+    if (url.endsWith("/rooms/room_demo") && !init?.method) {
+      return Response.json({
+        roomId: "room_demo",
+        state: "hosting",
+        sourceState: "missing",
+        hostConnected: true,
+        hostSessionId: null,
+        viewerCount: 0,
+      });
+    }
+
+    if (url.endsWith("/rooms/room_demo/join") && init?.method === "POST") {
+      return Response.json({
+        roomId: "room_demo",
+        sessionId: "viewer_1",
+        viewerToken: "viewer-token",
+        wsUrl: "ws://signal.example/rooms/room_demo/ws",
+        iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
+      });
+    }
+
+    throw new Error(`unexpected request: ${url}`);
+  };
+}
