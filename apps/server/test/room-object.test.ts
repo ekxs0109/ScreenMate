@@ -61,6 +61,76 @@ function createSocketPair() {
   return { client, server };
 }
 
+async function initializeRoomObject(roomObject: RoomObject) {
+  await roomObject.fetch(
+    new Request("https://room.internal/internal/initialize", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        roomId: "room_demo",
+        hostSessionId: "host_1",
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 3_600_000,
+        maxExpiresAt: Date.now() + 43_200_000,
+      }),
+    }),
+  );
+}
+
+function connectTestSocket(
+  roomState: RoomState,
+  input: {
+    role: "host" | "viewer";
+    sessionId: string;
+    client: TestSocket;
+  },
+) {
+  const server = createSocketPair().server;
+  server.setPeer(input.client);
+  input.client.setPeer(server);
+  const connection = {
+    roomId: "room_demo",
+    role: input.role,
+    sessionId: input.sessionId,
+    socket: server,
+  };
+  roomState.connectSession(connection);
+  return connection;
+}
+
+function getRoomStateInstance(roomObject: RoomObject) {
+  return (roomObject as unknown as { roomState: RoomState }).roomState;
+}
+
+async function sendEnvelope(
+  roomState: RoomState,
+  input: {
+    role: "host" | "viewer";
+    sessionId: string;
+    connection: {
+      roomId: string;
+      role: "host" | "viewer";
+      sessionId: string;
+      socket: TestSocket;
+    };
+    messageType: string;
+    payload: Record<string, unknown>;
+    timestamp?: number;
+  },
+) {
+  await roomState.handleSocketMessage(
+    input.connection,
+    JSON.stringify({
+      roomId: "room_demo",
+      sessionId: input.sessionId,
+      role: input.role,
+      messageType: input.messageType,
+      timestamp: input.timestamp ?? 100,
+      payload: input.payload,
+    }),
+  );
+}
+
 class MemoryStorage {
   private readonly records = new Map<string, unknown>();
 
@@ -70,6 +140,10 @@ class MemoryStorage {
 
   async put<T>(key: string, value: T): Promise<void> {
     this.records.set(key, value);
+  }
+
+  async delete(key: string): Promise<void> {
+    this.records.delete(key);
   }
 }
 
@@ -107,6 +181,500 @@ async function sendHostHeartbeat(roomObject: RoomObject, sessionId = "host_1") {
 }
 
 describe("RoomObject", () => {
+  it("ignores stale viewer close events after the same session reconnects", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    const roomState = getRoomStateInstance(roomObject);
+    const firstViewer = createSocketPair();
+    const secondViewer = createSocketPair();
+    const host = createSocketPair();
+
+    roomState.connectSession({
+      roomId: "room_demo",
+      role: "host",
+      sessionId: "host_1",
+      socket: host.server,
+    });
+    const firstViewerConnection = {
+      roomId: "room_demo",
+      role: "viewer",
+      sessionId: "viewer_1",
+      socket: firstViewer.server,
+    } as const;
+    roomState.connectSession(firstViewerConnection);
+    roomState.connectSession({
+      roomId: "room_demo",
+      role: "viewer",
+      sessionId: "viewer_1",
+      socket: secondViewer.server,
+    });
+
+    roomState.disconnectSession(firstViewerConnection);
+
+    expect(roomState.getStateSnapshot().viewerCount).toBe(1);
+    expect(
+      host.client.messages.filter(
+        (message) =>
+          (message as { messageType?: string }).messageType === "viewer-left",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("ignores stale host close events after the host reconnects", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    const roomState = getRoomStateInstance(roomObject);
+    const firstHost = createSocketPair();
+    const secondHost = createSocketPair();
+
+    const firstHostConnection = {
+      roomId: "room_demo",
+      role: "host",
+      sessionId: "host_1",
+      socket: firstHost.server,
+    } as const;
+    roomState.connectSession(firstHostConnection);
+    roomState.connectSession({
+      roomId: "room_demo",
+      role: "host",
+      sessionId: "host_1",
+      socket: secondHost.server,
+    });
+
+    roomState.disconnectSession(firstHostConnection);
+
+    expect(roomState.getStateSnapshot().state).not.toBe("closed");
+    expect(roomState.getStateSnapshot().hostConnected).toBe(true);
+  });
+
+  it("stores viewer profile and metrics and broadcasts roster snapshots", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const { state } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+      await initializeRoomObject(roomObject);
+      const roomState = getRoomStateInstance(roomObject);
+      const host = createSocketPair().client;
+      const viewer = createSocketPair().client;
+
+      connectTestSocket(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        client: host,
+      });
+      const viewerConnection = connectTestSocket(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        client: viewer,
+      });
+
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: viewerConnection,
+        messageType: "viewer-profile",
+        payload: {
+          viewerSessionId: "viewer_1",
+          displayName: "Mina",
+        },
+      });
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: viewerConnection,
+        messageType: "viewer-metrics",
+        payload: {
+          viewerSessionId: "viewer_1",
+          connectionType: "relay",
+          pingMs: 142,
+        },
+      });
+
+      const rosters = host.messages.filter(
+        (message) =>
+          (message as { messageType?: string }).messageType === "viewer-roster",
+      );
+      expect(rosters.at(-1)).toMatchObject({
+        messageType: "viewer-roster",
+        payload: {
+          viewers: [
+            {
+              viewerSessionId: "viewer_1",
+              displayName: "Mina",
+              online: true,
+              connectionType: "relay",
+              pingMs: 142,
+            },
+          ],
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("canonicalizes chat messages and replays chat history to new connections", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(2_000);
+      const { state } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+      await initializeRoomObject(roomObject);
+      const roomState = getRoomStateInstance(roomObject);
+      const host = createSocketPair().client;
+      const viewer = createSocketPair().client;
+
+      connectTestSocket(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        client: host,
+      });
+      const viewerConnection = connectTestSocket(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        client: viewer,
+      });
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: viewerConnection,
+        messageType: "viewer-profile",
+        payload: {
+          viewerSessionId: "viewer_1",
+          displayName: "Mina",
+        },
+      });
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: viewerConnection,
+        messageType: "chat-message",
+        payload: {
+          text: "  hello host  ",
+        },
+      });
+
+      expect(host.messages.at(-1)).toMatchObject({
+        messageType: "chat-message-created",
+        payload: {
+          senderSessionId: "viewer_1",
+          senderRole: "viewer",
+          senderName: "Mina",
+          text: "hello host",
+          sentAt: 2_000,
+        },
+      });
+
+      const secondViewer = createSocketPair().client;
+      connectTestSocket(roomState, {
+        role: "viewer",
+        sessionId: "viewer_2",
+        client: secondViewer,
+      });
+
+      expect(
+        secondViewer.messages.find(
+          (message) =>
+            (message as { messageType?: string }).messageType === "chat-history",
+        ),
+      ).toMatchObject({
+        messageType: "chat-history",
+        payload: {
+          messages: [
+            {
+              senderSessionId: "viewer_1",
+              senderRole: "viewer",
+              senderName: "Mina",
+              text: "hello host",
+            },
+          ],
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("marks disconnected viewers offline while keeping their profile", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    const roomState = getRoomStateInstance(roomObject);
+    const host = createSocketPair().client;
+    const viewer = createSocketPair().client;
+
+    connectTestSocket(roomState, {
+      role: "host",
+      sessionId: "host_1",
+      client: host,
+    });
+    const viewerConnection = connectTestSocket(roomState, {
+      role: "viewer",
+      sessionId: "viewer_1",
+      client: viewer,
+    });
+    await sendEnvelope(roomState, {
+      role: "viewer",
+      sessionId: "viewer_1",
+      connection: viewerConnection,
+      messageType: "viewer-profile",
+      payload: {
+        viewerSessionId: "viewer_1",
+        displayName: "Mina",
+      },
+    });
+
+    roomState.disconnectSession(viewerConnection);
+
+    expect(host.messages.at(-1)).toMatchObject({
+      messageType: "viewer-roster",
+      payload: {
+        viewers: [
+          {
+            viewerSessionId: "viewer_1",
+            displayName: "Mina",
+            online: false,
+          },
+        ],
+      },
+    });
+  });
+
+  it("replays persisted room activity after Durable Object reload", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(3_000);
+      const { state } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+      await initializeRoomObject(roomObject);
+      const roomState = getRoomStateInstance(roomObject);
+      const viewer = createSocketPair().client;
+      const viewerConnection = connectTestSocket(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        client: viewer,
+      });
+
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: viewerConnection,
+        messageType: "viewer-profile",
+        payload: {
+          viewerSessionId: "viewer_1",
+          displayName: "Mina",
+        },
+      });
+      await sendEnvelope(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        connection: viewerConnection,
+        messageType: "chat-message",
+        payload: { text: "persist me" },
+      });
+
+      const freshRoomObject = new RoomObject(state, {} as never);
+      await freshRoomObject.fetch(
+        new Request("https://room.internal/internal/state", { method: "GET" }),
+      );
+      const freshRoomState = getRoomStateInstance(freshRoomObject);
+      const host = createSocketPair().client;
+      connectTestSocket(freshRoomState, {
+        role: "host",
+        sessionId: "host_1",
+        client: host,
+      });
+
+      expect(
+        host.messages.find(
+          (message) =>
+            (message as { messageType?: string }).messageType === "viewer-roster",
+        ),
+      ).toMatchObject({
+        payload: {
+          viewers: [
+            expect.objectContaining({
+              viewerSessionId: "viewer_1",
+              displayName: "Mina",
+            }),
+          ],
+        },
+      });
+      expect(
+        host.messages.find(
+          (message) =>
+            (message as { messageType?: string }).messageType === "chat-history",
+        ),
+      ).toMatchObject({
+        payload: {
+          messages: [expect.objectContaining({ text: "persist me" })],
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects viewer activity for a different viewer session", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    const roomState = getRoomStateInstance(roomObject);
+    const viewer = createSocketPair().client;
+    const viewerConnection = connectTestSocket(roomState, {
+      role: "viewer",
+      sessionId: "viewer_1",
+      client: viewer,
+    });
+
+    await sendEnvelope(roomState, {
+      role: "viewer",
+      sessionId: "viewer_1",
+      connection: viewerConnection,
+      messageType: "viewer-profile",
+      payload: {
+        viewerSessionId: "viewer_2",
+        displayName: "Mina",
+      },
+    });
+
+    expect(viewer.closeReason).toBe("session-mismatch");
+  });
+
+  it("rejects server-authored activity envelopes from clients", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    const roomState = getRoomStateInstance(roomObject);
+    const viewer = createSocketPair().client;
+    const viewerConnection = connectTestSocket(roomState, {
+      role: "viewer",
+      sessionId: "viewer_1",
+      client: viewer,
+    });
+
+    await sendEnvelope(roomState, {
+      role: "viewer",
+      sessionId: "viewer_1",
+      connection: viewerConnection,
+      messageType: "chat-message-created",
+      payload: {
+        messageId: "msg_1",
+        senderSessionId: "viewer_1",
+        senderRole: "viewer",
+        senderName: "Mina",
+        text: "spoofed",
+        sentAt: 1,
+      },
+    });
+
+    expect(viewer.closeReason).toBe("message-type-not-allowed");
+  });
+
+  it("ignores empty chat without broadcasting or persisting", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    const roomState = getRoomStateInstance(roomObject);
+    const host = createSocketPair().client;
+    const hostConnection = connectTestSocket(roomState, {
+      role: "host",
+      sessionId: "host_1",
+      client: host,
+    });
+
+    await sendEnvelope(roomState, {
+      role: "host",
+      sessionId: "host_1",
+      connection: hostConnection,
+      messageType: "chat-message",
+      payload: { text: "   " },
+    });
+
+    expect(
+      host.messages.some(
+        (message) =>
+          (message as { messageType?: string }).messageType ===
+          "chat-message-created",
+      ),
+    ).toBe(false);
+  });
+
+  it("normalizes malformed persisted activity before sending snapshots", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+    await state.storage.put("room-activity", {
+      viewerProfiles: [{ viewerSessionId: "viewer_1", displayName: "Mina" }],
+      viewerMetrics: [{ viewerSessionId: "viewer_1", connectionType: "relay" }],
+      chatMessages: [{ text: "missing canonical fields" }],
+    });
+
+    const freshRoomObject = new RoomObject(state, {} as never);
+    await freshRoomObject.fetch(
+      new Request("https://room.internal/internal/state", { method: "GET" }),
+    );
+    const freshRoomState = getRoomStateInstance(freshRoomObject);
+    const host = createSocketPair().client;
+
+    expect(() =>
+      connectTestSocket(freshRoomState, {
+        role: "host",
+        sessionId: "host_1",
+        client: host,
+      }),
+    ).not.toThrow();
+  });
+
+  it("caps chat history replay to the latest 100 messages", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(4_000);
+      const { state } = createDurableObjectState();
+      const roomObject = new RoomObject(state, {} as never);
+      await initializeRoomObject(roomObject);
+      const roomState = getRoomStateInstance(roomObject);
+      const host = createSocketPair().client;
+      const hostConnection = connectTestSocket(roomState, {
+        role: "host",
+        sessionId: "host_1",
+        client: host,
+      });
+
+      for (let i = 0; i < 101; i += 1) {
+        await sendEnvelope(roomState, {
+          role: "host",
+          sessionId: "host_1",
+          connection: hostConnection,
+          messageType: "chat-message",
+          payload: { text: `message ${i}` },
+        });
+      }
+
+      const viewer = createSocketPair().client;
+      connectTestSocket(roomState, {
+        role: "viewer",
+        sessionId: "viewer_1",
+        client: viewer,
+      });
+      const history = viewer.messages.find(
+        (message) =>
+          (message as { messageType?: string }).messageType === "chat-history",
+      ) as { payload: { messages: Array<{ text: string; messageId: string }> } };
+
+      expect(history.payload.messages).toHaveLength(100);
+      expect(history.payload.messages[0]!.text).toBe("message 1");
+      expect(
+        new Set(history.payload.messages.map((message) => message.messageId)).size,
+      ).toBe(100);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("persists host-heartbeat renewal in DO storage and survives reload", async () => {
     vi.useFakeTimers();
     try {
@@ -642,12 +1210,13 @@ describe("RoomState", () => {
     const host = createSocketPair();
     const viewer = createSocketPair();
 
-    room.connectSession({
+    const hostConnection = {
       roomId: "room_demo",
       role: "host",
       sessionId: "host_1",
       socket: host.server,
-    });
+    } as const;
+    room.connectSession(hostConnection);
     room.connectSession({
       roomId: "room_demo",
       role: "viewer",
@@ -655,7 +1224,7 @@ describe("RoomState", () => {
       socket: viewer.server,
     });
 
-    room.disconnectSession("host_1", "host");
+    room.disconnectSession(hostConnection);
     await Promise.resolve();
 
     expect(closedReason).toBe("host-left");

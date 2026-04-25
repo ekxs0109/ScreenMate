@@ -1,11 +1,15 @@
 import {
   errorCodes,
+  roomChatMessageSchema,
   signalEnvelopeSchema,
+  type RoomChatMessage,
   type RoomSourceState,
+  type ViewerRosterEntry,
 } from "@screenmate/shared";
 import type { CloudflareBindings } from "../env.js";
 
 type SessionRole = "host" | "viewer";
+type RoomConnectionType = ViewerRosterEntry["connectionType"];
 type RoomLifecycleState =
   | "hosting"
   | "streaming"
@@ -28,6 +32,26 @@ type PersistedRoomRecord = RoomInitialization & {
 };
 type StoredRoomRecord = Omit<PersistedRoomRecord, "maxExpiresAt"> & {
   maxExpiresAt?: number;
+};
+
+type ViewerProfileRecord = {
+  viewerSessionId: string;
+  displayName: string;
+  joinedAt: number;
+  profileUpdatedAt: number | null;
+};
+
+type ViewerMetricsRecord = {
+  viewerSessionId: string;
+  connectionType: RoomConnectionType;
+  pingMs: number | null;
+  metricsUpdatedAt: number;
+};
+
+type PersistedRoomActivity = {
+  viewerProfiles: ViewerProfileRecord[];
+  viewerMetrics: ViewerMetricsRecord[];
+  chatMessages: RoomChatMessage[];
 };
 
 type RoomStateSnapshot = {
@@ -61,8 +85,14 @@ type JoinValidation =
   | { ok: false; status: number; body: Record<string, unknown> };
 
 const ROOM_RECORD_KEY = "room-record";
+const ROOM_ACTIVITY_KEY = "room-activity";
 const ROOM_RENEWAL_WINDOW_MS = 30 * 60 * 1_000;
 const ROOM_MAX_LIFETIME_MS = 12 * 60 * 60 * 1_000;
+const CHAT_HISTORY_LIMIT = 100;
+const MAX_RETAINED_VIEWERS = 50;
+const MIN_METRICS_INTERVAL_MS = 3_000;
+const MIN_PROFILE_UPDATE_INTERVAL_MS = 1_000;
+const MIN_CHAT_INTERVAL_MS = 500;
 
 export class RoomState {
   private readonly roomId: string;
@@ -75,16 +105,27 @@ export class RoomState {
   private sourceState: RoomSourceState = "missing";
   private hostConnection: RoomConnection | null = null;
   private readonly viewers = new Map<string, RoomConnection>();
+  private readonly viewerProfiles = new Map<string, ViewerProfileRecord>();
+  private readonly viewerMetrics = new Map<string, ViewerMetricsRecord>();
+  private readonly lastProfileUpdates = new Map<string, number>();
+  private readonly lastMetricsUpdates = new Map<string, number>();
+  private readonly lastChatMessages = new Map<string, number>();
+  private chatMessages: RoomChatMessage[] = [];
+  private activityPersistQueue = Promise.resolve();
 
   constructor(
     record: PersistedRoomRecord,
     private readonly options: {
+      activity?: PersistedRoomActivity | null;
       now?: () => number;
       onClose?: (closure: {
         closedAt: number;
         reason: CloseReason;
       }) => void | Promise<void>;
       onPersist?: (record: PersistedRoomRecord) => void | Promise<void>;
+      onPersistActivity?: (
+        activity: PersistedRoomActivity,
+      ) => void | Promise<void>;
     } = {},
   ) {
     this.roomId = record.roomId;
@@ -94,6 +135,16 @@ export class RoomState {
     this.maxExpiresAt = record.maxExpiresAt;
     this.closedAt = record.closedAt;
     this.closedReason = record.closedReason;
+
+    for (const profile of this.options.activity?.viewerProfiles ?? []) {
+      this.viewerProfiles.set(profile.viewerSessionId, profile);
+    }
+    for (const metrics of this.options.activity?.viewerMetrics ?? []) {
+      this.viewerMetrics.set(metrics.viewerSessionId, metrics);
+    }
+    this.chatMessages = [...(this.options.activity?.chatMessages ?? [])].slice(
+      -CHAT_HISTORY_LIMIT,
+    );
   }
 
   initialize() {
@@ -146,6 +197,8 @@ export class RoomState {
 
       this.hostConnection = connection;
       this.send(connection, this.roomStateEnvelope());
+      this.send(connection, this.viewerRosterEnvelope());
+      this.send(connection, this.chatHistoryEnvelope());
 
       for (const viewer of this.viewers.values()) {
         this.send(connection, this.viewerPresenceEnvelope("viewer-joined", viewer.sessionId));
@@ -165,7 +218,11 @@ export class RoomState {
     }
 
     this.viewers.set(connection.sessionId, connection);
+    this.ensureViewerProfile(connection.sessionId);
+    void this.persistActivity();
     this.send(connection, this.roomStateEnvelope());
+    this.send(connection, this.viewerRosterEnvelope());
+    this.send(connection, this.chatHistoryEnvelope());
 
     if (this.hostConnection) {
       this.send(connection, this.hostConnectedEnvelope());
@@ -176,21 +233,30 @@ export class RoomState {
       ({ sessionId }) => sessionId !== connection.sessionId,
     );
     this.broadcast(this.roomStateEnvelope());
+    this.broadcast(this.viewerRosterEnvelope());
   }
 
-  disconnectSession(sessionId: string, role: SessionRole) {
-    if (role === "host" && this.hostConnection?.sessionId === sessionId) {
+  disconnectSession(connection: RoomConnection) {
+    const { role, sessionId } = connection;
+
+    if (role === "host") {
+      if (this.hostConnection !== connection) {
+        return;
+      }
+
       this.hostConnection = null;
       void this.closeRoom("host-left");
       return;
     }
 
-    if (!this.viewers.delete(sessionId)) {
+    if (this.viewers.get(sessionId) !== connection) {
       return;
     }
 
+    this.viewers.delete(sessionId);
     this.broadcast(this.viewerPresenceEnvelope("viewer-left", sessionId));
     this.broadcast(this.roomStateEnvelope());
+    this.broadcast(this.viewerRosterEnvelope());
   }
 
   validateViewerJoin(): JoinValidation {
@@ -253,7 +319,7 @@ export class RoomState {
     return true;
   }
 
-  handleSocketMessage(connection: RoomConnection, rawData: unknown) {
+  async handleSocketMessage(connection: RoomConnection, rawData: unknown) {
     if (typeof rawData !== "string") {
       connection.socket.close(1003, "unsupported-message");
       return;
@@ -265,6 +331,20 @@ export class RoomState {
       parsedJson = JSON.parse(rawData);
     } catch {
       connection.socket.close(1007, "invalid-json");
+      return;
+    }
+
+    if (isServerAuthoredActivityMessage(parsedJson)) {
+      connection.socket.close(1008, "message-type-not-allowed");
+      return;
+    }
+
+    if (isMismatchedViewerActivityMessage(parsedJson, connection)) {
+      connection.socket.close(1008, "session-mismatch");
+      return;
+    }
+
+    if (isEmptyChatMessage(parsedJson, connection)) {
       return;
     }
 
@@ -312,6 +392,40 @@ export class RoomState {
         break;
       case "reconnect":
         break;
+      case "viewer-profile":
+        if (
+          connection.role !== "viewer" ||
+          envelope.payload.viewerSessionId !== connection.sessionId
+        ) {
+          connection.socket.close(1008, "session-mismatch");
+          return;
+        }
+        await this.updateViewerProfile(
+          connection.sessionId,
+          envelope.payload.displayName,
+        );
+        break;
+      case "viewer-metrics":
+        if (
+          connection.role !== "viewer" ||
+          envelope.payload.viewerSessionId !== connection.sessionId
+        ) {
+          connection.socket.close(1008, "session-mismatch");
+          return;
+        }
+        await this.updateViewerMetrics(connection.sessionId, {
+          connectionType: envelope.payload.connectionType,
+          pingMs: envelope.payload.pingMs ?? null,
+        });
+        break;
+      case "chat-message":
+        await this.appendChatMessage(connection, envelope.payload.text);
+        break;
+      case "viewer-roster":
+      case "chat-history":
+      case "chat-message-created":
+        connection.socket.close(1008, "message-type-not-allowed");
+        break;
       default:
         connection.socket.close(1008, "message-type-not-allowed");
     }
@@ -345,6 +459,159 @@ export class RoomState {
     }
 
     return this.viewers.get(sessionId) ?? null;
+  }
+
+  private ensureViewerProfile(viewerSessionId: string) {
+    const existing = this.viewerProfiles.get(viewerSessionId);
+    if (existing) {
+      return existing;
+    }
+
+    const profile = {
+      viewerSessionId,
+      displayName: defaultViewerName(viewerSessionId),
+      joinedAt: this.now(),
+      profileUpdatedAt: null,
+    };
+    this.viewerProfiles.set(viewerSessionId, profile);
+    this.pruneRetainedViewers();
+    return profile;
+  }
+
+  private getViewerRoster(): ViewerRosterEntry[] {
+    return [...this.viewerProfiles.values()].map((profile) => {
+      const metrics = this.viewerMetrics.get(profile.viewerSessionId);
+      return {
+        viewerSessionId: profile.viewerSessionId,
+        displayName: profile.displayName,
+        online: this.viewers.has(profile.viewerSessionId),
+        connectionType: metrics?.connectionType ?? "unknown",
+        pingMs: metrics?.pingMs ?? null,
+        joinedAt: profile.joinedAt,
+        profileUpdatedAt: profile.profileUpdatedAt,
+        metricsUpdatedAt: metrics?.metricsUpdatedAt ?? null,
+      };
+    });
+  }
+
+  private async updateViewerProfile(
+    viewerSessionId: string,
+    displayName: string,
+  ) {
+    const now = this.now();
+    const lastUpdatedAt = this.lastProfileUpdates.get(viewerSessionId);
+    if (
+      lastUpdatedAt !== undefined &&
+      now - lastUpdatedAt < MIN_PROFILE_UPDATE_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    const current = this.ensureViewerProfile(viewerSessionId);
+    this.viewerProfiles.set(viewerSessionId, {
+      ...current,
+      displayName: displayName.trim(),
+      profileUpdatedAt: now,
+    });
+    this.lastProfileUpdates.set(viewerSessionId, now);
+    await this.persistActivity();
+    this.broadcast(this.viewerRosterEnvelope());
+  }
+
+  private async updateViewerMetrics(
+    viewerSessionId: string,
+    metrics: {
+      connectionType: RoomConnectionType;
+      pingMs: number | null;
+    },
+  ) {
+    const now = this.now();
+    const lastUpdatedAt = this.lastMetricsUpdates.get(viewerSessionId);
+    if (
+      lastUpdatedAt !== undefined &&
+      now - lastUpdatedAt < MIN_METRICS_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this.ensureViewerProfile(viewerSessionId);
+    this.viewerMetrics.set(viewerSessionId, {
+      viewerSessionId,
+      connectionType: metrics.connectionType,
+      pingMs: metrics.pingMs,
+      metricsUpdatedAt: now,
+    });
+    this.lastMetricsUpdates.set(viewerSessionId, now);
+    await this.persistActivity();
+    this.broadcast(this.viewerRosterEnvelope());
+  }
+
+  private async appendChatMessage(connection: RoomConnection, text: string) {
+    const normalizedText = text.trim();
+    if (!normalizedText) {
+      return;
+    }
+
+    const now = this.now();
+    const lastSentAt = this.lastChatMessages.get(connection.sessionId);
+    if (
+      connection.role === "viewer" &&
+      lastSentAt !== undefined &&
+      now - lastSentAt < MIN_CHAT_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    const message: RoomChatMessage = {
+      messageId: crypto.randomUUID(),
+      senderSessionId: connection.sessionId,
+      senderRole: connection.role,
+      senderName:
+        connection.role === "host"
+          ? "Host"
+          : this.ensureViewerProfile(connection.sessionId).displayName,
+      text: normalizedText,
+      sentAt: now,
+    };
+
+    this.lastChatMessages.set(connection.sessionId, now);
+    this.chatMessages = [...this.chatMessages, message].slice(-CHAT_HISTORY_LIMIT);
+    await this.persistActivity();
+    this.broadcast(this.chatMessageCreatedEnvelope(message));
+  }
+
+  private getPersistedActivity(): PersistedRoomActivity {
+    return {
+      viewerProfiles: [...this.viewerProfiles.values()],
+      viewerMetrics: [...this.viewerMetrics.values()],
+      chatMessages: this.chatMessages,
+    };
+  }
+
+  private persistActivity() {
+    this.activityPersistQueue = this.activityPersistQueue
+      .catch(() => undefined)
+      .then(() => this.options.onPersistActivity?.(this.getPersistedActivity()));
+    return this.activityPersistQueue;
+  }
+
+  private pruneRetainedViewers() {
+    if (this.viewerProfiles.size <= MAX_RETAINED_VIEWERS) {
+      return;
+    }
+
+    const offlineProfiles = [...this.viewerProfiles.values()]
+      .filter((profile) => !this.viewers.has(profile.viewerSessionId))
+      .sort((left, right) => left.joinedAt - right.joinedAt);
+    const removableCount = this.viewerProfiles.size - MAX_RETAINED_VIEWERS;
+
+    for (const profile of offlineProfiles.slice(0, removableCount)) {
+      this.viewerProfiles.delete(profile.viewerSessionId);
+      this.viewerMetrics.delete(profile.viewerSessionId);
+      this.lastProfileUpdates.delete(profile.viewerSessionId);
+      this.lastMetricsUpdates.delete(profile.viewerSessionId);
+      this.lastChatMessages.delete(profile.viewerSessionId);
+    }
   }
 
   private async closeRoom(reason: CloseReason) {
@@ -418,6 +685,39 @@ export class RoomState {
       messageType: "host-connected",
       timestamp: this.now(),
       payload: { viewerCount: this.viewers.size },
+    });
+  }
+
+  private viewerRosterEnvelope(): SignalEnvelope {
+    return signalEnvelopeSchema.parse({
+      roomId: this.roomId,
+      sessionId: this.hostSessionId,
+      role: "host",
+      messageType: "viewer-roster",
+      timestamp: this.now(),
+      payload: { viewers: this.getViewerRoster() },
+    });
+  }
+
+  private chatHistoryEnvelope(): SignalEnvelope {
+    return signalEnvelopeSchema.parse({
+      roomId: this.roomId,
+      sessionId: this.hostSessionId,
+      role: "host",
+      messageType: "chat-history",
+      timestamp: this.now(),
+      payload: { messages: this.chatMessages },
+    });
+  }
+
+  private chatMessageCreatedEnvelope(message: RoomChatMessage): SignalEnvelope {
+    return signalEnvelopeSchema.parse({
+      roomId: this.roomId,
+      sessionId: this.hostSessionId,
+      role: "host",
+      messageType: "chat-message-created",
+      timestamp: message.sentAt,
+      payload: message,
     });
   }
 
@@ -520,6 +820,7 @@ export class RoomState {
 export class RoomObject {
   private roomState: RoomState | null = null;
   private record: PersistedRoomRecord | null = null;
+  private activity: PersistedRoomActivity | null = null;
   private loaded = false;
 
   constructor(
@@ -539,9 +840,15 @@ export class RoomObject {
       };
 
       this.record = record;
+      this.activity = {
+        viewerProfiles: [],
+        viewerMetrics: [],
+        chatMessages: [],
+      };
       this.roomState = this.createRoomState(record);
       this.loaded = true;
       await this.state.storage.put(ROOM_RECORD_KEY, record);
+      await this.state.storage.put(ROOM_ACTIVITY_KEY, this.activity);
 
       return Response.json(this.roomState.initialize());
     }
@@ -585,6 +892,9 @@ export class RoomObject {
       this.record = storedRecord
         ? this.normalizePersistedRecord(storedRecord)
         : null;
+      this.activity = normalizePersistedActivity(
+        await this.state.storage.get<unknown>(ROOM_ACTIVITY_KEY),
+      );
       this.loaded = true;
 
       if (
@@ -607,9 +917,18 @@ export class RoomObject {
 
   private createRoomState(record: PersistedRoomRecord): RoomState {
     return new RoomState(record, {
+      activity: this.activity,
       onPersist: async (nextRecord) => {
         this.record = nextRecord;
         await this.state.storage.put(ROOM_RECORD_KEY, nextRecord);
+      },
+      onPersistActivity: async (nextActivity) => {
+        this.activity = nextActivity;
+        await this.state.storage.put(ROOM_ACTIVITY_KEY, nextActivity);
+      },
+      onClose: async () => {
+        this.activity = null;
+        await this.state.storage.delete(ROOM_ACTIVITY_KEY);
       },
     });
   }
@@ -667,10 +986,12 @@ export class RoomObject {
 
     roomState.connectSession(connection);
     server.addEventListener("message", (event) => {
-      roomState.handleSocketMessage(connection, event.data);
+      void roomState
+        .handleSocketMessage(connection, event.data)
+        .catch(() => connection.socket.close(1011, "message-handler-failed"));
     });
     server.addEventListener("close", () => {
-      roomState.disconnectSession(sessionId, role);
+      roomState.disconnectSession(connection);
     });
 
     return new Response(null, {
@@ -685,5 +1006,162 @@ function createNoopSocket(): ConnectionSocket {
     addEventListener() {},
     close() {},
     send() {},
+  };
+}
+
+function defaultViewerName(viewerSessionId: string) {
+  return `Viewer ${viewerSessionId.slice(-4)}`;
+}
+
+function isServerAuthoredActivityMessage(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const messageType = (value as { messageType?: unknown }).messageType;
+  return (
+    messageType === "viewer-roster" ||
+    messageType === "chat-history" ||
+    messageType === "chat-message-created"
+  );
+}
+
+function isMismatchedViewerActivityMessage(
+  value: unknown,
+  connection: RoomConnection,
+) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as {
+    messageType?: unknown;
+    payload?: { viewerSessionId?: unknown };
+  };
+
+  if (
+    candidate.messageType !== "viewer-profile" &&
+    candidate.messageType !== "viewer-metrics"
+  ) {
+    return false;
+  }
+
+  return (
+    connection.role !== "viewer" ||
+    candidate.payload?.viewerSessionId !== connection.sessionId
+  );
+}
+
+function isEmptyChatMessage(value: unknown, connection: RoomConnection) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as {
+    roomId?: unknown;
+    sessionId?: unknown;
+    role?: unknown;
+    messageType?: unknown;
+    payload?: { text?: unknown };
+  };
+
+  return (
+    candidate.roomId === connection.roomId &&
+    candidate.sessionId === connection.sessionId &&
+    candidate.role === connection.role &&
+    candidate.messageType === "chat-message" &&
+    typeof candidate.payload?.text === "string" &&
+    candidate.payload.text.trim() === ""
+  );
+}
+
+function normalizePersistedActivity(value: unknown): PersistedRoomActivity {
+  if (!value || typeof value !== "object") {
+    return { viewerProfiles: [], viewerMetrics: [], chatMessages: [] };
+  }
+
+  const record = value as Partial<PersistedRoomActivity>;
+  return {
+    viewerProfiles: Array.isArray(record.viewerProfiles)
+      ? record.viewerProfiles.flatMap((profile) => {
+          if (!profile || typeof profile !== "object") {
+            return [];
+          }
+
+          const candidate = profile as Partial<ViewerProfileRecord>;
+          const viewerSessionId =
+            typeof candidate.viewerSessionId === "string"
+              ? candidate.viewerSessionId.trim()
+              : "";
+          const displayName =
+            typeof candidate.displayName === "string"
+              ? candidate.displayName.trim()
+              : "";
+
+          if (!viewerSessionId || !displayName) {
+            return [];
+          }
+
+          return [
+            {
+              viewerSessionId,
+              displayName: displayName.slice(0, 80),
+              joinedAt:
+                typeof candidate.joinedAt === "number" && candidate.joinedAt >= 0
+                  ? Math.trunc(candidate.joinedAt)
+                  : 0,
+              profileUpdatedAt:
+                typeof candidate.profileUpdatedAt === "number" &&
+                candidate.profileUpdatedAt >= 0
+                  ? Math.trunc(candidate.profileUpdatedAt)
+                  : null,
+            },
+          ];
+        })
+      : [],
+    viewerMetrics: Array.isArray(record.viewerMetrics)
+      ? record.viewerMetrics.flatMap((metrics) => {
+          if (!metrics || typeof metrics !== "object") {
+            return [];
+          }
+
+          const candidate = metrics as Partial<ViewerMetricsRecord>;
+          const viewerSessionId =
+            typeof candidate.viewerSessionId === "string"
+              ? candidate.viewerSessionId.trim()
+              : "";
+
+          if (
+            !viewerSessionId ||
+            (candidate.connectionType !== "direct" &&
+              candidate.connectionType !== "relay" &&
+              candidate.connectionType !== "unknown") ||
+            typeof candidate.metricsUpdatedAt !== "number" ||
+            candidate.metricsUpdatedAt < 0
+          ) {
+            return [];
+          }
+
+          return [
+            {
+              viewerSessionId,
+              connectionType: candidate.connectionType,
+              pingMs:
+                typeof candidate.pingMs === "number" && candidate.pingMs >= 0
+                  ? Math.trunc(candidate.pingMs)
+                  : null,
+              metricsUpdatedAt: Math.trunc(candidate.metricsUpdatedAt),
+            },
+          ];
+        })
+      : [],
+    chatMessages: Array.isArray(record.chatMessages)
+      ? record.chatMessages
+          .flatMap((message) => {
+            const parsed = roomChatMessageSchema.safeParse(message);
+            return parsed.success ? [parsed.data] : [];
+          })
+          .slice(-CHAT_HISTORY_LIMIT)
+      : [],
   };
 }
