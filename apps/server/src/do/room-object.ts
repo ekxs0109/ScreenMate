@@ -7,6 +7,7 @@ import {
   type ViewerRosterEntry,
 } from "@screenmate/shared";
 import type { CloudflareBindings } from "../env.js";
+import { verifyRoomPassword } from "../lib/room-password.js";
 
 type SessionRole = "host" | "viewer";
 type RoomConnectionType = ViewerRosterEntry["connectionType"];
@@ -29,10 +30,17 @@ type RoomInitialization = {
 type PersistedRoomRecord = RoomInitialization & {
   closedAt: number | null;
   closedReason: CloseReason | null;
+  passwordHash: string | null;
 };
 type StoredRoomRecord = Omit<PersistedRoomRecord, "maxExpiresAt"> & {
   maxExpiresAt?: number;
+  passwordHash?: string | null;
 };
+type RoomStateRecord = PersistedRoomRecord | (
+  Omit<PersistedRoomRecord, "passwordHash"> & {
+    passwordHash?: string | null;
+  }
+);
 
 type ViewerProfileRecord = {
   viewerSessionId: string;
@@ -61,6 +69,7 @@ type RoomStateSnapshot = {
   viewerCount: number;
   state: RoomLifecycleState;
   sourceState: RoomSourceState;
+  requiresPassword: boolean;
 };
 
 type ConnectionSocket = {
@@ -100,6 +109,7 @@ export class RoomState {
   private readonly createdAt: number;
   private expiresAt: number;
   private readonly maxExpiresAt: number;
+  private passwordHash: string | null;
   private closedAt: number | null;
   private closedReason: CloseReason | null;
   private sourceState: RoomSourceState = "missing";
@@ -114,7 +124,7 @@ export class RoomState {
   private activityPersistQueue = Promise.resolve();
 
   constructor(
-    record: PersistedRoomRecord,
+    record: RoomStateRecord,
     private readonly options: {
       activity?: PersistedRoomActivity | null;
       now?: () => number;
@@ -133,6 +143,7 @@ export class RoomState {
     this.createdAt = record.createdAt;
     this.expiresAt = record.expiresAt;
     this.maxExpiresAt = record.maxExpiresAt;
+    this.passwordHash = record.passwordHash ?? null;
     this.closedAt = record.closedAt;
     this.closedReason = record.closedReason;
 
@@ -261,7 +272,39 @@ export class RoomState {
     this.broadcast(this.viewerRosterEnvelope());
   }
 
-  validateViewerJoin(): JoinValidation {
+  async setAccess(passwordHash: string | null) {
+    this.passwordHash = passwordHash;
+    await this.options.onPersist?.(this.getPersistedRecord());
+
+    return {
+      roomId: this.roomId,
+      requiresPassword: this.passwordHash !== null,
+    };
+  }
+
+  async validateViewerJoin(password = ""): Promise<JoinValidation> {
+    if (this.passwordHash !== null) {
+      if (!password.trim()) {
+        return {
+          ok: false,
+          status: 403,
+          body: { error: errorCodes.ROOM_PASSWORD_REQUIRED },
+        };
+      }
+
+      if (!(await verifyRoomPassword(password, this.passwordHash))) {
+        return {
+          ok: false,
+          status: 403,
+          body: { error: errorCodes.ROOM_PASSWORD_INVALID },
+        };
+      }
+    }
+
+    return this.validateViewerConnection();
+  }
+
+  validateViewerConnection(): JoinValidation {
     if (this.isExpired()) {
       void this.closeRoom("expired");
       return {
@@ -309,6 +352,7 @@ export class RoomState {
       viewerCount,
       state,
       sourceState: this.sourceState,
+      requiresPassword: this.passwordHash !== null,
     };
   }
 
@@ -830,6 +874,7 @@ export class RoomState {
       createdAt: this.createdAt,
       expiresAt: this.expiresAt,
       maxExpiresAt: this.maxExpiresAt,
+      passwordHash: this.passwordHash,
       closedAt: this.closedAt,
       closedReason: this.closedReason,
     };
@@ -863,6 +908,7 @@ export class RoomObject {
       const body = (await request.json()) as RoomInitialization;
       const record: PersistedRoomRecord = {
         ...body,
+        passwordHash: null,
         closedAt: null,
         closedReason: null,
       };
@@ -894,13 +940,25 @@ export class RoomObject {
     }
 
     if (url.pathname === "/internal/join" && request.method === "POST") {
-      const validation = roomState.validateViewerJoin();
+      const body = await request.json().catch(() => ({})) as { password?: unknown };
+      const password = typeof body.password === "string" ? body.password : "";
+      const validation = await roomState.validateViewerJoin(password);
 
       if (!validation.ok) {
         return Response.json(validation.body, { status: validation.status });
       }
 
       return Response.json(validation.snapshot);
+    }
+
+    if (url.pathname === "/internal/access" && request.method === "PUT") {
+      const body = await request.json().catch(() => ({})) as {
+        passwordHash?: unknown;
+      };
+      const passwordHash =
+        typeof body.passwordHash === "string" ? body.passwordHash : null;
+
+      return Response.json(await roomState.setAccess(passwordHash));
     }
 
     if (url.pathname === "/internal/ws" && request.method === "GET") {
@@ -992,6 +1050,8 @@ export class RoomObject {
     return {
       ...record,
       maxExpiresAt,
+      passwordHash:
+        typeof record.passwordHash === "string" ? record.passwordHash : null,
     };
   }
 
@@ -1010,7 +1070,7 @@ export class RoomObject {
 
     const validation =
       role === "viewer"
-        ? roomState.validateViewerJoin()
+        ? roomState.validateViewerConnection()
         : { ok: true as const, snapshot: roomState.getStateSnapshot() };
 
     if (!validation.ok) {

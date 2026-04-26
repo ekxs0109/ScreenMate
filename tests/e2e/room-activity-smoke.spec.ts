@@ -69,6 +69,43 @@ test("covers the popup + viewer room activity smoke flow", async ({ screenmate }
   await expect(viewerPage).toHaveURL(new RegExp(`/rooms/${roomId}$`));
 });
 
+test("requires the saved room password before viewer auto-join succeeds", async ({ screenmate }) => {
+  test.slow();
+
+  const { popupPage, viewerPage } = screenmate;
+  const password = "letmein";
+
+  await waitForSniffCard(popupPage);
+  await popupPage.locator('[data-testid^="popup-sniff-card-"]').first().click();
+  await popupPage.getByTestId("popup-start-or-attach").click();
+  await popupPage.getByTestId("popup-tab-room").click();
+  await expect(popupPage.getByTestId("popup-room-status")).toContainText("attached");
+
+  const roomId = (await popupPage.getByTestId("popup-room-id-value").textContent())?.trim();
+  if (!roomId) {
+    throw new Error("Expected a room id after starting the room.");
+  }
+
+  await popupPage.getByTestId("popup-room-password-input").fill(password);
+  await popupPage.getByTestId("popup-room-password-save").click();
+  await expect(popupPage.getByTestId("popup-room-password-save")).toHaveText(/saved/i);
+
+  await viewerPage.goto(`http://127.0.0.1:4173/rooms/${roomId}`);
+  await expect(viewerPage.getByTestId("viewer-room-code-input")).toHaveValue(roomId);
+  await expect(viewerPage.getByTestId("viewer-connection-state")).toHaveAttribute(
+    "data-status",
+    "error",
+  );
+
+  await viewerPage.getByTestId("viewer-room-password-input").fill("wrong");
+  await viewerPage.getByTestId("viewer-join-submit").click();
+  await expect(viewerPage.getByTestId("viewer-room-error")).toContainText(/password/i);
+
+  await viewerPage.getByTestId("viewer-room-password-input").fill(password);
+  await viewerPage.getByTestId("viewer-join-submit").click();
+  await waitForViewerConnected(viewerPage);
+});
+
 async function waitForSniffCard(popupPage: Page) {
   await expect
     .poll(async () => popupPage.locator('[data-testid^="popup-sniff-card-"]').count(), {

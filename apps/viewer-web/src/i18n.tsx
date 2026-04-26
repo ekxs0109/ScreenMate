@@ -24,6 +24,8 @@ const viewerMessages = {
     joinRoomTitle: "加入房间",
     joinRoomDescription: "输入房主分享给你的房间号。",
     roomCodeLabel: "房间号",
+    roomPasswordLabel: "密码",
+    roomPasswordPlaceholder: "房间密码",
     joinRoomAction: "加入房间",
     joiningAction: "正在加入...",
     syncStatus: "同步状态",
@@ -45,6 +47,7 @@ const viewerMessages = {
     waitingForVideoSource: "等待视频源...",
     connectedToHost: "已连接到房主",
     waitingForVideoStream: "等待视频流",
+    clickToPlay: "点击播放",
     clickToUnmute: "点击开启声音",
     languageLabel: "语言",
     themeLight: "浅色",
@@ -66,12 +69,16 @@ const viewerMessages = {
     directConnectivityFailed: "你的网络无法建立直连 WebRTC 连接。",
     negotiationFailed: "点对点协商失败。",
     joinFailed: "无法加入这个房间。",
+    roomPasswordRequired: "这个房间需要密码。",
+    roomPasswordInvalid: "房间密码不正确。",
   },
   en: {
     documentTitle: "ScreenMate Viewer",
     joinRoomTitle: "Join Room",
     joinRoomDescription: "Enter the room code shared by the host.",
     roomCodeLabel: "Room code",
+    roomPasswordLabel: "Password",
+    roomPasswordPlaceholder: "Room password",
     joinRoomAction: "Join room",
     joiningAction: "Joining...",
     syncStatus: "Sync Status",
@@ -93,6 +100,7 @@ const viewerMessages = {
     waitingForVideoSource: "Waiting for video source...",
     connectedToHost: "Connected to host",
     waitingForVideoStream: "Waiting for video stream",
+    clickToPlay: "Click to play",
     clickToUnmute: "Click to unmute",
     languageLabel: "Language",
     themeLight: "Light",
@@ -115,12 +123,16 @@ const viewerMessages = {
       "Your network could not establish a direct WebRTC connection.",
     negotiationFailed: "Peer negotiation failed.",
     joinFailed: "We couldn't join that room.",
+    roomPasswordRequired: "This room requires a password.",
+    roomPasswordInvalid: "The room password is incorrect.",
   },
   ja: {
     documentTitle: "ScreenMate 視聴ページ",
     joinRoomTitle: "ルームに参加",
     joinRoomDescription: "ホストから共有されたルームコードを入力してください。",
     roomCodeLabel: "ルームコード",
+    roomPasswordLabel: "パスワード",
+    roomPasswordPlaceholder: "ルームパスワード",
     joinRoomAction: "ルームに参加",
     joiningAction: "参加中...",
     syncStatus: "同期ステータス",
@@ -142,6 +154,7 @@ const viewerMessages = {
     waitingForVideoSource: "映像ソースを待っています...",
     connectedToHost: "ホストに接続しました",
     waitingForVideoStream: "映像ストリームを待っています",
+    clickToPlay: "クリックして再生",
     clickToUnmute: "クリックしてミュート解除",
     languageLabel: "言語",
     themeLight: "ライト",
@@ -164,12 +177,16 @@ const viewerMessages = {
       "ネットワークの都合で WebRTC の直接接続を確立できませんでした。",
     negotiationFailed: "ピア接続のネゴシエーションに失敗しました。",
     joinFailed: "そのルームに参加できませんでした。",
+    roomPasswordRequired: "このルームにはパスワードが必要です。",
+    roomPasswordInvalid: "ルームパスワードが正しくありません。",
   },
   es: {
     documentTitle: "ScreenMate Viewer",
     joinRoomTitle: "Unirse a la sala",
     joinRoomDescription: "Introduce el codigo de sala compartido por el anfitrion.",
     roomCodeLabel: "Codigo de sala",
+    roomPasswordLabel: "Contrasena",
+    roomPasswordPlaceholder: "Contrasena de la sala",
     joinRoomAction: "Unirse a la sala",
     joiningAction: "Uniendo...",
     syncStatus: "Estado de sincronizacion",
@@ -192,6 +209,7 @@ const viewerMessages = {
     waitingForVideoSource: "Esperando la fuente de video...",
     connectedToHost: "Conectado al anfitrion",
     waitingForVideoStream: "Esperando la transmision de video",
+    clickToPlay: "Haz clic para reproducir",
     clickToUnmute: "Haz clic para activar el sonido",
     languageLabel: "Idioma",
     themeLight: "Claro",
@@ -214,6 +232,8 @@ const viewerMessages = {
       "Tu red no pudo establecer una conexion WebRTC directa.",
     negotiationFailed: "La negociacion entre pares fallo.",
     joinFailed: "No pudimos unirnos a esa sala.",
+    roomPasswordRequired: "Esta sala requiere contrasena.",
+    roomPasswordInvalid: "La contrasena de la sala es incorrecta.",
   },
 } as const;
 
@@ -302,6 +322,8 @@ function buildViewerDictionary(
     joinRoomTitle: translate("joinRoomTitle"),
     joinRoomDescription: translate("joinRoomDescription"),
     roomCodeLabel: translate("roomCodeLabel"),
+    roomPasswordLabel: translate("roomPasswordLabel"),
+    roomPasswordPlaceholder: translate("roomPasswordPlaceholder"),
     joinRoomAction: translate("joinRoomAction"),
     joiningAction: translate("joiningAction"),
     syncStatus: translate("syncStatus"),
@@ -344,6 +366,8 @@ function buildViewerDictionary(
     directConnectivityFailed: translate("directConnectivityFailed"),
     negotiationFailed: translate("negotiationFailed"),
     joinFailed: translate("joinFailed"),
+    roomPasswordRequired: translate("roomPasswordRequired"),
+    roomPasswordInvalid: translate("roomPasswordInvalid"),
   };
 }
 
@@ -420,6 +444,10 @@ export function translateViewerError(
       return copy.roomNotFound;
     case "ROOM_EXPIRED":
       return copy.roomExpired;
+    case "ROOM_PASSWORD_REQUIRED":
+      return copy.roomPasswordRequired;
+    case "ROOM_PASSWORD_INVALID":
+      return copy.roomPasswordInvalid;
     case "ROOM_ALREADY_CLOSED":
     case "HOST_ENDED_ROOM":
       return copy.roomAlreadyClosed;

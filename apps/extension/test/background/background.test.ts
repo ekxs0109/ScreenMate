@@ -241,6 +241,37 @@ describe("createHostMessageHandler", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("routes popup room password saves through the host runtime", async () => {
+    const snapshot = createHostRoomSnapshot({
+      roomLifecycle: "open",
+      sourceState: "attached",
+      roomId: "room_123",
+    });
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      setRoomPassword: vi.fn().mockResolvedValue({
+        ok: true,
+        snapshot,
+        error: null,
+      }),
+    };
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      runtime: runtime as never,
+    }));
+
+    const result = await handler({
+      type: "screenmate:set-room-password",
+      password: "letmein",
+    });
+
+    expect(runtime.setRoomPassword).toHaveBeenCalledWith("letmein");
+    expect(result).toEqual({
+      ok: true,
+      snapshot,
+      error: null,
+    });
+  });
+
   it("keeps sniff results in the browser tab order instead of forcing the active tab first", async () => {
     const queryActiveTabId = vi.fn().mockResolvedValue(84);
     const queryCurrentWindowTabs = vi.fn().mockResolvedValue([
@@ -1876,6 +1907,43 @@ describe("createHostMessageHandler", () => {
       hostToken: "host-token",
       signalingUrl: "/rooms/room_123/ws",
       iceServers: [{ urls: ["stun:stun.screenmate.dev"] }],
+    });
+  });
+
+  it("updates room access through the extension background network context", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        roomId: "room_123",
+        requiresPassword: true,
+      }),
+    });
+    const handler = createInternalHostNetworkHandler({
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const result = await handler({
+      type: "screenmate:set-room-access",
+      apiBaseUrl: "http://localhost:8787",
+      roomId: "room_123",
+      hostToken: "host-token",
+      password: "letmein",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://localhost:8787/rooms/room_123/access",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: "Bearer host-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ password: "letmein" }),
+      },
+    );
+    expect(result).toEqual({
+      roomId: "room_123",
+      requiresPassword: true,
     });
   });
 

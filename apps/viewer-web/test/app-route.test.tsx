@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { StrictMode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ViewerI18nProvider } from "../src/i18n";
@@ -7,7 +8,7 @@ import type { ViewerSessionState } from "../src/lib/session-state";
 
 const constructorSpy = vi.fn();
 const destroySpy = vi.fn();
-const joinSpy = vi.fn<(_: string) => Promise<void>>();
+const joinSpy = vi.fn<(_: string, password?: string) => Promise<void>>();
 let snapshot: ViewerSessionState;
 
 vi.mock("../src/viewer-session", async () => {
@@ -28,8 +29,12 @@ vi.mock("../src/viewer-session", async () => {
         destroySpy();
       }
 
-      join(roomId: string) {
-        return joinSpy(roomId);
+      getSnapshot() {
+        return snapshot ?? initialViewerSessionState;
+      }
+
+      join(roomId: string, password?: string) {
+        return joinSpy(roomId, password);
       }
     },
   };
@@ -47,6 +52,18 @@ describe("App room routing", () => {
     joinSpy.mockResolvedValue(undefined);
     snapshot = initialViewerSessionState;
     window.history.replaceState({}, "", "/");
+    Object.defineProperty(HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(undefined),
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "pause", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "load", {
+      configurable: true,
+      value: vi.fn(),
+    });
   });
 
   afterEach(() => {
@@ -78,7 +95,23 @@ describe("App room routing", () => {
     );
 
     await waitFor(() => {
-      expect(joinSpy).toHaveBeenCalledWith("room_demo");
+      expect(joinSpy).toHaveBeenCalledWith("room_demo", "");
+    });
+  });
+
+  it("retries route auto-join after React StrictMode remount cleanup", async () => {
+    window.history.replaceState({}, "", "/rooms/room_demo");
+
+    render(
+      <StrictMode>
+        <ViewerI18nProvider initialLocale="en">
+          <App />
+        </ViewerI18nProvider>
+      </StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(joinSpy.mock.calls.filter(([roomId]) => roomId === "room_demo").length).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -94,7 +127,7 @@ describe("App room routing", () => {
     fireEvent.click(screen.getByTestId("viewer-join-submit"));
 
     await waitFor(() => {
-      expect(joinSpy).toHaveBeenCalledWith("room_form_join");
+      expect(joinSpy).toHaveBeenCalledWith("room_form_join", "");
       expect(window.location.pathname).toBe("/rooms/room_form_join");
     });
   });

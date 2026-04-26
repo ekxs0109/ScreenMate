@@ -1,11 +1,39 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, LogIn, LogOut, Pause, Radio, Send, Shuffle, Users } from "lucide-react";
 import { useTheme } from "next-themes";
+import DPlayer from "dplayer";
 import { JoinForm } from "./JoinForm";
 import type { ViewerSceneModel } from "../viewer-scene-model";
 import { cn } from "../lib/utils";
 import { HeaderControls } from "./header-controls";
 import { useViewerI18n } from "../i18n";
+import { createLogger } from "../lib/logger";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+type PlaybackPrompt = "play" | "unmute" | null;
+
+const viewerPlayerLogger = createLogger("viewer:player");
+
+function getStreamResolution(stream: MediaStream | null) {
+  if (!stream) {
+    return null;
+  }
+
+  const fallbackTrack = stream.getVideoTracks?.()[0] ?? null;
+  const fallbackSettings = fallbackTrack?.getSettings?.() ?? null;
+  const fallbackWidth = typeof fallbackSettings?.width === "number" ? fallbackSettings.width : 0;
+  const fallbackHeight = typeof fallbackSettings?.height === "number" ? fallbackSettings.height : 0;
+
+  return fallbackWidth > 0 && fallbackHeight > 0
+    ? `${fallbackWidth}x${fallbackHeight}`
+    : null;
+}
 
 export function ViewerShell({
   scene,
@@ -19,7 +47,7 @@ export function ViewerShell({
 }: {
   scene: ViewerSceneModel;
   stream: MediaStream | null;
-  onJoin: (roomCode: string) => Promise<void>;
+  onJoin: (roomCode: string, password: string) => Promise<void>;
   onLeaveRoom: () => void;
   onJoinOtherRoom: () => void;
   onRandomizeUsername: () => void;
@@ -28,10 +56,18 @@ export function ViewerShell({
 }) {
   const { resolvedTheme, setTheme, theme } = useTheme();
   const { copy, locale, setLocale } = useViewerI18n();
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<DPlayer | null>(null);
+  const playerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(stream);
+  const resolutionCleanupRef = useRef<(() => void) | null>(null);
+  const playbackAttemptRef = useRef(0);
+  const [playbackPrompt, setPlaybackPrompt] = useState<PlaybackPrompt>(null);
+  const [videoResolution, setVideoResolution] = useState<string | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState(
     scene.sidebar.username,
   );
+  const fallbackStreamResolution = getStreamResolution(stream);
 
   useEffect(() => {
     setDisplayNameDraft(scene.sidebar.username);
@@ -46,22 +82,375 @@ export function ViewerShell({
     onDisplayNameChange(value);
   }
 
+  const updatePlaybackPrompt = useCallback(
+    (
+      nextPrompt: PlaybackPrompt,
+      reason: string,
+      details?: Record<string, unknown>,
+    ) => {
+      if (nextPrompt) {
+        viewerPlayerLogger.info("Showing viewer playback prompt.", {
+          prompt: nextPrompt,
+          reason,
+          ...details,
+        });
+      } else {
+        viewerPlayerLogger.debug("Clearing viewer playback prompt.", {
+          reason,
+          ...details,
+        });
+      }
+
+      setPlaybackPrompt(nextPrompt);
+    },
+    [],
+  );
+
+  const waitForPlaybackSettle = useCallback(async () => {
+    await Promise.resolve();
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 0);
+    });
+  }, []);
+
+  const clearPlayerVideo = useCallback((video: HTMLVideoElement) => {
+    playbackAttemptRef.current += 1;
+    resolutionCleanupRef.current?.();
+    resolutionCleanupRef.current = null;
+    viewerPlayerLogger.debug("Clearing viewer video element.", {
+      hadStream: Boolean(video.srcObject),
+      paused: video.paused,
+    });
+    video.pause?.();
+    video.srcObject = null;
+    video.removeAttribute("src");
+    video.load?.();
+    setVideoResolution(null);
+    updatePlaybackPrompt(null, "player-cleared");
+  }, [updatePlaybackPrompt]);
+
+  const syncVideoResolution = useCallback(
+    (
+      video: HTMLVideoElement,
+      nextStream: MediaStream | null,
+      reason: string,
+    ) => {
+      const nextWidth = video.videoWidth;
+      const nextHeight = video.videoHeight;
+      const fallbackTrack = nextStream?.getVideoTracks?.()[0] ?? null;
+      const fallbackSettings = fallbackTrack?.getSettings?.() ?? null;
+      const fallbackWidth = typeof fallbackSettings?.width === "number" ? fallbackSettings.width : 0;
+      const fallbackHeight = typeof fallbackSettings?.height === "number" ? fallbackSettings.height : 0;
+      const width = nextWidth > 0 ? nextWidth : fallbackWidth;
+      const height = nextHeight > 0 ? nextHeight : fallbackHeight;
+      const nextResolution =
+        width > 0 && height > 0 ? `${width}x${height}` : null;
+
+      viewerPlayerLogger.debug("Synced viewer video resolution.", {
+        reason,
+        streamId: nextStream?.id ?? null,
+        videoHeight: nextHeight,
+        videoWidth: nextWidth,
+        resolution: nextResolution,
+      });
+      setVideoResolution(nextResolution);
+    },
+    [],
+  );
+
+  const trackVideoResolution = useCallback(
+    (video: HTMLVideoElement, nextStream: MediaStream | null) => {
+      resolutionCleanupRef.current?.();
+      resolutionCleanupRef.current = null;
+
+      if (!nextStream) {
+        setVideoResolution(null);
+        return;
+      }
+
+      const handleResolutionChange = () => {
+        syncVideoResolution(video, nextStream, "video-metadata");
+      };
+
+      video.addEventListener("loadedmetadata", handleResolutionChange);
+      video.addEventListener("resize", handleResolutionChange);
+      resolutionCleanupRef.current = () => {
+        video.removeEventListener("loadedmetadata", handleResolutionChange);
+        video.removeEventListener("resize", handleResolutionChange);
+      };
+
+      syncVideoResolution(video, nextStream, "stream-bound");
+    },
+    [syncVideoResolution],
+  );
+
+  const getAutoplayPolicy = useCallback((video: HTMLVideoElement) => {
+    const policyReader = (
+      navigator as Navigator & {
+        getAutoplayPolicy?: (
+          target: HTMLVideoElement,
+        ) => "allowed" | "allowed-muted" | "disallowed";
+      }
+    ).getAutoplayPolicy;
+
+    if (typeof policyReader !== "function") {
+      return null;
+    }
+
+    try {
+      return policyReader(video);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const tryPlayVideo = useCallback(
+    async (
+      video: HTMLVideoElement,
+      options: {
+        muted: boolean;
+        restoreAudioOnSuccess: boolean;
+        successPrompt: PlaybackPrompt;
+        promptAfterAudioRestorePause?: PlaybackPrompt;
+      }
+    ) => {
+      const attemptId = ++playbackAttemptRef.current;
+      viewerPlayerLogger.info("Attempting viewer playback.", {
+        attemptId,
+        muted: options.muted,
+        restoreAudioOnSuccess: options.restoreAudioOnSuccess,
+      });
+      video.muted = options.muted;
+      updatePlaybackPrompt(null, "playback-attempt-started", { attemptId });
+
+      try {
+        await video.play();
+
+        if (playbackAttemptRef.current !== attemptId) {
+          return;
+        }
+
+        viewerPlayerLogger.info("Viewer playback play() resolved.", {
+          attemptId,
+          muted: video.muted,
+          paused: video.paused,
+          readyState: video.readyState,
+        });
+
+        if (options.restoreAudioOnSuccess) {
+          video.muted = false;
+          viewerPlayerLogger.info("Tried to restore viewer audio after muted autoplay.", {
+            attemptId,
+            muted: video.muted,
+            paused: video.paused,
+          });
+          await waitForPlaybackSettle();
+
+          if (playbackAttemptRef.current !== attemptId) {
+            return;
+          }
+
+          if (video.paused) {
+            viewerPlayerLogger.warn("Viewer playback paused after audio restore.", {
+              attemptId,
+              readyState: video.readyState,
+            });
+            updatePlaybackPrompt(
+              options.promptAfterAudioRestorePause ?? "play",
+              "paused-after-audio-restore",
+              { attemptId },
+            );
+            return;
+          }
+        }
+
+        updatePlaybackPrompt(options.successPrompt, "playback-ready", {
+          attemptId,
+          muted: video.muted,
+          paused: video.paused,
+        });
+      } catch (error) {
+        if (playbackAttemptRef.current !== attemptId) {
+          return;
+        }
+
+        viewerPlayerLogger.warn("Viewer playback play() was rejected.", {
+          attemptId,
+          error: error instanceof Error ? error.message : String(error),
+          muted: video.muted,
+        });
+        updatePlaybackPrompt("play", "playback-rejected", { attemptId });
+      }
+    },
+    [updatePlaybackPrompt, waitForPlaybackSettle],
+  );
+
+  const bindStreamToVideo = useCallback(
+    (video: HTMLVideoElement, nextStream: MediaStream | null) => {
+      clearPlayerVideo(video);
+      video.autoplay = true;
+      video.playsInline = true;
+
+      if (!nextStream) {
+        viewerPlayerLogger.debug("Viewer stream cleared.");
+        return;
+      }
+
+      video.srcObject = nextStream;
+      trackVideoResolution(video, nextStream);
+
+      const autoplayPolicy = getAutoplayPolicy(video);
+      viewerPlayerLogger.info("Binding stream to viewer player.", {
+        autoplayPolicy,
+        streamId: nextStream.id,
+      });
+      if (autoplayPolicy === "disallowed") {
+        updatePlaybackPrompt("play", "autoplay-policy-disallowed", {
+          streamId: nextStream.id,
+        });
+        return;
+      }
+
+      if (autoplayPolicy === "allowed") {
+        void tryPlayVideo(video, {
+          muted: false,
+          restoreAudioOnSuccess: false,
+          successPrompt: null,
+        });
+        return;
+      }
+
+      if (autoplayPolicy === "allowed-muted") {
+        void tryPlayVideo(video, {
+          muted: true,
+          restoreAudioOnSuccess: false,
+          successPrompt: "unmute",
+        });
+        return;
+      }
+
+      void tryPlayVideo(video, {
+        muted: true,
+        restoreAudioOnSuccess: true,
+        successPrompt: null,
+        promptAfterAudioRestorePause: "play",
+      });
+    },
+    [clearPlayerVideo, getAutoplayPolicy, trackVideoResolution, tryPlayVideo, updatePlaybackPrompt],
+  );
+
+  const syncPlayerVideo = useCallback(
+    (nextStream: MediaStream | null) => {
+      const nextVideo =
+        playerVideoRef.current ??
+        playerRef.current?.video ??
+        playerContainerRef.current?.querySelector("video") ??
+        null;
+
+      if (!nextVideo) {
+        return;
+      }
+
+      playerVideoRef.current = nextVideo;
+      bindStreamToVideo(nextVideo, nextStream);
+    },
+    [bindStreamToVideo],
+  );
+
   useEffect(() => {
-    const video = videoRef.current;
+    streamRef.current = stream;
+    syncPlayerVideo(stream);
+  }, [stream, syncPlayerVideo]);
+
+  const retryPlayback = useCallback(() => {
+    const video =
+      playerVideoRef.current ??
+      playerRef.current?.video ??
+      playerContainerRef.current?.querySelector("video") ??
+      null;
+
+    if (!video || !streamRef.current) {
+      return;
+    }
+
+    viewerPlayerLogger.info("Viewer requested manual playback retry.");
+    void tryPlayVideo(video, {
+      muted: false,
+      restoreAudioOnSuccess: false,
+      successPrompt: null,
+    });
+  }, [tryPlayVideo]);
+
+  const resumeAudio = useCallback(() => {
+    const video =
+      playerVideoRef.current ??
+      playerRef.current?.video ??
+      playerContainerRef.current?.querySelector("video") ??
+      null;
+
     if (!video) {
       return;
     }
 
-    video.srcObject = stream;
-    if (!stream) {
+    viewerPlayerLogger.info("Viewer requested manual audio resume.");
+    void tryPlayVideo(video, {
+      muted: false,
+      restoreAudioOnSuccess: false,
+      successPrompt: null,
+    });
+  }, [tryPlayVideo]);
+
+  useEffect(() => {
+    const container = playerContainerRef.current;
+    if (!container || playerRef.current) {
       return;
     }
 
-    video.muted = true;
-    void video.play().then(() => {
-      video.muted = false;
-    }).catch(() => {});
-  }, [stream]);
+    const nextPlayer = new DPlayer({
+      autoplay: true,
+      container,
+      live: true,
+      mutex: false,
+      video: {
+        url: "about:blank",
+        type: "webrtc-stream",
+        customType: {
+          "webrtc-stream": (video) => {
+            playerVideoRef.current = video;
+            bindStreamToVideo(video, streamRef.current);
+          },
+        },
+      },
+    });
+
+    viewerPlayerLogger.info("Created viewer DPlayer instance.", {
+      hasInitialStream: Boolean(streamRef.current),
+    });
+    playerRef.current = nextPlayer;
+    if (nextPlayer.video) {
+      playerVideoRef.current = nextPlayer.video;
+      bindStreamToVideo(nextPlayer.video, streamRef.current);
+    }
+
+    return () => {
+      const video =
+        playerVideoRef.current ??
+        nextPlayer.video ??
+        container.querySelector("video") ??
+        null;
+
+      if (video) {
+        clearPlayerVideo(video);
+      }
+
+      nextPlayer.destroy();
+      viewerPlayerLogger.info("Destroyed viewer DPlayer instance.");
+      if (playerRef.current === nextPlayer) {
+        playerRef.current = null;
+      }
+      playerVideoRef.current = null;
+    };
+  }, [bindStreamToVideo, clearPlayerVideo]);
 
   const handleThemeToggle = useCallback(() => {
     const nextTheme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
@@ -123,13 +512,20 @@ export function ViewerShell({
         {/* Left Side: Video Player */}
         <div className="w-full lg:flex-[3] aspect-video lg:aspect-auto flex flex-col relative shrink-0 z-10 bg-black lg:border-r border-border/10">
           <div className="absolute inset-0 w-full h-full flex items-center justify-center group overflow-hidden bg-black">
-            <video
+            <div
               data-testid="viewer-video"
-              ref={videoRef}
-              className="absolute inset-0 w-full h-full object-contain outline-none"
-              controls={false}
-              playsInline
+              ref={playerContainerRef}
+              className="absolute inset-0 h-full w-full outline-none [&_.dplayer]:h-full [&_.dplayer]:w-full [&_.dplayer-video-wrap]:h-full [&_video]:h-full [&_video]:w-full [&_video]:object-contain"
             />
+
+            {(videoResolution ?? fallbackStreamResolution) && !scene.player.showJoinOverlay && (
+              <div
+                data-testid="viewer-resolution"
+                className="absolute right-4 top-4 z-10 rounded-full border border-white/10 bg-black/55 px-3 py-1 text-xs font-medium text-white shadow-lg backdrop-blur-md"
+              >
+                {videoResolution ?? fallbackStreamResolution}
+              </div>
+            )}
             
             {/* OSD Status (Host pausing) */}
             {scene.player.showWaitingOverlay && (
@@ -148,21 +544,66 @@ export function ViewerShell({
               </div>
             )}
 
-            {/* Join Overlay */}
-            {scene.player.showJoinOverlay && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6 pointer-events-auto">
-                <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-black/60 p-6 shadow-2xl">
-                  <h2 className="text-xl font-bold text-white mb-2">{copy.joinRoomTitle}</h2>
-                  <p className="text-sm text-zinc-300 mb-4">{copy.joinRoomDescription}</p>
-                  {(scene.notices.error || scene.notices.endedReason) && (
-                    <p className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
-                      {scene.notices.error || scene.notices.endedReason}
-                    </p>
-                  )}
-                  <JoinForm isBusy={scene.player.joinBusy} onJoin={onJoin} />
+            {playbackPrompt === "play" &&
+              !scene.player.showJoinOverlay &&
+              !scene.player.showWaitingOverlay && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/45 backdrop-blur-sm">
+                  <button
+                    data-testid="viewer-playback-retry"
+                    type="button"
+                    onClick={retryPlayback}
+                    className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-5 py-3 text-sm font-medium text-white shadow-xl transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40"
+                  >
+                    <Radio className="h-4 w-4" />
+                    {copy.clickToPlay}
+                  </button>
                 </div>
-              </div>
-            )}
+              )}
+
+            {playbackPrompt === "unmute" &&
+              !scene.player.showJoinOverlay &&
+              !scene.player.showWaitingOverlay && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/30 backdrop-blur-[2px]">
+                  <button
+                    data-testid="viewer-unmute-prompt"
+                    type="button"
+                    onClick={resumeAudio}
+                    className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-5 py-3 text-sm font-medium text-white shadow-xl transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40"
+                  >
+                    <Radio className="h-4 w-4" />
+                    {copy.clickToUnmute}
+                  </button>
+                </div>
+              )}
+
+            {/* Join Overlay */}
+            <Dialog open={scene.player.showJoinOverlay} modal={false}>
+              <DialogContent 
+                className="sm:max-w-md [&>button]:hidden" 
+                onInteractOutside={(e) => e.preventDefault()} 
+                onEscapeKeyDown={(e) => e.preventDefault()}
+              >
+                <DialogHeader>
+                  <DialogTitle>{copy.joinRoomTitle}</DialogTitle>
+                  <DialogDescription>
+                    {copy.joinRoomDescription}
+                  </DialogDescription>
+                </DialogHeader>
+                {(scene.notices.error || scene.notices.endedReason) && (
+                  <p
+                    data-testid="viewer-room-error"
+                    className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100"
+                  >
+                    {scene.notices.error || scene.notices.endedReason}
+                  </p>
+                )}
+                <JoinForm
+                  initialRoomCode={scene.header.roomId ?? ""}
+                  isBusy={scene.player.joinBusy}
+                  onJoin={onJoin}
+                />
+              </DialogContent>
+            </Dialog>
 
           </div>
         </div>

@@ -451,6 +451,7 @@ export function ExtensionPopupPresenter({
                             <Key className="w-3.5 h-3.5 text-muted-foreground" />
                           </div>
                           <input
+                            data-testid="popup-room-password-input"
                             type="text"
                             value={scene.roomTab.passwordDraft}
                             onChange={(event) => onPasswordChange(event.target.value)}
@@ -458,6 +459,7 @@ export function ExtensionPopupPresenter({
                             className="flex-1 bg-transparent border-b border-border px-1 py-1.5 text-xs font-bold focus:border-blue-500 focus:outline-none transition-colors dark:text-zinc-200 placeholder:font-medium"
                           />
                           <button
+                            data-testid="popup-room-password-save"
                             onClick={onSavePassword}
                             type="button"
                             className={cn("text-xs px-3 py-1.5 rounded-lg font-bold transition-[background-color,transform,box-shadow] shadow-sm whitespace-nowrap active:scale-95", scene.roomTab.passwordSaved ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800/50" : "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 border border-transparent")}

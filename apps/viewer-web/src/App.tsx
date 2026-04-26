@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ViewerShell } from "./components/ViewerShell";
 import {
   buildRandomViewerUsername,
@@ -15,6 +15,14 @@ import {
 import { buildViewerSceneModel } from "./viewer-scene-adapter";
 import { createViewerMockState, type ViewerMockState } from "./viewer-mock-state";
 import { ViewerSession } from "./viewer-session";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { JoinForm } from "./components/JoinForm";
 
 export default function App() {
   const { copy, locale } = useViewerI18n();
@@ -34,7 +42,7 @@ export default function App() {
         initialDisplayName: displayName,
       }),
   );
-  const autoJoinedRoomIdRef = useRef<string | null>(null);
+  const [isJoinOtherRoomOpen, setIsJoinOtherRoomOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribe = viewerSession.subscribe(setSession);
@@ -46,19 +54,23 @@ export default function App() {
   }, [viewerSession]);
 
   useEffect(() => {
+    if (!initialRoomId) {
+      return;
+    }
+
+    const currentSnapshot = viewerSession.getSnapshot();
     if (
-      !initialRoomId ||
-      autoJoinedRoomIdRef.current === initialRoomId
+      currentSnapshot.roomId === initialRoomId &&
+      currentSnapshot.status !== "idle"
     ) {
       return;
     }
 
-    autoJoinedRoomIdRef.current = initialRoomId;
-    void viewerSession.join(initialRoomId);
+    void viewerSession.join(initialRoomId, "");
   }, [initialRoomId, viewerSession]);
 
-  async function handleJoin(roomCode: string) {
-    await viewerSession.join(roomCode);
+  async function handleJoin(roomCode: string, password: string) {
+    await viewerSession.join(roomCode, password);
     window.history.replaceState(
       {},
       "",
@@ -73,48 +85,65 @@ export default function App() {
   });
 
   return (
-    <ViewerShell
-      scene={scene}
-      stream={session.remoteStream}
-      onJoin={handleJoin}
-      onLeaveRoom={() => {
-        viewerSession.destroy();
-        setSession(initialViewerSessionState);
-        window.history.replaceState({}, "", "/");
-      }}
-      onJoinOtherRoom={() => {
-        const newRoomId = window.prompt(copy.enterRoomIdPrompt);
-        if (newRoomId) {
-          void viewerSession.join(newRoomId);
-          window.history.replaceState({}, "", `/rooms/${encodeURIComponent(newRoomId)}`);
-        }
-      }}
-      onRandomizeUsername={() => {
-        const nextDisplayName = buildRandomViewerUsername(locale);
-        setDisplayName(nextDisplayName);
-        viewerSession.updateDisplayName(nextDisplayName);
-        setMock((current) => ({
-          ...current,
-          username: nextDisplayName,
-        }));
-      }}
-      onDisplayNameChange={(nextName) => {
-        const nextDisplayName = nextName.trim();
+    <>
+      <ViewerShell
+        scene={scene}
+        stream={session.remoteStream}
+        onJoin={handleJoin}
+        onLeaveRoom={() => {
+          viewerSession.destroy();
+          setSession(initialViewerSessionState);
+          window.history.replaceState({}, "", "/");
+        }}
+        onJoinOtherRoom={() => {
+          setIsJoinOtherRoomOpen(true);
+        }}
+        onRandomizeUsername={() => {
+          const nextDisplayName = buildRandomViewerUsername(locale);
+          setDisplayName(nextDisplayName);
+          viewerSession.updateDisplayName(nextDisplayName);
+          setMock((current) => ({
+            ...current,
+            username: nextDisplayName,
+          }));
+        }}
+        onDisplayNameChange={(nextName) => {
+          const nextDisplayName = nextName.trim();
 
-        if (!nextDisplayName) {
-          return;
-        }
+          if (!nextDisplayName) {
+            return;
+          }
 
-        setDisplayName(nextDisplayName);
-        viewerSession.updateDisplayName(nextDisplayName);
-        setMock((current) => ({
-          ...current,
-          username: nextDisplayName,
-        }));
-      }}
-      onSendMessage={(text) => {
-        return viewerSession.sendChatMessage(text);
-      }}
-    />
+          setDisplayName(nextDisplayName);
+          viewerSession.updateDisplayName(nextDisplayName);
+          setMock((current) => ({
+            ...current,
+            username: nextDisplayName,
+          }));
+        }}
+        onSendMessage={(text) => {
+          return viewerSession.sendChatMessage(text);
+        }}
+      />
+      <Dialog open={isJoinOtherRoomOpen} onOpenChange={setIsJoinOtherRoomOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{copy.joinOtherRoom}</DialogTitle>
+            <DialogDescription>
+              {copy.joinRoomDescription}
+            </DialogDescription>
+          </DialogHeader>
+          <JoinForm
+            isBusy={scene.player.joinBusy}
+            onJoin={(roomCode, password) => {
+              void viewerSession.join(roomCode, password).then(() => {
+                setIsJoinOtherRoomOpen(false);
+                window.history.replaceState({}, "", `/rooms/${encodeURIComponent(roomCode)}`);
+              });
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

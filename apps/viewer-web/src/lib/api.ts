@@ -22,6 +22,7 @@ export type RoomStateResponse = {
   viewerCount: number;
   state: RoomState;
   sourceState: RoomSourceState;
+  requiresPassword?: boolean;
 };
 
 export type RoomApiError = Error & {
@@ -33,10 +34,13 @@ export type RoomApiError = Error & {
 export async function joinRoom(
   baseUrl: string,
   roomId: string,
+  password = "",
   fetchFn: typeof fetch = fetch,
 ): Promise<JoinRoomResponse> {
   const response = await fetchFn(new URL(`/rooms/${roomId}/join`, baseUrl), {
     method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password }),
   });
 
   if (!response.ok) {

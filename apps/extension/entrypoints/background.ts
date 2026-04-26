@@ -5,6 +5,8 @@ import { getScreenMateApiBaseUrl } from "../lib/config";
 import { createLogger } from "../lib/logger";
 import {
   requestRoomCreation,
+  updateRoomAccess,
+  type RoomAccessResponse,
   type RoomCreateResponse,
 } from "../lib/room-api";
 import {
@@ -30,6 +32,7 @@ type SourceFingerprintMatch = Omit<SourceFingerprint, "frameId" | "tabId">;
 export type HostMessage =
   | { type: "screenmate:get-room-session" }
   | { type: "screenmate:send-chat-message"; text: string }
+  | { type: "screenmate:set-room-password"; password: string }
   | { type: "screenmate:list-videos"; refresh?: boolean }
   | { type: "screenmate:get-video-sniff-state" }
   | { type: "screenmate:ensure-video-sniff-state" }
@@ -86,6 +89,12 @@ export type PreviewAck = { ok: true };
 export type InternalHostNetworkMessage = {
   type: "screenmate:create-room";
   apiBaseUrl: string;
+} | {
+  type: "screenmate:set-room-access";
+  apiBaseUrl: string;
+  roomId: string;
+  hostToken: string;
+  password: string;
 };
 export type InternalHostNetworkErrorResponse = {
   error: string;
@@ -123,7 +132,7 @@ type HandlerResponse =
   | {
       ok: boolean;
       snapshot: HostRoomSnapshot;
-      error: "room-chat-send-failed" | null;
+      error: "room-chat-send-failed" | "room-password-save-failed" | null;
     };
 type TabMessageResponse =
   | LocalVideoSource[]
@@ -132,6 +141,7 @@ type TabMessageResponse =
   | undefined;
 type InternalHostNetworkResponse =
   | RoomCreateResponse
+  | RoomAccessResponse
   | InternalHostNetworkErrorResponse;
 
 const backgroundLogger = createLogger("background");
@@ -182,6 +192,10 @@ export function createHostMessageHandler(
         snapshot: dependencies.runtime.getSnapshot(),
         error: ok ? null : "room-chat-send-failed",
       };
+    }
+
+    if (message.type === "screenmate:set-room-password") {
+      return dependencies.runtime.setRoomPassword(message.password);
     }
 
     if (message.type === "screenmate:stop-room") {
@@ -265,7 +279,9 @@ export function createHostMessageHandler(
       const roomResponse = await dependencies.createRoom(apiBaseUrl);
       if (!isRoomCreateResponse(roomResponse)) {
         return createHostRoomSnapshot({
-          message: roomResponse.error,
+          message: isInternalHostNetworkErrorResponse(roomResponse)
+            ? roomResponse.error
+            : "Room creation returned an incomplete response.",
         });
       }
 
@@ -507,6 +523,31 @@ export function createInternalHostNetworkHandler(
     }
 
     return (async () => {
+      if (message.type === "screenmate:set-room-access") {
+        backgroundLogger.info("Updating room access via extension background.", {
+          endpoint: `${message.apiBaseUrl}/rooms/${message.roomId}/access`,
+          roomId: message.roomId,
+        });
+
+        try {
+          return await updateRoomAccess(
+            dependencies.fetchImpl,
+            message.apiBaseUrl,
+            message.roomId,
+            message.hostToken,
+            message.password,
+          );
+        } catch (error) {
+          const formattedError = toErrorMessage(error);
+          backgroundLogger.error("Background room access update failed.", {
+            endpoint: `${message.apiBaseUrl}/rooms/${message.roomId}/access`,
+            error: formattedError,
+            roomId: message.roomId,
+          });
+          return { error: formattedError };
+        }
+      }
+
       backgroundLogger.info("Creating room via extension background.", {
         endpoint: `${message.apiBaseUrl}/rooms`,
       });
@@ -1155,6 +1196,8 @@ function isHostMessage(message: unknown): message is HostMessage {
       return true;
     case "screenmate:send-chat-message":
       return typeof message.text === "string" && message.text.trim().length > 0;
+    case "screenmate:set-room-password":
+      return typeof message.password === "string";
     case "screenmate:list-videos":
       return (
         typeof message.refresh === "undefined" ||
@@ -1287,20 +1330,38 @@ function isRoomCreateResponse(
   response: InternalHostNetworkResponse,
 ): response is RoomCreateResponse {
   return (
+    isRecord(response) &&
     "roomId" in response &&
     typeof response.roomId === "string" &&
+    "hostToken" in response &&
     typeof response.hostToken === "string" &&
+    "signalingUrl" in response &&
     typeof response.signalingUrl === "string"
   );
+}
+
+function isInternalHostNetworkErrorResponse(
+  response: InternalHostNetworkResponse,
+): response is InternalHostNetworkErrorResponse {
+  return isRecord(response) && "error" in response && typeof response.error === "string";
 }
 
 function isInternalHostNetworkMessage(
   message: unknown,
 ): message is InternalHostNetworkMessage {
+  if (!isRecord(message) || typeof message.apiBaseUrl !== "string") {
+    return false;
+  }
+
+  if (message.type === "screenmate:create-room") {
+    return true;
+  }
+
   return (
-    isRecord(message) &&
-    message.type === "screenmate:create-room" &&
-    typeof message.apiBaseUrl === "string"
+    message.type === "screenmate:set-room-access" &&
+    typeof message.roomId === "string" &&
+    typeof message.hostToken === "string" &&
+    typeof message.password === "string"
   );
 }
 

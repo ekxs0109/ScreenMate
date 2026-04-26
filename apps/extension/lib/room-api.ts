@@ -12,6 +12,11 @@ export type HostIceRefreshResponse = {
   turnCredentialExpiresAt: number | null;
 };
 
+export type RoomAccessResponse = {
+  roomId: string;
+  requiresPassword: boolean;
+};
+
 export async function requestRoomCreation(
   fetchImpl: typeof fetch,
   apiBaseUrl: string,
@@ -65,6 +70,41 @@ export async function refreshHostIce(
     )
   ) {
     throw new Error("Host ICE refresh returned an incomplete response.");
+  }
+
+  return payload;
+}
+
+export async function updateRoomAccess(
+  fetchImpl: typeof fetch,
+  apiBaseUrl: string,
+  roomId: string,
+  hostToken: string,
+  password: string,
+): Promise<RoomAccessResponse> {
+  const response = await fetchImpl(`${apiBaseUrl}/rooms/${roomId}/access`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${hostToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ password }),
+  });
+
+  if (!response.ok) {
+    const errorDetails = await readResponseErrorDetails(response);
+    throw new Error(
+      `Failed to update room access (${response.status}): ${errorDetails}`,
+    );
+  }
+
+  const payload = (await response.json()) as RoomAccessResponse;
+
+  if (
+    typeof payload.roomId !== "string" ||
+    typeof payload.requiresPassword !== "boolean"
+  ) {
+    throw new Error("Room access update returned an incomplete response.");
   }
 
   return payload;

@@ -12,6 +12,7 @@ import {
 } from "./env.js";
 export { RoomObject } from "./do/room-object.js";
 import { getDefaultIcePool } from "./lib/ice-pool.js";
+import { hashRoomPassword } from "./lib/room-password.js";
 import { buildSessionIceServers } from "./lib/turn-credentials.js";
 import { issueScopedToken, verifyScopedToken } from "./lib/token.js";
 
@@ -23,7 +24,7 @@ const ROOM_TOKEN_TTL_SECONDS = ROOM_MAX_TTL_MS / 1_000;
 app.use(
   "*",
   cors({
-    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
     origin(origin) {
       return origin || "*";
     },
@@ -93,9 +94,15 @@ app.get("/rooms/:roomId", async (c) => {
 
 app.post("/rooms/:roomId/join", async (c) => {
   const roomId = c.req.param("roomId");
+  const body = await c.req.json().catch(() => ({})) as { password?: unknown };
+  const password = typeof body.password === "string" ? body.password : "";
   const roomObject = getRoomObject(c.env, roomId);
   const joinValidation = await roomObject.fetch(
-    buildInternalRequest("/internal/join", { method: "POST" }),
+    buildInternalRequest("/internal/join", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password }),
+    }),
   );
 
   if (!joinValidation.ok) {
@@ -132,6 +139,53 @@ app.post("/rooms/:roomId/join", async (c) => {
     iceServers: ice.iceServers,
     turnCredentialExpiresAt: ice.turnCredentialExpiresAt,
   });
+});
+
+app.put("/rooms/:roomId/access", async (c) => {
+  const roomId = c.req.param("roomId");
+  const authHeader = c.req.header("authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const claims = await verifyScopedToken(token, {
+    secret: getRoomTokenSecret(c.env),
+    now: Math.floor(getNow(c.env) / 1_000),
+  });
+
+  if (!claims || claims.roomId !== roomId || claims.role !== "host") {
+    return c.json({ error: errorCodes.ROOM_NOT_FOUND }, 401);
+  }
+
+  const roomObject = getRoomObject(c.env, roomId);
+  const roomStateResponse = await roomObject.fetch(
+    buildInternalRequest("/internal/state"),
+  );
+
+  if (!roomStateResponse.ok) {
+    return c.json({ error: errorCodes.ROOM_NOT_FOUND }, 401);
+  }
+
+  const roomState = (await roomStateResponse.json()) as {
+    hostSessionId?: unknown;
+    state?: unknown;
+  };
+
+  if (
+    roomState.state === "closed" ||
+    roomState.hostSessionId !== claims.sessionId
+  ) {
+    return c.json({ error: errorCodes.ROOM_NOT_FOUND }, 401);
+  }
+
+  const body = await c.req.json().catch(() => ({})) as { password?: unknown };
+  const password = typeof body.password === "string" ? body.password.trim() : "";
+  const passwordHash = password ? await hashRoomPassword(password) : null;
+
+  return roomObject.fetch(
+    buildInternalRequest("/internal/access", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ passwordHash }),
+    }),
+  );
 });
 
 app.post("/rooms/:roomId/host/ice", async (c) => {

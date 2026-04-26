@@ -242,6 +242,196 @@ describe("room routes", () => {
     expect(body.turnCredentialExpiresAt).toBe(TEST_NOW + 10 * 60 * 1_000);
   });
 
+  it("stores host access password through a validated host bearer token", async () => {
+    const roomNamespace = createRoomNamespace(async (roomId, request) => {
+      expect(roomId).toBe("room_demo");
+      const pathname = new URL(request.url).pathname;
+
+      if (pathname === "/internal/state") {
+        expect(request.method).toBe("GET");
+        return Response.json({
+          roomId,
+          hostSessionId: "host_123",
+          hostConnected: true,
+          viewerCount: 0,
+          state: "hosting",
+          sourceState: "attached",
+        });
+      }
+
+      expect(pathname).toBe("/internal/access");
+      expect(request.method).toBe("PUT");
+      const body = (await request.json()) as { passwordHash: string | null };
+      expect(body.passwordHash).toMatch(/^pbkdf2-sha256:/);
+      expect(body.passwordHash).not.toContain("letmein");
+
+      return Response.json({ roomId, requiresPassword: true });
+    });
+    const token = await issueScopedToken(
+      { roomId: "room_demo", role: "host", sessionId: "host_123" },
+      {
+        secret: TEST_SECRET,
+        now: Math.floor(TEST_NOW / 1_000),
+        ttlSeconds: 2 * 60 * 60,
+      },
+    );
+
+    const response = await app.request(
+      "/rooms/room_demo/access",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ password: "letmein" }),
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+    const body = (await response.json()) as {
+      roomId: string;
+      requiresPassword: boolean;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ roomId: "room_demo", requiresPassword: true });
+    expect(roomNamespace.calls).toHaveLength(2);
+  });
+
+  it("clears host access password when the host saves an empty password", async () => {
+    const roomNamespace = createRoomNamespace(async (roomId, request) => {
+      expect(roomId).toBe("room_demo");
+      const pathname = new URL(request.url).pathname;
+
+      if (pathname === "/internal/state") {
+        return Response.json({
+          roomId,
+          hostSessionId: "host_123",
+          hostConnected: true,
+          viewerCount: 0,
+          state: "hosting",
+          sourceState: "attached",
+        });
+      }
+
+      expect(pathname).toBe("/internal/access");
+      const body = (await request.json()) as { passwordHash: string | null };
+      expect(body.passwordHash).toBeNull();
+
+      return Response.json({ roomId, requiresPassword: false });
+    });
+    const token = await issueScopedToken(
+      { roomId: "room_demo", role: "host", sessionId: "host_123" },
+      {
+        secret: TEST_SECRET,
+        now: Math.floor(TEST_NOW / 1_000),
+        ttlSeconds: 2 * 60 * 60,
+      },
+    );
+
+    const response = await app.request(
+      "/rooms/room_demo/access",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ password: "   " }),
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      roomId: "room_demo",
+      requiresPassword: false,
+    });
+  });
+
+  it("rejects room access updates without a valid host bearer token", async () => {
+    const roomNamespace = createRoomNamespace(() => {
+      throw new Error("unexpected durable object request");
+    });
+
+    const missingTokenResponse = await app.request(
+      "/rooms/room_demo/access",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "letmein" }),
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+    const invalidTokenResponse = await app.request(
+      "/rooms/room_demo/access",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: "Bearer bad-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ password: "letmein" }),
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+
+    expect(missingTokenResponse.status).toBe(401);
+    expect(invalidTokenResponse.status).toBe(401);
+    expect(roomNamespace.calls).toHaveLength(0);
+  });
+
+  it("passes viewer passwords to the durable object during join", async () => {
+    const roomNamespace = createRoomNamespace(async (roomId, request) => {
+      expect(roomId).toBe("room_demo");
+      expect(new URL(request.url).pathname).toBe("/internal/join");
+      expect(request.method).toBe("POST");
+
+      const body = (await request.json()) as { password: string };
+      expect(body.password).toBe("letmein");
+
+      return Response.json({
+        roomId,
+        state: "hosting",
+        hostConnected: true,
+        viewerCount: 1,
+      });
+    });
+
+    const response = await app.request(
+      "/rooms/room_demo/join",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "letmein" }),
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+
+    expect(response.status).toBe(200);
+    expect(roomNamespace.calls).toHaveLength(1);
+  });
+
   it("refreshes host turn credentials when presented with a valid host bearer token", async () => {
     const roomNamespace = createRoomNamespace((roomId, request) => {
       expect(roomId).toBe("room_demo");

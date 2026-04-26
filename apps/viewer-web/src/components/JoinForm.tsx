@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,18 +6,25 @@ import { Loader2 } from "lucide-react";
 import { useViewerI18n } from "../i18n";
 
 export function JoinForm({
+  initialRoomCode = "",
   isBusy,
   onJoin,
 }: {
+  initialRoomCode?: string;
   isBusy: boolean;
-  onJoin: (roomCode: string) => void;
+  onJoin: (roomCode: string, password: string) => void;
 }) {
   const { copy } = useViewerI18n();
-  const [roomCode, setRoomCode] = useState("");
+  const [roomCode, setRoomCode] = useState(initialRoomCode);
+  const [password, setPassword] = useState("");
+
+  useEffect(() => {
+    setRoomCode(initialRoomCode);
+  }, [initialRoomCode]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onJoin(roomCode.trim());
+    onJoin(roomCode.trim(), password);
   }
 
   return (
@@ -35,6 +42,22 @@ export function JoinForm({
           className="bg-white/50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/50 focus-visible:ring-teal-500"
           autoComplete="off"
           disabled={isBusy}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="roomPassword" className="text-slate-600 dark:text-slate-300">
+          {copy.roomPasswordLabel}
+        </Label>
+        <Input
+          data-testid="viewer-room-password-input"
+          id="roomPassword"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder={copy.roomPasswordPlaceholder}
+          className="bg-white/50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/50 focus-visible:ring-teal-500"
+          autoComplete="off"
+          disabled={isBusy}
+          type="password"
         />
       </div>
       <Button 

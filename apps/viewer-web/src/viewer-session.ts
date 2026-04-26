@@ -61,7 +61,7 @@ export class ViewerSession {
     };
   }
 
-  async join(roomId: string) {
+  async join(roomId: string, password = "") {
     viewerSessionLogger.info("Viewer is joining a room.", {
       apiBaseUrl: this.options.apiBaseUrl,
       roomId,
@@ -116,6 +116,7 @@ export class ViewerSession {
       const joined = await joinRoom(
         this.options.apiBaseUrl,
         roomId,
+        password,
         this.options.fetchFn,
       );
       if (!this.isCurrentGeneration(generation)) {

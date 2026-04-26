@@ -11,6 +11,7 @@ import {
 } from "../../lib/config";
 import {
   refreshHostIce as requestHostIceRefresh,
+  updateRoomAccess,
   type HostIceRefreshResponse,
 } from "../../lib/room-api";
 import {
@@ -382,6 +383,37 @@ export function createHostRoomRuntime(options: {
       turnCredentialExpiresAt: number | null,
     ) {
       return updateIceServers(iceServers, turnCredentialExpiresAt);
+    },
+    async setRoomPassword(password: string) {
+      if (!session) {
+        return {
+          ok: false,
+          snapshot: store.getSnapshot(),
+          error: "room-password-save-failed" as const,
+        };
+      }
+
+      try {
+        await updateRoomAccess(
+          fetchImpl,
+          apiBaseUrl,
+          session.roomId,
+          session.hostToken,
+          password,
+        );
+
+        return {
+          ok: true,
+          snapshot: store.getSnapshot(),
+          error: null,
+        };
+      } catch {
+        return {
+          ok: false,
+          snapshot: store.getSnapshot(),
+          error: "room-password-save-failed" as const,
+        };
+      }
     },
     async setViewerCount(viewerCount: number) {
       if (session) {

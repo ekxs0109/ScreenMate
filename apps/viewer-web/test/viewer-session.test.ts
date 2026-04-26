@@ -225,6 +225,96 @@ describe("ViewerSession", () => {
     });
   });
 
+  it("sends the viewer password when joining a protected room", async () => {
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+
+      if (url.endsWith("/rooms/room_demo") && !init?.method) {
+        return Response.json({
+          roomId: "room_demo",
+          state: "hosting",
+          sourceState: "missing",
+          hostConnected: true,
+          hostSessionId: null,
+          viewerCount: 0,
+          requiresPassword: true,
+        });
+      }
+
+      if (url.endsWith("/rooms/room_demo/join") && init?.method === "POST") {
+        expect(init.headers).toMatchObject({
+          "content-type": "application/json",
+        });
+        expect(init.body).toBe(JSON.stringify({ password: "letmein" }));
+        return Response.json({
+          roomId: "room_demo",
+          sessionId: "viewer_1",
+          viewerToken: "viewer-token",
+          wsUrl: "ws://signal.example/rooms/room_demo/ws",
+          iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
+        });
+      }
+
+      throw new Error(`unexpected request: ${url}`);
+    });
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn,
+      createWebSocket: () => new FakeWebSocket() as never,
+      createPeerConnection: () => new FakePeerConnection() as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo", "letmein");
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      new URL("https://api.example/rooms/room_demo/join"),
+      expect.objectContaining({
+        body: JSON.stringify({ password: "letmein" }),
+      }),
+    );
+  });
+
+  it("surfaces password-required errors without forgetting the room id", async () => {
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+
+        if (url.endsWith("/rooms/room_demo") && !init?.method) {
+          return Response.json({
+            roomId: "room_demo",
+            state: "hosting",
+            sourceState: "missing",
+            hostConnected: true,
+            hostSessionId: null,
+            viewerCount: 0,
+            requiresPassword: true,
+          });
+        }
+
+        if (url.endsWith("/rooms/room_demo/join") && init?.method === "POST") {
+          return Response.json({ error: "ROOM_PASSWORD_REQUIRED" }, { status: 403 });
+        }
+
+        throw new Error(`unexpected request: ${url}`);
+      },
+      createWebSocket: () => new FakeWebSocket() as never,
+      createPeerConnection: () => new FakePeerConnection() as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+
+    expect(session.getSnapshot()).toMatchObject({
+      roomId: "room_demo",
+      status: "error",
+      errorCode: "ROOM_PASSWORD_REQUIRED",
+    });
+  });
+
   it("sends viewer-profile when the signaling socket opens", async () => {
     const socket = new FakeWebSocket();
     const peer = new FakePeerConnection();

@@ -54,6 +54,7 @@ function App() {
     startOrAttach,
     stopRoom,
     sendChatMessage,
+    saveRoomPassword,
     isBusy,
     busyAction,
     isRefreshing,
@@ -212,7 +213,11 @@ function App() {
           await stopRoom();
           setSourceTab();
         }}
-        onSavePassword={markPasswordSaved}
+        onSavePassword={async () => {
+          if (await saveRoomPassword(passwordDraft)) {
+            markPasswordSaved();
+          }
+        }}
         onPasswordChange={setPasswordDraft}
         onCopyLink={() => {
           if (viewerRoomUrl) {

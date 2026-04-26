@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { RoomObject, RoomState } from "../src/do/room-object";
+import { hashRoomPassword } from "../src/lib/room-password";
 
 class TestSocket {
   private peer: TestSocket | null = null;
@@ -511,6 +512,80 @@ describe("RoomObject", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("requires the saved room password before issuing a viewer join validation", async () => {
+    const { state } = createDurableObjectState();
+    const roomObject = new RoomObject(state, {} as never);
+    await initializeRoomObject(roomObject);
+
+    const passwordHash = await hashRoomPassword("letmein");
+    const accessResponse = await roomObject.fetch(
+      new Request("https://room.internal/internal/access", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passwordHash }),
+      }),
+    );
+    const missingPasswordResponse = await roomObject.fetch(
+      new Request("https://room.internal/internal/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "" }),
+      }),
+    );
+    const wrongPasswordResponse = await roomObject.fetch(
+      new Request("https://room.internal/internal/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "wrong" }),
+      }),
+    );
+    const correctPasswordResponse = await roomObject.fetch(
+      new Request("https://room.internal/internal/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "letmein" }),
+      }),
+    );
+    const clearAccessResponse = await roomObject.fetch(
+      new Request("https://room.internal/internal/access", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passwordHash: null }),
+      }),
+    );
+    const unprotectedJoinResponse = await roomObject.fetch(
+      new Request("https://room.internal/internal/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "" }),
+      }),
+    );
+
+    expect(accessResponse.status).toBe(200);
+    expect(await accessResponse.json()).toEqual({
+      roomId: "room_demo",
+      requiresPassword: true,
+    });
+    expect(missingPasswordResponse.status).toBe(403);
+    expect(await missingPasswordResponse.json()).toMatchObject({
+      error: "ROOM_PASSWORD_REQUIRED",
+    });
+    expect(wrongPasswordResponse.status).toBe(403);
+    expect(await wrongPasswordResponse.json()).toMatchObject({
+      error: "ROOM_PASSWORD_INVALID",
+    });
+    expect(correctPasswordResponse.status).toBe(200);
+    expect(await correctPasswordResponse.json()).toMatchObject({
+      roomId: "room_demo",
+      state: "degraded",
+    });
+    expect(await clearAccessResponse.json()).toEqual({
+      roomId: "room_demo",
+      requiresPassword: false,
+    });
+    expect(unprotectedJoinResponse.status).toBe(200);
   });
 
   it("keeps room activity deleted after host-left when an activity persist was queued", async () => {
@@ -1327,9 +1402,10 @@ describe("RoomObject", () => {
       });
       const roomObject = new RoomObject(state, {} as never);
 
-      await roomObject.fetch(
+      const stateResponse = await roomObject.fetch(
         new Request("https://room.internal/internal/state", { method: "GET" }),
       );
+      const stateBody = (await stateResponse.json()) as { requiresPassword: boolean };
       await sendHostHeartbeat(roomObject);
 
       const normalized = await storage.get<{
@@ -1339,6 +1415,7 @@ describe("RoomObject", () => {
 
       expect(Number.isFinite(normalized?.maxExpiresAt)).toBe(true);
       expect(Number.isFinite(normalized?.expiresAt)).toBe(true);
+      expect(stateBody.requiresPassword).toBe(false);
       expect(normalized?.maxExpiresAt).toBeGreaterThanOrEqual(
         normalized?.expiresAt ?? 0,
       );
@@ -1686,6 +1763,7 @@ describe("RoomState", () => {
       viewerCount: 0,
       state: "degraded",
       sourceState: "missing",
+      requiresPassword: false,
     });
   });
 
@@ -1710,6 +1788,7 @@ describe("RoomState", () => {
       viewerCount: 1,
       state: "degraded",
       sourceState: "missing",
+      requiresPassword: false,
     });
   });
 
@@ -1763,6 +1842,7 @@ describe("RoomState", () => {
       viewerCount: 1,
       state: "degraded",
       sourceState: "recovering",
+      requiresPassword: false,
     });
     expect(
       viewer.client.messages.filter(
@@ -1935,6 +2015,7 @@ describe("RoomState", () => {
       viewerCount: 0,
       state: "closed",
       sourceState: "missing",
+      requiresPassword: false,
     });
     expect(
       viewer.client.messages.some(

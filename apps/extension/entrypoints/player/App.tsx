@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef, ChangeEvent } from "react";
 import { useTheme } from "next-themes";
+import DPlayer from "dplayer";
 import { 
   Video, 
   Users, 
@@ -30,6 +31,7 @@ import {
   Maximize
 } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { HeaderControls } from "../../components/header-controls";
 import { getExtensionDictionary } from "../popup/i18n";
 import { usePopupUiStore } from "../popup/popup-ui-store";
 import { buildExtensionSceneModel } from "../popup/scene-adapter";
@@ -45,6 +47,9 @@ export default function PlayerApp() {
   const [activeTab, setActiveTab] = useState<'chat' | 'viewers'>('chat');
   const [language, setLanguage] = useState("en");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<DPlayer | null>(null);
+  const fileUrlRef = useRef<string | null>(null);
   
   // Random username generator 
   const [username, setUsername] = useState("Host");
@@ -74,6 +79,28 @@ export default function PlayerApp() {
     }), [snapshot, isBusy, busyAction]
   );
 
+  const clearPlayerSurface = () => {
+    const player = playerRef.current;
+    if (!player) {
+      return;
+    }
+
+    const video =
+      player.video ??
+      playerContainerRef.current?.querySelector("video") ??
+      null;
+
+    if (video) {
+      video.pause?.();
+      video.srcObject = null;
+      video.removeAttribute("src");
+      video.load?.();
+    }
+
+    player.destroy();
+    playerRef.current = null;
+  };
+
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && file.type.startsWith('video/')) {
@@ -91,11 +118,23 @@ export default function PlayerApp() {
   };
 
   const handleLoadFile = (file: File) => {
-    if (fileUrl) URL.revokeObjectURL(fileUrl);
+    if (fileUrlRef.current) {
+      URL.revokeObjectURL(fileUrlRef.current);
+    }
     const url = URL.createObjectURL(file);
+    fileUrlRef.current = url;
     setFileUrl(url);
     setLocalFile({ name: file.name, size: file.size, type: file.type });
     appendLocalMessage(`已加载本地视频: ${file.name} (Loaded local video)`);
+  };
+
+  const handleClearFile = () => {
+    if (fileUrlRef.current) {
+      URL.revokeObjectURL(fileUrlRef.current);
+      fileUrlRef.current = null;
+    }
+    setFileUrl(null);
+    clearLocalFile();
   };
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -117,6 +156,42 @@ export default function PlayerApp() {
     const nextTheme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
     setTheme(nextTheme);
   };
+
+  useEffect(() => {
+    return () => {
+      clearPlayerSurface();
+      if (fileUrlRef.current) {
+        URL.revokeObjectURL(fileUrlRef.current);
+        fileUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    clearPlayerSurface();
+
+    const container = playerContainerRef.current;
+    if (!fileUrl || !container) {
+      return;
+    }
+
+    const nextPlayer = new DPlayer({
+      autoplay: true,
+      container,
+      mutex: false,
+      video: {
+        url: fileUrl,
+      },
+    });
+
+    playerRef.current = nextPlayer;
+
+    return () => {
+      if (playerRef.current === nextPlayer) {
+        clearPlayerSurface();
+      }
+    };
+  }, [fileUrl]);
 
   return (
     <div className="w-full min-h-screen bg-zinc-200/50 dark:bg-zinc-950 p-0 sm:p-4 lg:p-8 flex flex-col font-sans transition-colors">
@@ -162,11 +237,10 @@ export default function PlayerApp() {
         >
           {fileUrl ? (
             <div className="absolute inset-0 w-full h-full flex items-center justify-center group overflow-hidden bg-black">
-              <video 
-                src={fileUrl} 
-                className="absolute inset-0 w-full h-full outline-none"
-                controls 
-                autoPlay
+              <div
+                ref={playerContainerRef}
+                data-testid="extension-player-video"
+                className="absolute inset-0 h-full w-full outline-none [&_.dplayer]:h-full [&_.dplayer]:w-full [&_.dplayer-video-wrap]:h-full [&_video]:h-full [&_video]:w-full [&_video]:object-contain"
               />
               
               {/* Custom floating title overlay on hover */}
@@ -183,8 +257,7 @@ export default function PlayerApp() {
                 <button 
                   onClick={(e) => {
                     e.stopPropagation();
-                    setFileUrl(null);
-                    clearLocalFile();
+                    handleClearFile();
                   }}
                   className="px-4 py-2 bg-black/50 hover:bg-black/80 text-white rounded-lg backdrop-blur border border-white/10 text-sm font-medium transition-colors pointer-events-auto"
                 >
@@ -380,4 +453,3 @@ export default function PlayerApp() {
     </div>
   );
 }
-

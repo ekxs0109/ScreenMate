@@ -96,6 +96,12 @@ export function buildSendChatMessageRequest(
   return { type: "screenmate:send-chat-message", text };
 }
 
+export function buildSetRoomPasswordRequest(
+  password: string,
+): Extract<HostMessage, { type: "screenmate:set-room-password" }> {
+  return { type: "screenmate:set-room-password", password };
+}
+
 export function useHostControls({
   persistedSelectedVideoId,
   onSelectedVideoChange,
@@ -483,11 +489,46 @@ export function useHostControls({
         setSnapshot(normalizeSnapshot(response.snapshot));
       }
 
-      return isRecord(response) && response.ok === true;
+      const ok = isRecord(response) && response.ok === true;
+      if (!ok) {
+        setSnapshot((current) =>
+          createHostRoomSnapshot({
+            ...current,
+            message: "Could not save the room password.",
+          }),
+        );
+      }
+
+      return ok;
     } catch (error) {
       popupLogger.warn("Could not send room chat message.", {
         error: error instanceof Error ? error.message : String(error),
       });
+      return false;
+    }
+  };
+
+  const saveRoomPassword = async (password: string) => {
+    try {
+      const response = await browser.runtime.sendMessage(
+        buildSetRoomPasswordRequest(password),
+      );
+
+      if (isRecord(response) && "snapshot" in response) {
+        setSnapshot(normalizeSnapshot(response.snapshot));
+      }
+
+      return isRecord(response) && response.ok === true;
+    } catch (error) {
+      popupLogger.warn("Could not save room password.", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      setSnapshot((current) =>
+        createHostRoomSnapshot({
+          ...current,
+          message: "Could not save the room password.",
+        }),
+      );
       return false;
     }
   };
@@ -509,6 +550,7 @@ export function useHostControls({
     startOrAttach,
     stopRoom,
     sendChatMessage,
+    saveRoomPassword,
     isBusy: busyAction !== null,
     busyAction,
     isRefreshing: isSniffRefreshing || isManualRefreshPending,
