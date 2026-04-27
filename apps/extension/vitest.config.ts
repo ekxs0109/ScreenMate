@@ -2,7 +2,16 @@ import { defineConfig } from "vitest/config";
 import { WxtVitest } from "wxt/testing/vitest-plugin";
 
 export default defineConfig({
-  plugins: [WxtVitest()],
+  plugins: [
+    WxtVitest({
+      dev: {
+        server: {
+          host: "127.0.0.1",
+          origin: "127.0.0.1",
+        },
+      },
+    }),
+  ],
   test: {
     setupFiles: ["./test/setup/browser.ts"],
   },

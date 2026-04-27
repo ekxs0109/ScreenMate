@@ -284,7 +284,7 @@ export default defineContentScript({
 export function createVideoChangeNotifier({
   debounceMs = 500,
   highFrequencyLifetimeMs = 15_000,
-  lowFrequencyPollIntervalMs = 10_000,
+  lowFrequencyPollIntervalMs = 2_000,
   notify,
   pollIntervalMs = 1_000,
 }: {

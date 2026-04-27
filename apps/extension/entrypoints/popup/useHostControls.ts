@@ -17,6 +17,7 @@ import { createLogger } from "../../lib/logger";
 
 const popupLogger = createLogger("popup");
 const MANUAL_REFRESH_SPINNER_MIN_MS = 650;
+const CONTENT_READY_CACHE_SYNC_DELAY_MS = 100;
 
 type BusyAction = "primary" | "stop" | null;
 type SniffTabSummary = {
@@ -237,6 +238,16 @@ export function useHostControls({
             error: error instanceof Error ? error.message : String(error),
           });
         });
+    const contentReadySyncTimers = new Set<ReturnType<typeof setTimeout>>();
+    const scheduleContentReadyCacheSync = () => {
+      const timer = setTimeout(() => {
+        contentReadySyncTimers.delete(timer);
+        if (!isCancelled) {
+          void syncCachedVideoSniffState();
+        }
+      }, CONTENT_READY_CACHE_SYNC_DELAY_MS);
+      contentReadySyncTimers.add(timer);
+    };
 
     const ensureVideoSniffState = () =>
       browser.runtime
@@ -298,9 +309,10 @@ export function useHostControls({
       }
 
       if (message.type === "screenmate:content-ready") {
-        popupLogger.debug("Received content notification. Waiting for sniff state storage update.", {
+        popupLogger.debug("Received content notification. Scheduling sniff state cache sync.", {
           type: message.type,
         });
+        scheduleContentReadyCacheSync();
         return;
       }
 
@@ -337,6 +349,10 @@ export function useHostControls({
       browser.tabs.onActivated.removeListener(handleTabActivated);
       browser.tabs.onUpdated.removeListener(handleTabUpdated);
       browser.runtime.onMessage.removeListener(handleMessage);
+      for (const timer of contentReadySyncTimers) {
+        clearTimeout(timer);
+      }
+      contentReadySyncTimers.clear();
     };
   }, []);
 

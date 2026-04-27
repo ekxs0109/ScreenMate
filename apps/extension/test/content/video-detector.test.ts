@@ -399,6 +399,7 @@ describe("createVideoMessageListener", () => {
 
 describe("createVideoChangeNotifier", () => {
   afterEach(() => {
+    document.body.innerHTML = "";
     vi.useRealTimers();
   });
 
@@ -442,6 +443,40 @@ describe("createVideoChangeNotifier", () => {
     expect(notify).toHaveBeenCalledTimes(1);
 
     video.dispatchEvent(new Event("loadedmetadata"));
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    notifier.stop();
+  });
+
+  it("keeps polling source changes promptly after the high-frequency window", async () => {
+    vi.useFakeTimers();
+    const notify = vi.fn();
+    const notifier = createVideoChangeNotifier({
+      debounceMs: 100,
+      highFrequencyLifetimeMs: 250,
+      notify,
+      pollIntervalMs: 50,
+    });
+    const video = document.createElement("video");
+    Object.defineProperty(video, "currentSrc", {
+      configurable: true,
+      value: "",
+    });
+    document.body.appendChild(video);
+
+    notifier.start();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(250);
+    Object.defineProperty(video, "currentSrc", {
+      configurable: true,
+      value: "https://example.com/next.mp4",
+    });
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
     await vi.advanceTimersByTimeAsync(100);
 
     expect(notify).toHaveBeenCalledTimes(2);
