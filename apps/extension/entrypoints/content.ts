@@ -68,12 +68,16 @@ type ListenerResponse =
 
 const contentLogger = createLogger("content");
 const VIDEO_CHANGE_EVENT_NAMES = [
+  "abort",
   "loadedmetadata",
   "loadeddata",
+  "loadstart",
   "canplay",
   "durationchange",
+  "error",
   "resize",
   "emptied",
+  "stalled",
 ] as const;
 
 export function createVideoMessageListener(
@@ -301,6 +305,8 @@ export function createVideoChangeNotifier({
   let lastSeenVideoCount = 0;
   let lastSeenSrcSignature = "";
   const trackedVideos = new Set<HTMLVideoElement>();
+  const srcObjectIds = new WeakMap<object, number>();
+  let nextSrcObjectId = 1;
 
   const scheduleNotify = (reason: string) => {
     if (debounceTimer) {
@@ -383,6 +389,11 @@ export function createVideoChangeNotifier({
     }
     pollInterval = setInterval(checkLandscape, intervalMs);
   };
+  const handlePageLifecycleEvent = (event: Event) => {
+    scheduleNotify(
+      event.type === "wxt:locationchange" ? "location-change" : event.type,
+    );
+  };
 
   return {
     start() {
@@ -395,10 +406,23 @@ export function createVideoChangeNotifier({
       });
       mutationObserver.observe(document.documentElement, {
         attributes: true,
-        attributeFilter: ["src", "poster", "style", "class", "hidden"],
+        attributeFilter: [
+          "src",
+          "srcset",
+          "poster",
+          "type",
+          "style",
+          "class",
+          "hidden",
+        ],
         childList: true,
         subtree: true,
       });
+      window.addEventListener("hashchange", handlePageLifecycleEvent);
+      window.addEventListener("pageshow", handlePageLifecycleEvent);
+      window.addEventListener("popstate", handlePageLifecycleEvent);
+      window.addEventListener("wxt:locationchange", handlePageLifecycleEvent);
+      document.addEventListener("visibilitychange", handlePageLifecycleEvent);
       startPolling(pollIntervalMs);
       highFrequencyTimeout = setTimeout(() => {
         if (lowFrequencyPollIntervalMs === null) {
@@ -427,6 +451,11 @@ export function createVideoChangeNotifier({
       }
       mutationObserver?.disconnect();
       mutationObserver = null;
+      window.removeEventListener("hashchange", handlePageLifecycleEvent);
+      window.removeEventListener("pageshow", handlePageLifecycleEvent);
+      window.removeEventListener("popstate", handlePageLifecycleEvent);
+      window.removeEventListener("wxt:locationchange", handlePageLifecycleEvent);
+      document.removeEventListener("visibilitychange", handlePageLifecycleEvent);
       for (const video of Array.from(trackedVideos)) {
         for (const eventName of VIDEO_CHANGE_EVENT_NAMES) {
           video.removeEventListener(eventName, handleVideoEvent);
@@ -435,6 +464,44 @@ export function createVideoChangeNotifier({
       trackedVideos.clear();
     },
   };
+
+  function getSrcObjectId(srcObject: object | null) {
+    if (!srcObject) {
+      return "";
+    }
+
+    const existingId = srcObjectIds.get(srcObject);
+    if (existingId) {
+      return `object:${existingId}`;
+    }
+
+    const nextId = nextSrcObjectId++;
+    srcObjectIds.set(srcObject, nextId);
+    return `object:${nextId}`;
+  }
+
+  function getVideoSrcSignature(): string {
+    return collectPageVideos()
+      .map((video) => {
+        const sourceChildSignature = Array.from(
+          video.querySelectorAll("source"),
+        )
+          .map(
+            (source) =>
+              `${source.getAttribute("src") ?? ""}:${source.getAttribute("type") ?? ""}`,
+          )
+          .join(",");
+
+        return [
+          getVideoHandle(video),
+          video.currentSrc || video.src || "",
+          video.getAttribute("poster") ?? "",
+          getSrcObjectId(video.srcObject),
+          sourceChildSignature,
+        ].join(":");
+      })
+      .join("|");
+  }
 }
 
 function buildContentReadyVideos() {
@@ -464,15 +531,4 @@ function buildContentReadyVideos() {
     }),
     fingerprint: candidate.fingerprint,
   }));
-}
-
-/**
- * Build a simple signature from the src/currentSrc of all page videos.
- * When any video's source changes (e.g. a blob URL is assigned) the
- * signature changes, triggering a content-ready re-notification.
- */
-function getVideoSrcSignature(): string {
-  return collectPageVideos()
-    .map((v) => `${getVideoHandle(v)}:${v.currentSrc || v.src || ""}`)
-    .join("|");
 }

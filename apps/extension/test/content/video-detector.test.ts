@@ -449,6 +449,28 @@ describe("createVideoChangeNotifier", () => {
     notifier.stop();
   });
 
+  it("notifies on SPA location changes without waiting for polling", async () => {
+    vi.useFakeTimers();
+    const notify = vi.fn();
+    const notifier = createVideoChangeNotifier({
+      debounceMs: 100,
+      highFrequencyLifetimeMs: 15_000,
+      notify,
+      pollIntervalMs: 1_000,
+    });
+
+    notifier.start();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(new Event("wxt:locationchange"));
+    await vi.advanceTimersByTimeAsync(99);
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(notify).toHaveBeenCalledTimes(2);
+    notifier.stop();
+  });
+
   it("keeps polling source changes promptly after the high-frequency window", async () => {
     vi.useFakeTimers();
     const notify = vi.fn();
@@ -477,6 +499,32 @@ describe("createVideoChangeNotifier", () => {
     expect(notify).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    notifier.stop();
+  });
+
+  it("detects srcObject changes as a media landscape change", async () => {
+    vi.useFakeTimers();
+    const notify = vi.fn();
+    const notifier = createVideoChangeNotifier({
+      debounceMs: 100,
+      highFrequencyLifetimeMs: 15_000,
+      notify,
+      pollIntervalMs: 1_000,
+    });
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+
+    notifier.start();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(video, "srcObject", {
+      configurable: true,
+      value: {},
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
     await vi.advanceTimersByTimeAsync(100);
 
     expect(notify).toHaveBeenCalledTimes(2);
