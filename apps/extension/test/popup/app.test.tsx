@@ -127,6 +127,65 @@ describe("ExtensionPopupPresenter", () => {
     ).toBeNull();
   });
 
+  it("reattaches the selected source when changing source in an active room", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        viewerCount: 1,
+      }),
+      videos: [
+        { id: "screenmate-video-1", tabId: 42, frameId: 0, label: "Bilibili video" },
+      ],
+      selectedVideoId: "42:0:screenmate-video-1",
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: createExtensionMockState(),
+    });
+    const onStartOrAttach = vi.fn();
+    const onSelectTab = vi.fn();
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={onSelectTab}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onSelectLocalFile={vi.fn()}
+        onClearLocalFile={vi.fn()}
+        onStartOrAttach={onStartOrAttach}
+        onStopRoom={vi.fn()}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cambiar Fuente" }));
+
+    expect(onStartOrAttach).toHaveBeenCalledTimes(1);
+    expect(onSelectTab).not.toHaveBeenCalledWith("room");
+  });
+
   it("previews sniff cards on hover without selecting them", () => {
     const scene = buildExtensionSceneModel({
       snapshot: createHostRoomSnapshot(),

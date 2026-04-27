@@ -400,7 +400,7 @@ export function ExtensionPopupPresenter({
                     <button onClick={() => onSelectTab("room")} className="flex-1 py-3.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900/80 dark:hover:bg-zinc-800 text-sm font-bold rounded-xl transition-colors border border-transparent flex items-center justify-center text-foreground" type="button">
                       {copy.cancel}
                     </button>
-                    <button onClick={() => onSelectTab("room")} className="flex-1 py-3.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2" type="button">
+                    <button onClick={onStartOrAttach} className="flex-1 py-3.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none" disabled={scene.footer.primaryDisabled} type="button">
                       <RefreshCw className="w-4 h-4" />
                       {copy.changeSource}
                     </button>
