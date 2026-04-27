@@ -79,6 +79,11 @@ const VIDEO_CHANGE_EVENT_NAMES = [
   "emptied",
   "stalled",
 ] as const;
+const VIDEO_THUMBNAIL_REFRESH_EVENT_NAMES = [
+  "playing",
+  "seeked",
+  "timeupdate",
+] as const;
 
 export function createVideoMessageListener(
   sourceAttachmentRuntime?: ReturnType<typeof createSourceAttachmentRuntime>,
@@ -290,12 +295,14 @@ export function createVideoChangeNotifier({
   highFrequencyLifetimeMs = 15_000,
   lowFrequencyPollIntervalMs = 2_000,
   notify,
+  thumbnailRefreshMinMs = 8_000,
   pollIntervalMs = 1_000,
 }: {
   debounceMs?: number;
   highFrequencyLifetimeMs?: number;
   lowFrequencyPollIntervalMs?: number | null;
   notify: (reason?: string) => void;
+  thumbnailRefreshMinMs?: number;
   pollIntervalMs?: number;
 }) {
   let mutationObserver: MutationObserver | null = null;
@@ -305,6 +312,7 @@ export function createVideoChangeNotifier({
   let lastSeenVideoCount = 0;
   let lastSeenSrcSignature = "";
   const trackedVideos = new Set<HTMLVideoElement>();
+  const lastThumbnailRefreshAtByVideo = new WeakMap<HTMLVideoElement, number>();
   const srcObjectIds = new WeakMap<object, number>();
   let nextSrcObjectId = 1;
 
@@ -324,6 +332,24 @@ export function createVideoChangeNotifier({
   const handleVideoEvent = (event: Event) => {
     scheduleNotify(`video-${event.type}`);
   };
+  const handleThumbnailRefreshEvent = (event: Event) => {
+    if (!(event.currentTarget instanceof HTMLVideoElement)) {
+      return;
+    }
+
+    const video = event.currentTarget;
+    const now = Date.now();
+    const lastRefreshAt = lastThumbnailRefreshAtByVideo.get(video) ?? 0;
+    if (
+      event.type === "timeupdate" &&
+      now - lastRefreshAt < thumbnailRefreshMinMs
+    ) {
+      return;
+    }
+
+    lastThumbnailRefreshAtByVideo.set(video, now);
+    scheduleNotify(`video-thumbnail-${event.type}`);
+  };
 
   const trackVideo = (video: HTMLVideoElement) => {
     if (trackedVideos.has(video)) {
@@ -333,6 +359,9 @@ export function createVideoChangeNotifier({
     trackedVideos.add(video);
     for (const eventName of VIDEO_CHANGE_EVENT_NAMES) {
       video.addEventListener(eventName, handleVideoEvent);
+    }
+    for (const eventName of VIDEO_THUMBNAIL_REFRESH_EVENT_NAMES) {
+      video.addEventListener(eventName, handleThumbnailRefreshEvent);
     }
   };
 
@@ -344,6 +373,9 @@ export function createVideoChangeNotifier({
 
       for (const eventName of VIDEO_CHANGE_EVENT_NAMES) {
         video.removeEventListener(eventName, handleVideoEvent);
+      }
+      for (const eventName of VIDEO_THUMBNAIL_REFRESH_EVENT_NAMES) {
+        video.removeEventListener(eventName, handleThumbnailRefreshEvent);
       }
       trackedVideos.delete(video);
     }
@@ -459,6 +491,9 @@ export function createVideoChangeNotifier({
       for (const video of Array.from(trackedVideos)) {
         for (const eventName of VIDEO_CHANGE_EVENT_NAMES) {
           video.removeEventListener(eventName, handleVideoEvent);
+        }
+        for (const eventName of VIDEO_THUMBNAIL_REFRESH_EVENT_NAMES) {
+          video.removeEventListener(eventName, handleThumbnailRefreshEvent);
         }
       }
       trackedVideos.clear();

@@ -449,6 +449,58 @@ describe("createVideoChangeNotifier", () => {
     notifier.stop();
   });
 
+  it("notifies when playback starts so the thumbnail can refresh", async () => {
+    vi.useFakeTimers();
+    const notify = vi.fn();
+    const notifier = createVideoChangeNotifier({
+      debounceMs: 100,
+      highFrequencyLifetimeMs: 15_000,
+      notify,
+      pollIntervalMs: 1_000,
+    });
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+
+    notifier.start();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    video.dispatchEvent(new Event("playing"));
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    notifier.stop();
+  });
+
+  it("throttles timeupdate thumbnail refreshes while video keeps playing", async () => {
+    vi.useFakeTimers();
+    const notify = vi.fn();
+    const notifier = createVideoChangeNotifier({
+      debounceMs: 100,
+      highFrequencyLifetimeMs: 15_000,
+      notify,
+      pollIntervalMs: 1_000,
+      thumbnailRefreshMinMs: 1_000,
+    });
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+
+    notifier.start();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    video.dispatchEvent(new Event("timeupdate"));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(notify).toHaveBeenCalledTimes(2);
+
+    video.dispatchEvent(new Event("timeupdate"));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(notify).toHaveBeenCalledTimes(2);
+
+    video.dispatchEvent(new Event("timeupdate"));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(notify).toHaveBeenCalledTimes(3);
+    notifier.stop();
+  });
+
   it("notifies on SPA location changes without waiting for polling", async () => {
     vi.useFakeTimers();
     const notify = vi.fn();
