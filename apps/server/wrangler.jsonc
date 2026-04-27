@@ -3,6 +3,9 @@
   "name": "screenmate-cloudflare",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
+  "alias": {
+    "@screenmate/shared": "../../packages/shared/src/index.ts"
+  },
   "durable_objects": {
     "bindings": [{ "name": "ROOM_OBJECT", "class_name": "RoomObject" }]
   },
