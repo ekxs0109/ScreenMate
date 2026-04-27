@@ -494,10 +494,25 @@ export class RoomState {
 
   private relayToTarget(envelope: SignalEnvelope, targetSessionId: string) {
     const target = this.findConnection(targetSessionId);
+    console.log("[ScreenMate:server:room] Relaying signaling message.", {
+      fromRole: envelope.role,
+      fromSessionId: envelope.sessionId,
+      messageType: envelope.messageType,
+      roomId: this.roomId,
+      targetExists: Boolean(target),
+      targetSessionId,
+    });
 
     if (!target) {
       const sender = this.findConnection(envelope.sessionId);
       if (sender && envelope.messageType !== "negotiation-failed") {
+        console.warn("[ScreenMate:server:room] Signaling target unavailable.", {
+          fromRole: envelope.role,
+          fromSessionId: envelope.sessionId,
+          messageType: envelope.messageType,
+          roomId: this.roomId,
+          targetSessionId,
+        });
         this.send(
           sender,
           this.negotiationFailedEnvelope(
@@ -940,9 +955,15 @@ export class RoomObject {
     }
 
     if (url.pathname === "/internal/join" && request.method === "POST") {
-      const body = await request.json().catch(() => ({})) as { password?: unknown };
+      const body = await request.json().catch(() => ({})) as {
+        allowExistingViewer?: unknown;
+        password?: unknown;
+      };
       const password = typeof body.password === "string" ? body.password : "";
-      const validation = await roomState.validateViewerJoin(password);
+      const validation =
+        body.allowExistingViewer === true
+          ? roomState.validateViewerConnection()
+          : await roomState.validateViewerJoin(password);
 
       if (!validation.ok) {
         return Response.json(validation.body, { status: validation.status });

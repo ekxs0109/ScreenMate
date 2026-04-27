@@ -94,14 +94,33 @@ app.get("/rooms/:roomId", async (c) => {
 
 app.post("/rooms/:roomId/join", async (c) => {
   const roomId = c.req.param("roomId");
-  const body = await c.req.json().catch(() => ({})) as { password?: unknown };
+  const body = await c.req.json().catch(() => ({})) as {
+    password?: unknown;
+    previousViewerToken?: unknown;
+  };
   const password = typeof body.password === "string" ? body.password : "";
+  const previousViewerToken =
+    typeof body.previousViewerToken === "string" ? body.previousViewerToken : "";
+  const previousViewerClaims = previousViewerToken
+    ? await verifyScopedToken(previousViewerToken, {
+        secret: getRoomTokenSecret(c.env),
+        now: Math.floor(getNow(c.env) / 1_000),
+      })
+    : null;
+  const reusableViewerSessionId =
+    previousViewerClaims?.roomId === roomId &&
+    previousViewerClaims.role === "viewer"
+      ? previousViewerClaims.sessionId
+      : null;
   const roomObject = getRoomObject(c.env, roomId);
   const joinValidation = await roomObject.fetch(
     buildInternalRequest("/internal/join", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({
+        password,
+        allowExistingViewer: reusableViewerSessionId !== null,
+      }),
     }),
   );
 
@@ -110,7 +129,7 @@ app.post("/rooms/:roomId/join", async (c) => {
   }
 
   const now = getNow(c.env);
-  const viewerSessionId = `viewer_${nanoid(12)}`;
+  const viewerSessionId = reusableViewerSessionId ?? `viewer_${nanoid(12)}`;
   const viewerToken = await issueScopedToken(
     {
       roomId,

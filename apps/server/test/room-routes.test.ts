@@ -242,6 +242,61 @@ describe("room routes", () => {
     expect(body.turnCredentialExpiresAt).toBe(TEST_NOW + 10 * 60 * 1_000);
   });
 
+  it("reuses a valid previous viewer token when rejoining the same room", async () => {
+    const previousViewerToken = await issueScopedToken(
+      {
+        roomId: "room_demo",
+        role: "viewer",
+        sessionId: "viewer_existing",
+      },
+      {
+        secret: TEST_SECRET,
+        now: Math.floor(TEST_NOW / 1_000),
+        ttlSeconds: 12 * 60 * 60,
+      },
+    );
+    const roomNamespace = createRoomNamespace((roomId, request) => {
+      expect(roomId).toBe("room_demo");
+      expect(new URL(request.url).pathname).toBe("/internal/join");
+      expect(request.method).toBe("POST");
+
+      return Response.json({
+        roomId,
+        state: "hosting",
+        hostConnected: true,
+        viewerCount: 1,
+      });
+    });
+    const response = await app.request(
+      "/rooms/room_demo/join",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ previousViewerToken }),
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        TURN_AUTH_SECRET: "turn-secret",
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+    const body = (await response.json()) as {
+      sessionId: string;
+      viewerToken: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.sessionId).toBe("viewer_existing");
+
+    const payload = await verifyScopedToken(body.viewerToken, {
+      secret: TEST_SECRET,
+      now: Math.floor(TEST_NOW / 1_000),
+    });
+
+    expect(payload?.sessionId).toBe("viewer_existing");
+  });
+
   it("stores host access password through a validated host bearer token", async () => {
     const roomNamespace = createRoomNamespace(async (roomId, request) => {
       expect(roomId).toBe("room_demo");

@@ -46,6 +46,7 @@ export default function PlayerApp() {
   const [chatInput, setChatInput] = useState("");
   const [activeTab, setActiveTab] = useState<'chat' | 'viewers'>('chat');
   const [language, setLanguage] = useState("en");
+  const [isWebFullscreen, setIsWebFullscreen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<DPlayer | null>(null);
@@ -186,6 +187,12 @@ export default function PlayerApp() {
 
     playerRef.current = nextPlayer;
 
+    const handleWebFullscreen = () => setIsWebFullscreen(true);
+    const handleWebFullscreenCancel = () => setIsWebFullscreen(false);
+
+    nextPlayer.on("webfullscreen", handleWebFullscreen);
+    nextPlayer.on("webfullscreen_cancel", handleWebFullscreenCancel);
+
     return () => {
       if (playerRef.current === nextPlayer) {
         clearPlayerSurface();
@@ -296,7 +303,7 @@ export default function PlayerApp() {
         </div>
 
         {/* Right Side: Real-time Sidebar */}
-        <div className="flex-1 lg:flex-none lg:w-[400px] bg-card flex flex-col shrink-0 shadow-[-10px_0_30px_rgba(0,0,0,0.05)] relative z-20">
+        <div className={cn("flex-1 lg:flex-none lg:w-[400px] bg-card flex flex-col shrink-0 shadow-[-10px_0_30px_rgba(0,0,0,0.05)] relative z-20", isWebFullscreen && "hidden")}>
           <div className="flex shrink-0 px-3 pt-3 bg-zinc-50/80 dark:bg-zinc-950/80 border-b border-border gap-3">
              <button 
                onClick={() => setActiveTab('chat')}

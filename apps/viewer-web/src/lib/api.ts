@@ -35,12 +35,16 @@ export async function joinRoom(
   baseUrl: string,
   roomId: string,
   password = "",
+  previousViewerToken?: string | null,
   fetchFn: typeof fetch = fetch,
 ): Promise<JoinRoomResponse> {
   const response = await fetchFn(new URL(`/rooms/${roomId}/join`, baseUrl), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({
+      password,
+      ...(previousViewerToken ? { previousViewerToken } : {}),
+    }),
   });
 
   if (!response.ok) {

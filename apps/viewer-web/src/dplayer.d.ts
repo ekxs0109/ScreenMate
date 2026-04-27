@@ -21,6 +21,7 @@ declare module "dplayer" {
     readonly container: HTMLElement;
     readonly options: DPlayerOptions;
     readonly video: HTMLVideoElement;
+    on(event: string, handler: () => void): void;
     destroy(): void;
   }
 }

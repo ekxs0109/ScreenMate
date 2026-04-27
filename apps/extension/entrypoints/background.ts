@@ -952,10 +952,28 @@ async function attachSourceInFrame(
 ) {
   const roomSession = await getAttachSessionForNegotiation(dependencies);
   if (!roomSession) {
+    backgroundLogger.warn("Manual source attach skipped because no room session is available.", {
+      frameId: message.frameId,
+      tabId,
+      videoId: message.videoId,
+    });
     return dependencies.runtime.getSnapshot();
   }
 
   const snapshot = dependencies.runtime.getSnapshot();
+  backgroundLogger.info("Manual source attach requested.", {
+    activeFrameId: snapshot.activeFrameId,
+    activeTabId: snapshot.activeTabId,
+    frameId: message.frameId,
+    roomId: roomSession.roomId,
+    sourceState: snapshot.sourceState,
+    tabId,
+    videoId: message.videoId,
+    viewerCount: snapshot.viewerCount,
+    viewerSessionCount: roomSession.viewerSessionIds.length,
+    viewerSessionIds: roomSession.viewerSessionIds,
+  });
+
   if (
     snapshot.activeTabId !== tabId ||
     snapshot.activeFrameId !== message.frameId
@@ -975,8 +993,25 @@ async function attachSourceInFrame(
     );
 
     if (!isAttachSourceResponse(response)) {
+      backgroundLogger.warn("Manual source attach returned an invalid response.", {
+        frameId: message.frameId,
+        roomId: roomSession.roomId,
+        tabId,
+        videoId: message.videoId,
+        viewerSessionCount: roomSession.viewerSessionIds.length,
+      });
       return dependencies.runtime.markMissing("No video attached.");
     }
+
+    backgroundLogger.info("Manual source attach sent to content successfully.", {
+      frameId: message.frameId,
+      roomId: roomSession.roomId,
+      sourceLabel: response.sourceLabel,
+      tabId,
+      videoId: message.videoId,
+      viewerSessionCount: roomSession.viewerSessionIds.length,
+      viewerSessionIds: roomSession.viewerSessionIds,
+    });
 
     return dependencies.runtime.setAttachedSource(response.sourceLabel, {
       ...response.fingerprint,
