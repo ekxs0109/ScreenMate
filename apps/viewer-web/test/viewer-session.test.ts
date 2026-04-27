@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ViewerSession } from "../src/viewer-session";
 
 // @ts-expect-error initialDisplayName is required for viewer identity wiring.
@@ -99,7 +99,7 @@ class FakePeerConnection {
     return;
   }
 
-  async getStats() {
+  async getStats(): Promise<Map<string, Record<string, unknown>>> {
     return new Map([
       [
         "local_1",
@@ -133,8 +133,41 @@ class FakePeerConnection {
   }
 }
 
+function createMemoryStorage(): Storage {
+  const values = new Map<string, string>();
+
+  return {
+    get length() {
+      return values.size;
+    },
+    clear() {
+      values.clear();
+    },
+    getItem(key: string) {
+      return values.get(key) ?? null;
+    },
+    key(index: number) {
+      return Array.from(values.keys())[index] ?? null;
+    },
+    removeItem(key: string) {
+      values.delete(key);
+    },
+    setItem(key: string, value: string) {
+      values.set(key, value);
+    },
+  };
+}
+
 describe("ViewerSession", () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, "sessionStorage", {
+      configurable: true,
+      value: createMemoryStorage(),
+    });
+  });
+
   afterEach(() => {
+    sessionStorage.clear();
     vi.useRealTimers();
   });
 
@@ -274,6 +307,74 @@ describe("ViewerSession", () => {
         body: JSON.stringify({ password: "letmein" }),
       }),
     );
+  });
+
+  it("reuses a stored viewer token and display name when rejoining the same room", async () => {
+    sessionStorage.setItem(
+      "screenmate.viewerSession.room_demo",
+      JSON.stringify({
+        displayName: "Stored Mina",
+        sessionId: "viewer_existing",
+        viewerToken: "previous-token",
+      }),
+    );
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+
+      if (url.endsWith("/rooms/room_demo") && !init?.method) {
+        return Response.json({
+          roomId: "room_demo",
+          state: "hosting",
+          sourceState: "missing",
+          hostConnected: true,
+          hostSessionId: "host_1",
+          viewerCount: 0,
+        });
+      }
+
+      if (url.endsWith("/rooms/room_demo/join") && init?.method === "POST") {
+        expect(init.body).toBe(
+          JSON.stringify({
+            password: "",
+            previousViewerToken: "previous-token",
+          }),
+        );
+
+        return Response.json({
+          roomId: "room_demo",
+          sessionId: "viewer_existing",
+          viewerToken: "next-token",
+          wsUrl: "ws://signal.example/rooms/room_demo/ws",
+          iceServers: [],
+        });
+      }
+
+      throw new Error(`unexpected request: ${url}`);
+    });
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn,
+      createWebSocket: () => new FakeWebSocket() as never,
+      createPeerConnection: () => new FakePeerConnection() as never,
+      initialDisplayName: "Random Name",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+
+    expect(session.getSnapshot()).toMatchObject({
+      displayName: "Stored Mina",
+      sessionId: "viewer_existing",
+    });
+    expect(
+      JSON.parse(
+        sessionStorage.getItem("screenmate.viewerSession.room_demo") ?? "{}",
+      ),
+    ).toMatchObject({
+      displayName: "Stored Mina",
+      sessionId: "viewer_existing",
+      viewerToken: "next-token",
+    });
   });
 
   it("surfaces password-required errors without forgetting the room id", async () => {
@@ -558,6 +659,68 @@ describe("ViewerSession", () => {
     await vi.advanceTimersByTimeAsync(500);
 
     expect(socket.sentMessages).toHaveLength(sentBeforeDestroy);
+  });
+
+  it("stores the negotiated viewer video codec from peer stats", async () => {
+    const socket = new FakeWebSocket();
+    const peer = new FakePeerConnection();
+    peer.getStats = async () =>
+      new Map([
+        [
+          "codec_1",
+          {
+            id: "codec_1",
+            type: "codec",
+            mimeType: "video/AV1",
+          },
+        ],
+        [
+          "inbound_1",
+          {
+            id: "inbound_1",
+            type: "inbound-rtp",
+            kind: "video",
+            codecId: "codec_1",
+          },
+        ],
+        [
+          "local_1",
+          {
+            id: "local_1",
+            type: "local-candidate",
+            candidateType: "host",
+          },
+        ],
+        [
+          "pair_1",
+          {
+            id: "pair_1",
+            type: "candidate-pair",
+            selected: true,
+            localCandidateId: "local_1",
+            currentRoundTripTime: 0.012,
+          },
+        ],
+      ]);
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peer as never,
+      initialDisplayName: "Mina",
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(session.getSnapshot()).toMatchObject({
+      localConnectionType: "direct",
+      localPingMs: 12,
+      localVideoCodec: "AV1",
+    });
   });
 
   it("stops metrics sampling when the signaling socket closes", async () => {

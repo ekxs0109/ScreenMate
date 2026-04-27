@@ -30,6 +30,7 @@ export type PeerConnectionLike = Pick<
 export type ViewerPeerMetrics = {
   connectionType: "direct" | "relay" | "unknown";
   pingMs: number | null;
+  videoCodec: string | null;
 };
 
 export function createViewerPeerConnection(
@@ -202,6 +203,7 @@ export async function collectViewerPeerMetrics(
   peerConnection: PeerConnectionLike,
 ): Promise<ViewerPeerMetrics> {
   const stats = await peerConnection.getStats();
+  const codecs = new Map<string, { mimeType: string | null }>();
   const localCandidates = new Map<string, { candidateType: string | null }>();
   const candidatePairs: Array<{
     currentRoundTripTime: number | null;
@@ -220,6 +222,13 @@ export async function collectViewerPeerMetrics(
     const reportType = readString(rawReport.type);
     const id = readString(rawReport.id);
 
+    if (reportType === "codec" && id) {
+      codecs.set(id, {
+        mimeType: readString(rawReport.mimeType),
+      });
+      continue;
+    }
+
     if (reportType === "local-candidate" && id) {
       localCandidates.set(id, {
         candidateType: readString(rawReport.candidateType),
@@ -237,6 +246,7 @@ export async function collectViewerPeerMetrics(
       });
     }
   }
+  const videoCodec = findInboundVideoCodec(stats, codecs);
 
   const selectedPair =
     candidatePairs.find((pair) => pair.selected === true) ??
@@ -246,6 +256,7 @@ export async function collectViewerPeerMetrics(
     return {
       connectionType: "unknown",
       pingMs: null,
+      videoCodec,
     };
   }
 
@@ -265,7 +276,44 @@ export async function collectViewerPeerMetrics(
       selectedPair.currentRoundTripTime === null
         ? null
         : Math.round(selectedPair.currentRoundTripTime * 1000),
+    videoCodec,
   };
+}
+
+function findInboundVideoCodec(
+  stats: RTCStatsReport,
+  codecs: Map<string, { mimeType: string | null }>,
+) {
+  for (const report of stats.values()) {
+    if (!report || typeof report !== "object") {
+      continue;
+    }
+
+    const rawReport = report as Record<string, unknown>;
+    if (readString(rawReport.type) !== "inbound-rtp") {
+      continue;
+    }
+
+    const kind = readString(rawReport.kind) ?? readString(rawReport.mediaType);
+    if (kind !== "video") {
+      continue;
+    }
+
+    const codecId = readString(rawReport.codecId);
+    const mimeType = codecId ? codecs.get(codecId)?.mimeType ?? null : null;
+    return formatVideoCodecLabel(mimeType ?? readString(rawReport.mimeType));
+  }
+
+  return null;
+}
+
+function formatVideoCodecLabel(mimeType: string | null) {
+  if (!mimeType) {
+    return null;
+  }
+
+  const [, codecName] = mimeType.split("/");
+  return codecName ? codecName.toUpperCase() : mimeType.toUpperCase();
 }
 
 async function handleConnectionStateChange(

@@ -26,6 +26,13 @@ import type { ViewerErrorCode } from "./viewer-errors";
 const viewerSessionLogger = createLogger("viewer:session");
 const maxDisplayNameLength = 80;
 const maxChatMessageLength = 500;
+const viewerRoomStoragePrefix = "screenmate.viewerSession.";
+
+type StoredViewerRoomSession = {
+  displayName: string;
+  sessionId: string;
+  viewerToken: string;
+};
 
 type ViewerSessionOptions = {
   apiBaseUrl: string;
@@ -66,8 +73,10 @@ export class ViewerSession {
       apiBaseUrl: this.options.apiBaseUrl,
       roomId,
     });
+    const storedViewerRoomSession = readStoredViewerRoomSession(roomId);
     const displayName =
       normalizeDisplayName(this.snapshot.displayName) ||
+      normalizeDisplayName(storedViewerRoomSession?.displayName ?? "") ||
       normalizeDisplayName(this.options.initialDisplayName) ||
       "";
     const generation = this.nextGeneration();
@@ -117,6 +126,7 @@ export class ViewerSession {
         this.options.apiBaseUrl,
         roomId,
         password,
+        storedViewerRoomSession?.viewerToken ?? null,
         this.options.fetchFn,
       );
       if (!this.isCurrentGeneration(generation)) {
@@ -142,6 +152,11 @@ export class ViewerSession {
         endedReasonCode: null,
         remoteStream: null,
         displayName: this.snapshot.displayName,
+      });
+      persistStoredViewerRoomSession(joined.roomId, {
+        displayName: this.snapshot.displayName,
+        sessionId: joined.sessionId,
+        viewerToken: joined.viewerToken,
       });
 
       this.joinResponse = joined;
@@ -265,6 +280,7 @@ export class ViewerSession {
     }
 
     this.update({ displayName: trimmedDisplayName });
+    this.persistCurrentViewerRoomSession();
     this.sendViewerProfile();
   }
 
@@ -327,6 +343,7 @@ export class ViewerSession {
           errorCode: null,
           endedReasonCode: null,
         });
+        void this.sendViewerMetrics();
       },
       onConnectionStateChange: (state) => {
         viewerSessionLogger.info("Viewer peer connection state changed.", {
@@ -557,6 +574,22 @@ export class ViewerSession {
     this.emit();
   }
 
+  private persistCurrentViewerRoomSession() {
+    if (
+      !this.snapshot.roomId ||
+      !this.snapshot.sessionId ||
+      !this.snapshot.viewerToken
+    ) {
+      return;
+    }
+
+    persistStoredViewerRoomSession(this.snapshot.roomId, {
+      displayName: this.snapshot.displayName,
+      sessionId: this.snapshot.sessionId,
+      viewerToken: this.snapshot.viewerToken,
+    });
+  }
+
   private emit() {
     for (const listener of this.listeners) {
       listener(this.snapshot);
@@ -625,6 +658,7 @@ export class ViewerSession {
       this.update({
         localConnectionType: metrics.connectionType,
         localPingMs: metrics.pingMs,
+        localVideoCodec: metrics.videoCodec ?? this.snapshot.localVideoCodec,
       });
 
       return socketClient.send(
@@ -683,6 +717,71 @@ function normalizeDisplayName(displayName: string) {
 
 function normalizeChatMessage(text: string) {
   return text.trim().slice(0, maxChatMessageLength);
+}
+
+function readStoredViewerRoomSession(
+  roomId: string,
+): StoredViewerRoomSession | null {
+  const storage = getSessionStorage();
+  if (!storage) {
+    return null;
+  }
+
+  try {
+    const rawValue = storage.getItem(toViewerRoomStorageKey(roomId));
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<StoredViewerRoomSession>;
+    if (
+      typeof parsed.displayName !== "string" ||
+      typeof parsed.sessionId !== "string" ||
+      typeof parsed.viewerToken !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      displayName: normalizeDisplayName(parsed.displayName),
+      sessionId: parsed.sessionId,
+      viewerToken: parsed.viewerToken,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistStoredViewerRoomSession(
+  roomId: string,
+  session: StoredViewerRoomSession,
+) {
+  const storage = getSessionStorage();
+  const displayName = normalizeDisplayName(session.displayName);
+  if (!storage || !displayName || !session.sessionId || !session.viewerToken) {
+    return;
+  }
+
+  storage.setItem(
+    toViewerRoomStorageKey(roomId),
+    JSON.stringify({
+      displayName,
+      sessionId: session.sessionId,
+      viewerToken: session.viewerToken,
+    }),
+  );
+}
+
+function toViewerRoomStorageKey(roomId: string) {
+  return `${viewerRoomStoragePrefix}${roomId}`;
+}
+
+function getSessionStorage(): Storage | null {
+  try {
+    return typeof sessionStorage === "undefined" ? null : sessionStorage;
+  } catch {
+    return null;
+  }
 }
 
 function appendChatMessage(

@@ -13,6 +13,7 @@ const dplayerInstances: Array<{
   container: HTMLElement;
   video: HTMLVideoElement;
   destroy: ReturnType<typeof vi.fn>;
+  on: ReturnType<typeof vi.fn>;
 }> = [];
 
 vi.mock("dplayer", () => {
@@ -20,6 +21,7 @@ vi.mock("dplayer", () => {
     public readonly container: HTMLElement;
     public readonly video: HTMLVideoElement;
     public readonly destroy = vi.fn();
+    public readonly on = vi.fn();
 
     constructor(options: { container: HTMLElement }) {
       this.container = options.container;
@@ -83,6 +85,39 @@ describe("ViewerShell", () => {
     expect(screen.getByText("同步状态")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "加入房间" })).toBeTruthy();
     expect(screen.getByText(/随机/)).toBeTruthy();
+  });
+
+  it("shows negotiated codec next to the viewer resolution", () => {
+    const scene = buildViewerSceneModel({
+      locale: "en",
+      session: {
+        ...initialViewerSessionState,
+        roomId: "room_demo",
+        status: "connected",
+        roomState: "streaming",
+        sourceState: "attached",
+        remoteStream: { id: "existing-stream" } as MediaStream,
+        localVideoCodec: "VP9",
+      },
+      mock: createViewerMockState("en"),
+    });
+    const stream = {
+      getVideoTracks: () => [
+        {
+          getSettings: () => ({
+            height: 1080,
+            width: 1920,
+          }),
+        },
+      ],
+    } as unknown as MediaStream;
+
+    renderViewerShell(scene, { stream });
+
+    expect(screen.getByTestId("viewer-resolution").textContent).toContain(
+      "1920x1080",
+    );
+    expect(screen.getByTestId("viewer-resolution").textContent).toContain("VP9");
   });
 
   it("commits controlled display name changes on blur and Enter", () => {

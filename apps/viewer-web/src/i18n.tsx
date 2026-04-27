@@ -345,6 +345,7 @@ function buildViewerDictionary(
     waitingForVideoSource: translate("waitingForVideoSource"),
     connectedToHost: translate("connectedToHost"),
     waitingForVideoStream: translate("waitingForVideoStream"),
+    clickToPlay: translate("clickToPlay"),
     clickToUnmute: translate("clickToUnmute"),
     languageLabel: translate("languageLabel"),
     themeLight: translate("themeLight"),

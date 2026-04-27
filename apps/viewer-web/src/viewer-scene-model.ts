@@ -16,6 +16,7 @@ export type ViewerSceneModel = {
   connection: {
     typeLabel: string;
     pingLabel: string;
+    videoCodecLabel: string | null;
   };
   sidebar: {
     viewerCount: number;

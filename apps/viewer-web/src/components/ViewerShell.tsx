@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, LogIn, LogOut, Pause, Radio, Send, Shuffle, Users } from "lucide-react";
+import { Activity, LogIn, LogOut, Monitor, Pause, Radio, Send, Shuffle, Users } from "lucide-react";
 import { useTheme } from "next-themes";
 import DPlayer from "dplayer";
 import { JoinForm } from "./JoinForm";
@@ -64,10 +64,12 @@ export function ViewerShell({
   const playbackAttemptRef = useRef(0);
   const [playbackPrompt, setPlaybackPrompt] = useState<PlaybackPrompt>(null);
   const [videoResolution, setVideoResolution] = useState<string | null>(null);
+  const [isWebFullscreen, setIsWebFullscreen] = useState(false);
   const [displayNameDraft, setDisplayNameDraft] = useState(
     scene.sidebar.username,
   );
   const fallbackStreamResolution = getStreamResolution(stream);
+  const displayedResolution = videoResolution ?? fallbackStreamResolution;
 
   useEffect(() => {
     setDisplayNameDraft(scene.sidebar.username);
@@ -427,6 +429,13 @@ export function ViewerShell({
       hasInitialStream: Boolean(streamRef.current),
     });
     playerRef.current = nextPlayer;
+
+    const handleWebFullscreen = () => setIsWebFullscreen(true);
+    const handleWebFullscreenCancel = () => setIsWebFullscreen(false);
+
+    nextPlayer.on("webfullscreen", handleWebFullscreen);
+    nextPlayer.on("webfullscreen_cancel", handleWebFullscreenCancel);
+
     if (nextPlayer.video) {
       playerVideoRef.current = nextPlayer.video;
       bindStreamToVideo(nextPlayer.video, streamRef.current);
@@ -479,6 +488,20 @@ export function ViewerShell({
                 <Activity className="w-3.5 h-3.5 text-green-500" />
                 {copy.pingLabel}: <span className="text-green-600 dark:text-green-400">{scene.connection.pingLabel}</span>
              </div>
+             {displayedResolution && (
+               <>
+                 <div className="w-px h-3 bg-border" />
+                 <div className="flex items-center gap-1.5 text-muted-foreground" data-testid="viewer-resolution">
+                    <Monitor className="w-3.5 h-3.5 text-blue-500" />
+                    <span className="text-foreground">{displayedResolution}</span>
+                    {scene.connection.videoCodecLabel && (
+                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                        {scene.connection.videoCodecLabel}
+                      </span>
+                    )}
+                 </div>
+               </>
+             )}
           </div>
         </div>
 
@@ -518,17 +541,7 @@ export function ViewerShell({
               className="absolute inset-0 h-full w-full outline-none [&_.dplayer]:h-full [&_.dplayer]:w-full [&_.dplayer-video-wrap]:h-full [&_video]:h-full [&_video]:w-full [&_video]:object-contain"
             />
 
-            {(videoResolution ?? fallbackStreamResolution) && !scene.player.showJoinOverlay && (
-              <div
-                data-testid="viewer-resolution"
-                className="absolute right-4 top-4 z-10 rounded-full border border-white/10 bg-black/55 px-3 py-1 text-xs font-medium text-white shadow-lg backdrop-blur-md"
-              >
-                {videoResolution ?? fallbackStreamResolution}
-              </div>
-            )}
-            
-            {/* OSD Status (Host pausing) */}
-            {scene.player.showWaitingOverlay && (
+            {/* OSD Status (Host pausing) */}            {scene.player.showWaitingOverlay && (
               <div className="absolute inset-0 bg-black/60 flex items-center justify-center transition-opacity backdrop-blur-sm pointer-events-none">
                 <div className="flex flex-col items-center gap-5 animate-in zoom-in duration-300">
                   <div className="w-20 h-20 rounded-full bg-white/10 backdrop-blur-xl flex items-center justify-center border border-white/20 shadow-2xl">
@@ -609,7 +622,7 @@ export function ViewerShell({
         </div>
 
         {/* Right Side: Real-time Sidebar */}
-        <div className="flex-1 lg:flex-none lg:w-[400px] bg-card flex flex-col shrink-0 shadow-[-10px_0_30px_rgba(0,0,0,0.05)] relative z-20">
+        <div className={cn("flex-1 lg:flex-none lg:w-[400px] bg-card flex flex-col shrink-0 shadow-[-10px_0_30px_rgba(0,0,0,0.05)] relative z-20", isWebFullscreen && "hidden")}>
           <div className="p-4 border-b border-border bg-zinc-50/80 dark:bg-zinc-900/80 flex flex-col gap-3 shrink-0">
              <div className="flex items-center justify-between">
                <h2 className="font-semibold text-[15px]">{copy.syncStatus}</h2>

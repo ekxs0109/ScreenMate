@@ -31,6 +31,7 @@ export type ViewerSessionState = {
   chatMessages: RoomChatMessage[];
   localConnectionType: ViewerRosterEntry["connectionType"];
   localPingMs: number | null;
+  localVideoCodec: string | null;
 };
 
 export const initialViewerSessionState: ViewerSessionState = {
@@ -49,4 +50,5 @@ export const initialViewerSessionState: ViewerSessionState = {
   chatMessages: [],
   localConnectionType: "unknown",
   localPingMs: null,
+  localVideoCodec: null,
 };

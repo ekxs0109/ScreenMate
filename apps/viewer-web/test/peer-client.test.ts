@@ -34,6 +34,7 @@ describe("collectViewerPeerMetrics", () => {
     ).resolves.toEqual({
       connectionType: "relay",
       pingMs: 24,
+      videoCodec: null,
     });
   });
 
@@ -58,6 +59,7 @@ describe("collectViewerPeerMetrics", () => {
     ).resolves.toEqual({
       connectionType: "relay",
       pingMs: 24,
+      videoCodec: null,
     });
   });
 
@@ -94,6 +96,7 @@ describe("collectViewerPeerMetrics", () => {
     ).resolves.toEqual({
       connectionType: "direct",
       pingMs: 12,
+      videoCodec: null,
     });
   });
 
@@ -118,6 +121,7 @@ describe("collectViewerPeerMetrics", () => {
     ).resolves.toEqual({
       connectionType: "direct",
       pingMs: 18,
+      videoCodec: null,
     });
   });
 
@@ -142,6 +146,7 @@ describe("collectViewerPeerMetrics", () => {
     ).resolves.toEqual({
       connectionType: "unknown",
       pingMs: null,
+      videoCodec: null,
     });
   });
 
@@ -165,6 +170,43 @@ describe("collectViewerPeerMetrics", () => {
     ).resolves.toEqual({
       connectionType: "direct",
       pingMs: null,
+      videoCodec: null,
+    });
+  });
+
+  it("reports the negotiated inbound video codec", async () => {
+    await expect(
+      collectViewerPeerMetrics(
+        createPeerConnectionWithStats([
+          {
+            id: "codec_1",
+            type: "codec",
+            mimeType: "video/VP9",
+          },
+          {
+            id: "inbound_1",
+            type: "inbound-rtp",
+            kind: "video",
+            codecId: "codec_1",
+          },
+          {
+            id: "local_1",
+            type: "local-candidate",
+            candidateType: "host",
+          },
+          {
+            id: "pair_1",
+            type: "candidate-pair",
+            selected: true,
+            localCandidateId: "local_1",
+            currentRoundTripTime: 0.018,
+          },
+        ]),
+      ),
+    ).resolves.toEqual({
+      connectionType: "direct",
+      pingMs: 18,
+      videoCodec: "VP9",
     });
   });
 });

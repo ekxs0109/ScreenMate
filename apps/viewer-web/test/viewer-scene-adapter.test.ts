@@ -45,6 +45,7 @@ describe("buildViewerSceneModel", () => {
         displayName: "Mina",
         localConnectionType: "relay",
         localPingMs: 24,
+        localVideoCodec: "AV1",
         viewerRoster: [
           {
             viewerSessionId: "viewer_1",
@@ -75,6 +76,7 @@ describe("buildViewerSceneModel", () => {
     expect(scene.sidebar.viewerCount).toBe(1);
     expect(scene.connection.typeLabel).toBe("Relay");
     expect(scene.connection.pingLabel).toBe("24ms");
+    expect(scene.connection.videoCodecLabel).toBe("AV1");
     expect(scene.sidebar.messages).toEqual([
       expect.objectContaining({
         id: "msg_1",

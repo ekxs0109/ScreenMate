@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorCodes } from "@screenmate/shared";
 import { createSourceAttachmentRuntime } from "../../entrypoints/content/source-attachment";
 import { getVideoHandle } from "../../entrypoints/content/video-detector";
+
+const originalRTCRtpSender = globalThis.RTCRtpSender;
 
 function setVideoRect(element: Element | null, width: number, height: number) {
   Object.defineProperty(element, "getBoundingClientRect", {
@@ -16,11 +18,15 @@ function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function createMockTrack(kind = "video") {
+function createMockTrack(
+  kind = "video",
+  settings: MediaTrackSettings = {},
+) {
   const listeners = new Map<string, Set<() => void>>();
 
   return {
     kind,
+    getSettings: vi.fn(() => settings),
     stop: vi.fn(),
     addEventListener: vi.fn((type: string, listener: () => void) => {
       const typedListeners = listeners.get(type) ?? new Set();
@@ -35,6 +41,31 @@ function createMockTrack(kind = "video") {
   };
 }
 
+class MockRTCRtpSender {
+  public readonly setParameters = vi.fn(async (parameters: RTCRtpSendParameters) => {
+    this.parameters = parameters;
+  });
+  private parameters: RTCRtpSendParameters;
+
+  constructor(
+    parameters: RTCRtpSendParameters = {
+      encodings: [{}],
+    } as RTCRtpSendParameters,
+  ) {
+    this.parameters = parameters;
+  }
+
+  getParameters() {
+    return this.parameters;
+  }
+}
+
+class MockRTCRtpTransceiver {
+  public readonly setCodecPreferences = vi.fn();
+
+  constructor(public readonly sender = new MockRTCRtpSender()) {}
+}
+
 class MockRTCPeerConnection {
   static instances: MockRTCPeerConnection[] = [];
   static createOfferErrors: Error[] = [];
@@ -45,6 +76,8 @@ class MockRTCPeerConnection {
     Set<(event: Event & { candidate?: RTCIceCandidateInit | null }) => void>
   >();
   public readonly addedTracks: Array<{ track: MediaStreamTrack; stream: MediaStream }> = [];
+  public readonly senders: MockRTCRtpSender[] = [];
+  public readonly transceivers: MockRTCRtpTransceiver[] = [];
   public closed = false;
 
   constructor(public readonly config?: RTCConfiguration) {
@@ -62,6 +95,20 @@ class MockRTCPeerConnection {
 
   addTrack(track: MediaStreamTrack, stream: MediaStream) {
     this.addedTracks.push({ track, stream });
+    const sender = new MockRTCRtpSender();
+    this.senders.push(sender);
+    return sender;
+  }
+
+  addTransceiver(track: MediaStreamTrack, init: RTCRtpTransceiverInit) {
+    this.addedTracks.push({
+      track,
+      stream: init.streams?.[0] as MediaStream,
+    });
+    const transceiver = new MockRTCRtpTransceiver();
+    this.senders.push(transceiver.sender);
+    this.transceivers.push(transceiver);
+    return transceiver;
   }
 
   async createOffer() {
@@ -98,6 +145,13 @@ class MockRTCPeerConnection {
 }
 
 describe("createSourceAttachmentRuntime", () => {
+  afterEach(() => {
+    Object.defineProperty(globalThis, "RTCRtpSender", {
+      configurable: true,
+      value: originalRTCRtpSender,
+    });
+  });
+
   it("marks the source detached when the captured track ends", async () => {
     document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
     const video = document.getElementById("host") as HTMLVideoElement;
@@ -124,7 +178,12 @@ describe("createSourceAttachmentRuntime", () => {
       onSourceDetached,
       RTCPeerConnectionImpl: class {
         addEventListener() {}
-        addTrack() {}
+        addTransceiver() {
+          return {
+            sender: new MockRTCRtpSender(),
+            setCodecPreferences: vi.fn(),
+          };
+        }
         async createOffer() {
           return { sdp: "offer-sdp" };
         }
@@ -197,6 +256,153 @@ describe("createSourceAttachmentRuntime", () => {
         sdpMLineIndex: 0,
       },
     });
+  });
+
+  it("configures video senders to preserve high source resolution", async () => {
+    document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
+    const video = document.getElementById("host") as HTMLVideoElement;
+    setVideoRect(video, 1920, 1080);
+    const track = createMockTrack("video", {
+      frameRate: 60,
+      height: 1080,
+      width: 1920,
+    }) as unknown as MediaStreamTrack;
+
+    Object.defineProperty(video, "captureStream", {
+      configurable: true,
+      value: vi.fn(() => ({ getTracks: () => [track] })),
+    });
+
+    MockRTCPeerConnection.instances = [];
+    const runtime = createSourceAttachmentRuntime({
+      now: () => 25,
+      onSignal: vi.fn(),
+      onSourceDetached: vi.fn(),
+      RTCPeerConnectionImpl: MockRTCPeerConnection as never,
+    });
+
+    await runtime.attachSource({
+      roomId: "room_123",
+      sessionId: "host_1",
+      videoId: getVideoHandle(video),
+      viewerSessionIds: ["viewer_1"],
+      iceServers: [],
+    });
+
+    const sender = MockRTCPeerConnection.instances[0]?.senders[0];
+
+    expect(sender?.setParameters).toHaveBeenCalledWith({
+      encodings: [
+        expect.objectContaining({
+          maxBitrate: 8_000_000,
+          maxFramerate: 60,
+          scaleResolutionDownBy: 1,
+        }),
+      ],
+    });
+  });
+
+  it("falls back to source video dimensions when track settings are missing", async () => {
+    document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
+    const video = document.getElementById("host") as HTMLVideoElement;
+    setVideoRect(video, 1920, 1080);
+    Object.defineProperty(video, "videoWidth", {
+      configurable: true,
+      value: 1920,
+    });
+    Object.defineProperty(video, "videoHeight", {
+      configurable: true,
+      value: 1080,
+    });
+    const track = createMockTrack("video") as unknown as MediaStreamTrack;
+
+    Object.defineProperty(video, "captureStream", {
+      configurable: true,
+      value: vi.fn(() => ({ getTracks: () => [track] })),
+    });
+
+    MockRTCPeerConnection.instances = [];
+    const runtime = createSourceAttachmentRuntime({
+      now: () => 25,
+      onSignal: vi.fn(),
+      onSourceDetached: vi.fn(),
+      RTCPeerConnectionImpl: MockRTCPeerConnection as never,
+    });
+
+    await runtime.attachSource({
+      roomId: "room_123",
+      sessionId: "host_1",
+      videoId: getVideoHandle(video),
+      viewerSessionIds: ["viewer_1"],
+      iceServers: [],
+    });
+
+    const sender = MockRTCPeerConnection.instances[0]?.senders[0];
+
+    expect(sender?.setParameters).toHaveBeenCalledWith({
+      encodings: [
+        expect.objectContaining({
+          maxBitrate: 8_000_000,
+          scaleResolutionDownBy: 1,
+        }),
+      ],
+    });
+  });
+
+  it("prefers modern video codecs before creating a host offer", async () => {
+    document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
+    const video = document.getElementById("host") as HTMLVideoElement;
+    setVideoRect(video, 1920, 1080);
+    const track = createMockTrack("video", {
+      height: 1080,
+      width: 1920,
+    }) as unknown as MediaStreamTrack;
+    const codecs = [
+      { mimeType: "video/H264", clockRate: 90_000 },
+      { mimeType: "video/VP8", clockRate: 90_000 },
+      { mimeType: "video/AV1", clockRate: 90_000 },
+      { mimeType: "video/rtx", clockRate: 90_000 },
+      { mimeType: "video/VP9", clockRate: 90_000 },
+      { mimeType: "video/H265", clockRate: 90_000 },
+    ];
+    Object.defineProperty(globalThis, "RTCRtpSender", {
+      configurable: true,
+      value: {
+        getCapabilities: vi.fn(() => ({ codecs, headerExtensions: [] })),
+      },
+    });
+
+    Object.defineProperty(video, "captureStream", {
+      configurable: true,
+      value: vi.fn(() => ({ getTracks: () => [track] })),
+    });
+
+    MockRTCPeerConnection.instances = [];
+    const runtime = createSourceAttachmentRuntime({
+      now: () => 25,
+      onSignal: vi.fn(),
+      onSourceDetached: vi.fn(),
+      RTCPeerConnectionImpl: MockRTCPeerConnection as never,
+    });
+
+    await runtime.attachSource({
+      roomId: "room_123",
+      sessionId: "host_1",
+      videoId: getVideoHandle(video),
+      viewerSessionIds: ["viewer_1"],
+      iceServers: [],
+    });
+
+    expect(
+      MockRTCPeerConnection.instances[0]?.transceivers[0]?.setCodecPreferences,
+    ).toHaveBeenCalledWith([
+      codecs[2],
+      codecs[4],
+      codecs[0],
+      codecs[1],
+      codecs[3],
+      codecs[5],
+    ]);
   });
 
   it("reports source detachment only once per attachment lifecycle", async () => {

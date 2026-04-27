@@ -37,6 +37,7 @@ export function buildViewerSceneModel(input: {
       pingLabel: useRealActivity
         ? formatPing(input.session.localPingMs)
         : formatPing(null),
+      videoCodecLabel: useRealActivity ? input.session.localVideoCodec : null,
     },
     sidebar: {
       viewerCount: useRealActivity
