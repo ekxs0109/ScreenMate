@@ -8,10 +8,23 @@ const messages = {
   tabSource: "Origen",
   tabRoom: "Sala Ajustes",
   tabChat: "Chat",
+  sourceAuto: "Auto",
+  sourceAutoDescription: "Sigue la pestaña activa del anfitrión automáticamente.",
+  autoEnable: "Activar toma",
+  autoDisable: "Desactivar toma",
   sourceSniff: "Reconocer",
   sourceScreen: "Compartir Pantalla",
   sourceUpload: "Subir Archivo",
   detected: "Medios detectados",
+  followAuto: "Auto",
+  followAutoDescription: "Sigue la pestaña que está viendo el anfitrión",
+  currentPlayback: "Reproduciendo",
+  waitingPlayback: "Esperando video",
+  webVideoStream: "Stream de video web",
+  autoMode: "Seguimiento auto",
+  manualMode: "Selección manual",
+  autoFollowEmptyTitle: "Seguimiento automático activado",
+  autoFollowEmptyDescription: "La sala seguirá la pestaña activa del anfitrión.",
   mockOrigin: "Pestaña",
   refreshSniff: "Refrescar",
   noVideo: "No se detectó video en esta página.",
@@ -78,7 +91,7 @@ describe("ExtensionPopupPresenter", () => {
       isBusy: false,
       busyAction: null,
       viewerRoomUrl: "https://viewer.example/rooms/room_demo",
-      mock: createExtensionMockState(),
+      mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
     });
 
     render(
@@ -142,7 +155,7 @@ describe("ExtensionPopupPresenter", () => {
       isBusy: false,
       busyAction: null,
       viewerRoomUrl: "https://viewer.example/rooms/room_demo",
-      mock: createExtensionMockState(),
+      mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
     });
     const onStartOrAttach = vi.fn();
     const onSelectTab = vi.fn();
@@ -196,7 +209,7 @@ describe("ExtensionPopupPresenter", () => {
       isBusy: false,
       busyAction: null,
       viewerRoomUrl: null,
-      mock: createExtensionMockState(),
+      mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
     });
     const onPreviewSource = vi.fn();
     const onClearSourcePreview = vi.fn();
@@ -245,6 +258,315 @@ describe("ExtensionPopupPresenter", () => {
     expect(onClearSourcePreview).toHaveBeenCalledTimes(1);
   });
 
+  it("shows the Auto tab enable CTA when follow is off and invokes the toggle", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot(),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: null,
+      mock: createExtensionMockState(),
+    });
+    const onToggleFollowActiveTabVideo = vi.fn();
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={vi.fn()}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onToggleFollowActiveTabVideo={onToggleFollowActiveTabVideo}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onSelectLocalFile={vi.fn()}
+        onClearLocalFile={vi.fn()}
+        onStartOrAttach={vi.fn()}
+        onStopRoom={vi.fn()}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={vi.fn()}
+      />,
+    );
+
+    const enableButton = screen.getByTestId("popup-auto-enable");
+    expect(screen.queryByTestId("popup-start-or-attach")).toBeNull();
+
+    fireEvent.click(enableButton);
+
+    expect(onToggleFollowActiveTabVideo).toHaveBeenCalledWith(true);
+  });
+
+  it("does not show the green source indicator merely for the selected source tab", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot(),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: null,
+      mock: {
+        ...createExtensionMockState(),
+        activeSourceType: "screen",
+      },
+    });
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={vi.fn()}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onToggleFollowActiveTabVideo={vi.fn()}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onSelectLocalFile={vi.fn()}
+        onClearLocalFile={vi.fn()}
+        onStartOrAttach={vi.fn()}
+        onStopRoom={vi.fn()}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={vi.fn()}
+      />,
+    );
+
+    const screenButton = screen.getByRole("button", {
+      name: "Compartir Pantalla",
+    });
+
+    expect(
+      screenButton.querySelector("[aria-hidden='true'].bg-emerald-500"),
+    ).toBeFalsy();
+  });
+
+  it("shows the green source indicator only on the currently attached source tab", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        sourceLabel: "Shared screen",
+        activeTabId: -1,
+        activeFrameId: -1,
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      preparedSourceState: {
+        status: "prepared-source",
+        kind: "screen",
+        ready: true,
+        label: "Shared screen",
+        metadata: null,
+        captureType: "screen",
+        error: null,
+      },
+      mock: {
+        ...createExtensionMockState(),
+        activeSourceType: "upload",
+      },
+    });
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={vi.fn()}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onToggleFollowActiveTabVideo={vi.fn()}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onSelectLocalFile={vi.fn()}
+        onClearLocalFile={vi.fn()}
+        onStartOrAttach={vi.fn()}
+        onStopRoom={vi.fn()}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={vi.fn()}
+      />,
+    );
+
+    const screenButton = screen.getByRole("button", {
+      name: "Compartir Pantalla",
+    });
+    const uploadButton = screen.getByRole("button", {
+      name: "Subir Archivo",
+    });
+
+    expect(
+      screenButton.querySelector("[aria-hidden='true'].bg-emerald-500"),
+    ).toBeTruthy();
+    expect(
+      uploadButton.querySelector("[aria-hidden='true'].bg-emerald-500"),
+    ).toBeFalsy();
+  });
+
+  it("shows the Auto tab status card and End Share footer when follow is on", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        sourceLabel: "blob:https://www.bilibili.com/source",
+        viewerCount: 1,
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      followActiveTabVideo: true,
+      mock: createExtensionMockState(),
+    });
+    const onToggleFollowActiveTabVideo = vi.fn();
+    const onStopRoom = vi.fn();
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={vi.fn()}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onToggleFollowActiveTabVideo={onToggleFollowActiveTabVideo}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onSelectLocalFile={vi.fn()}
+        onClearLocalFile={vi.fn()}
+        onStartOrAttach={vi.fn()}
+        onStopRoom={onStopRoom}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Seguimiento automático activado")).toBeTruthy();
+    expect(screen.getAllByText("Stream de video web").length).toBeGreaterThan(0);
+
+    const disableButton = screen.getByTestId("popup-auto-disable");
+    fireEvent.click(disableButton);
+    expect(onToggleFollowActiveTabVideo).toHaveBeenCalledWith(false);
+
+    fireEvent.click(screen.getByTestId("popup-stop-room"));
+    expect(onStopRoom).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the create room footer instead of End Share when auto follow is on without a room", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot(),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: null,
+      followActiveTabVideo: true,
+      mock: createExtensionMockState(),
+    });
+    const onStartOrAttach = vi.fn();
+    const onStopRoom = vi.fn();
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={vi.fn()}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onToggleFollowActiveTabVideo={vi.fn()}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onSelectLocalFile={vi.fn()}
+        onClearLocalFile={vi.fn()}
+        onStartOrAttach={onStartOrAttach}
+        onStopRoom={onStopRoom}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("popup-stop-room")).toBeNull();
+    fireEvent.click(screen.getByTestId("popup-start-or-attach"));
+    expect(onStartOrAttach).toHaveBeenCalledTimes(1);
+    expect(onStopRoom).not.toHaveBeenCalled();
+  });
+
   it("shows a neutral placeholder instead of a generated image when a video has no poster", () => {
     const scene = buildExtensionSceneModel({
       snapshot: createHostRoomSnapshot(),
@@ -255,7 +577,7 @@ describe("ExtensionPopupPresenter", () => {
       isBusy: false,
       busyAction: null,
       viewerRoomUrl: null,
-      mock: createExtensionMockState(),
+      mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
     });
 
     render(
@@ -308,7 +630,7 @@ describe("ExtensionPopupPresenter", () => {
       isBusy: false,
       busyAction: null,
       viewerRoomUrl: null,
-      mock: createExtensionMockState(),
+      mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
     });
 
     render(
@@ -372,7 +694,7 @@ describe("ExtensionPopupPresenter", () => {
       isBusy: false,
       busyAction: null,
       viewerRoomUrl: null,
-      mock: createExtensionMockState(),
+      mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
     });
 
     render(

@@ -2,10 +2,23 @@ appName: SyncPlay
 tabSource: Orígenes
 tabRoom: Sala Ajustes
 tabChat: Chat
+sourceAuto: Auto
+sourceAutoDescription: Comparte automáticamente el video principal de la pestaña activa del anfitrión.
+autoEnable: Activar toma automática
+autoDisable: Desactivar toma automática
 sourceSniff: Reconocer
 sourceScreen: Compartir Pantalla
 sourceUpload: Subir Archivo
 detected: Medios detectados
+followAuto: Auto
+followAutoDescription: Sigue la pestaña que está viendo el anfitrión
+currentPlayback: Reproduciendo
+waitingPlayback: Esperando video
+webVideoStream: Stream de video web
+autoMode: Seguimiento auto
+manualMode: Selección manual
+autoFollowEmptyTitle: Seguimiento automático activado
+autoFollowEmptyDescription: Cuando el anfitrión cambie de pestaña, la sala compartirá automáticamente el video principal de esa pestaña.
 mockOrigin: Pestaña
 refreshSniff: Refrescar
 noVideo: No se detectó video en esta página.

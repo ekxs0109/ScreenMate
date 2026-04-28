@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  buildStartSharingRequests,
+  buildStartSharingRequest,
   buildStopSharingRequest,
   normalizeSnapshot,
+  parseVideoSelectionKey,
   resolvePopupSelectedVideoKey,
   reportRoomActionResult,
   resolveSelectedVideoKey,
@@ -96,31 +97,56 @@ describe("normalizeSnapshot", () => {
 });
 
 describe("popup room action messages", () => {
-  it("builds room-start then attach requests when no room exists yet", () => {
+  it("parses cached video selection keys when the sniff cache is stale", () => {
+    expect(parseVideoSelectionKey("42:7:screenmate-video-1")).toEqual({
+      tabId: 42,
+      frameId: 7,
+      id: "screenmate-video-1",
+    });
+    expect(parseVideoSelectionKey("bad:key")).toBeNull();
+  });
+
+  it("builds one tab-video start-sharing request when no room exists yet", () => {
     expect(
-      buildStartSharingRequests(createHostRoomSnapshot(), {
+      buildStartSharingRequest(createHostRoomSnapshot(), {
         id: "screenmate-video-1",
         tabId: 42,
         frameId: 7,
       }),
-    ).toEqual([
+    ).toEqual(
       {
-        type: "screenmate:start-room",
-        tabId: 42,
-        frameId: 7,
+        type: "screenmate:start-sharing",
+        source: {
+          kind: "tab-video",
+          videoId: "screenmate-video-1",
+          tabId: 42,
+          frameId: 7,
+        },
       },
-      {
-        type: "screenmate:attach-source",
-        videoId: "screenmate-video-1",
-        tabId: 42,
-        frameId: 7,
-      },
-    ]);
+    );
   });
 
-  it("builds attach-only and stop-room requests for an existing room", () => {
+  it("builds one active-tab start-sharing request when automatic follow is enabled", () => {
     expect(
-      buildStartSharingRequests(
+      buildStartSharingRequest(createHostRoomSnapshot(), null, {
+        autoAttach: true,
+        sourceType: "auto",
+      }),
+    ).toEqual(
+      {
+        type: "screenmate:start-sharing",
+        source: { kind: "active-tab-video" },
+      },
+    );
+  });
+
+  it("does not build source-less start requests for manual sniff mode", () => {
+    expect(buildStartSharingRequest(createHostRoomSnapshot(), null)).toBeNull();
+  });
+
+  it("builds the same single tab-video request for an existing room", () => {
+    expect(
+      buildStartSharingRequest(
         createHostRoomSnapshot({
           roomLifecycle: "open",
           roomId: "room_123",
@@ -131,22 +157,25 @@ describe("popup room action messages", () => {
           frameId: 0,
         },
       ),
-    ).toEqual([
+    ).toEqual(
       {
-        type: "screenmate:attach-source",
-        videoId: "screenmate-video-1",
-        tabId: 42,
-        frameId: 0,
+        type: "screenmate:start-sharing",
+        source: {
+          kind: "tab-video",
+          videoId: "screenmate-video-1",
+          tabId: 42,
+          frameId: 0,
+        },
       },
-    ]);
+    );
     expect(buildStopSharingRequest()).toEqual({
       type: "screenmate:stop-room",
     });
   });
 
-  it("restarts a closed room before attaching a source", () => {
+  it("lets background restart a closed room through the same start-sharing request", () => {
     expect(
-      buildStartSharingRequests(
+      buildStartSharingRequest(
         createHostRoomSnapshot({
           roomLifecycle: "closed",
           roomId: "room_123",
@@ -157,19 +186,40 @@ describe("popup room action messages", () => {
           frameId: 0,
         },
       ),
-    ).toEqual([
+    ).toEqual(
       {
-        type: "screenmate:start-room",
-        tabId: 42,
-        frameId: 0,
+        type: "screenmate:start-sharing",
+        source: {
+          kind: "tab-video",
+          videoId: "screenmate-video-1",
+          tabId: 42,
+          frameId: 0,
+        },
       },
-      {
-        type: "screenmate:attach-source",
-        videoId: "screenmate-video-1",
-        tabId: 42,
-        frameId: 0,
+    );
+  });
+
+  it("builds prepared offscreen start-sharing requests", () => {
+    expect(
+      buildStartSharingRequest(createHostRoomSnapshot(), null, {
+        sourceType: "screen",
+        preparedSourceState: {
+          status: "prepared-source",
+          kind: "screen",
+          ready: true,
+          label: "Shared screen",
+          metadata: null,
+          captureType: "screen",
+          error: null,
+        },
+      }),
+    ).toEqual({
+      type: "screenmate:start-sharing",
+      source: {
+        kind: "prepared-offscreen",
+        sourceType: "screen",
       },
-    ]);
+    });
   });
 });
 

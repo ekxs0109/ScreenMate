@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, ChangeEvent } from "react";
 import { useTheme } from "next-themes";
 import DPlayer from "dplayer";
+import { browser } from "wxt/browser";
 import { 
   Video, 
   Users, 
@@ -31,6 +32,7 @@ import {
   Maximize
 } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { saveLocalMediaFile } from "../../lib/local-media-store";
 import { HeaderControls } from "../../components/header-controls";
 import { getExtensionDictionary } from "../popup/i18n";
 import { usePopupUiStore } from "../popup/popup-ui-store";
@@ -59,10 +61,17 @@ export default function PlayerApp() {
   const localFile = usePopupUiStore((state) => state.localFile);
   const clearLocalFile = usePopupUiStore((state) => state.clearLocalFile);
   const setLocalFile = usePopupUiStore((state) => state.setLocalFile);
+  const setActiveSourceType = usePopupUiStore((state) => state.setActiveSourceType);
   const messages = usePopupUiStore((state) => state.messages);
   const appendLocalMessage = usePopupUiStore((state) => state.appendLocalMessage);
 
-  const { snapshot, isBusy, busyAction } = useHostControls();
+  const {
+    snapshot,
+    isBusy,
+    busyAction,
+    prepareLocalFileSource,
+    sendChatMessage,
+  } = useHostControls();
   const copy = getExtensionDictionary();
 
   const scene = useMemo(() => 
@@ -77,7 +86,7 @@ export default function PlayerApp() {
         ...usePopupUiStore.getState(),
         isRefreshing: false,
       }
-    }), [snapshot, isBusy, busyAction]
+    }), [snapshot, isBusy, busyAction, messages]
   );
 
   const clearPlayerSurface = () => {
@@ -105,7 +114,7 @@ export default function PlayerApp() {
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && file.type.startsWith('video/')) {
-      handleLoadFile(file);
+      void handleLoadFile(file);
     }
   };
 
@@ -114,18 +123,24 @@ export default function PlayerApp() {
     setIsHoveringDrop(false);
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('video/')) {
-      handleLoadFile(file);
+      void handleLoadFile(file);
     }
   };
 
-  const handleLoadFile = (file: File) => {
+  const handleLoadFile = async (file: File) => {
     if (fileUrlRef.current) {
       URL.revokeObjectURL(fileUrlRef.current);
     }
     const url = URL.createObjectURL(file);
+    const metadata = await saveLocalMediaFile(file);
     fileUrlRef.current = url;
     setFileUrl(url);
     setLocalFile({ name: file.name, size: file.size, type: file.type });
+    setActiveSourceType("upload");
+    await prepareLocalFileSource({
+      fileId: metadata.id,
+      metadata,
+    });
     appendLocalMessage(`已加载本地视频: ${file.name} (Loaded local video)`);
   };
 
@@ -140,9 +155,15 @@ export default function PlayerApp() {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
-    appendLocalMessage(chatInput.trim());
+    const text = chatInput.trim();
+    if (!text) return;
     setChatInput("");
+    if (snapshot.roomId && snapshot.roomLifecycle !== "closed") {
+      void sendChatMessage(text);
+      return;
+    }
+
+    appendLocalMessage(text);
   };
 
   const formatFileSize = (bytes: number) => {
@@ -193,7 +214,25 @@ export default function PlayerApp() {
     nextPlayer.on("webfullscreen", handleWebFullscreen);
     nextPlayer.on("webfullscreen_cancel", handleWebFullscreenCancel);
 
+    const video = nextPlayer.video ?? container.querySelector("video");
+    const syncPlayback = (action: "play" | "pause" | "seek") => {
+      void browser.runtime.sendMessage({
+        type: "screenmate:sync-local-playback",
+        action,
+        currentTime: video?.currentTime ?? 0,
+      });
+    };
+    const handlePlay = () => syncPlayback("play");
+    const handlePause = () => syncPlayback("pause");
+    const handleSeeked = () => syncPlayback("seek");
+    video?.addEventListener("play", handlePlay);
+    video?.addEventListener("pause", handlePause);
+    video?.addEventListener("seeked", handleSeeked);
+
     return () => {
+      video?.removeEventListener("play", handlePlay);
+      video?.removeEventListener("pause", handlePause);
+      video?.removeEventListener("seeked", handleSeeked);
       if (playerRef.current === nextPlayer) {
         clearPlayerSurface();
       }
@@ -332,7 +371,7 @@ export default function PlayerApp() {
             {activeTab === 'chat' && (
               <>
                 <div className="flex-1 overflow-y-auto p-4 space-y-4 font-sans text-sm pb-10 xl:pb-4 relative bg-[url('/patterns/cubes.png')] dark:bg-zinc-950/50">
-                  {messages.map(msg => {
+                  {scene.chatTab.messages.map(msg => {
                     const isYou = msg.sender === 'You' || msg.sender === username;
                     const isSystem = msg.sender === 'System';
                     

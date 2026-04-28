@@ -205,6 +205,7 @@ describe("viewer WebRTC logging", () => {
       },
       createWebSocket: () => socket as never,
       createPeerConnection: () => peer as never,
+      connectionFailureGraceMs: 0,
       initialDisplayName: "Mina",
     });
 

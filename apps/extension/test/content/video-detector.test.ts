@@ -40,6 +40,34 @@ describe("collectVisibleVideos", () => {
     expect(videos.map((video) => video.id)).toEqual(["large", "small"]);
   });
 
+  it("prioritizes playing visible videos before larger paused videos", () => {
+    document.body.innerHTML = `
+      <video id="large-paused"></video>
+      <video id="small-playing"></video>
+    `;
+
+    const largePaused = document.getElementById("large-paused") as HTMLVideoElement;
+    const smallPlaying = document.getElementById("small-playing") as HTMLVideoElement;
+    setVideoRect(largePaused, 800, 450);
+    setVideoRect(smallPlaying, 320, 180);
+    Object.defineProperty(largePaused, "paused", {
+      configurable: true,
+      value: true,
+    });
+    Object.defineProperty(smallPlaying, "paused", {
+      configurable: true,
+      value: false,
+    });
+    Object.defineProperty(smallPlaying, "ended", {
+      configurable: true,
+      value: false,
+    });
+
+    const videos = collectVisibleVideos();
+
+    expect(videos.map((video) => video.id)).toEqual(["small-playing", "large-paused"]);
+  });
+
   it("excludes hidden and non-displayable videos", () => {
     document.body.innerHTML = `
       <video id="visible"></video>
@@ -128,6 +156,7 @@ describe("collectPageVideos", () => {
 
 describe("listVisibleVideoSources", () => {
   it("returns stable handles and useful labels", () => {
+    window.history.replaceState({}, "", "/video/BV1demo");
     document.body.innerHTML = `
       <video id="named" src="https://example.com/a.mp4"></video>
       <video id="hidden" hidden></video>
@@ -149,6 +178,15 @@ describe("listVisibleVideoSources", () => {
       primaryUrl: "https://example.com/a.mp4",
       format: "mp4",
       isVisible: true,
+      isPlaying: false,
+      visibleArea: 60_000,
+      fingerprint: {
+        primaryUrl: "https://example.com/a.mp4",
+        pageUrl: "http://localhost:3000/video/BV1demo",
+        elementId: "named",
+        label: "https://example.com/a.mp4",
+        visibleIndex: 0,
+      },
     });
     expect(firstPass[1]).toMatchObject({
       id: getVideoHandle(hidden),
@@ -400,6 +438,8 @@ describe("createVideoMessageListener", () => {
 describe("createVideoChangeNotifier", () => {
   afterEach(() => {
     document.body.innerHTML = "";
+    document.title = "";
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -520,6 +560,68 @@ describe("createVideoChangeNotifier", () => {
 
     await vi.advanceTimersByTimeAsync(1);
     expect(notify).toHaveBeenCalledTimes(2);
+    notifier.stop();
+  });
+
+  it("notifies when the page title changes even if the video element is reused", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "MutationObserver",
+      class NoopMutationObserver {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    document.title = "Old video title";
+    const notify = vi.fn();
+    const notifier = createVideoChangeNotifier({
+      debounceMs: 100,
+      highFrequencyLifetimeMs: 15_000,
+      notify,
+      pollIntervalMs: 1_000,
+    });
+    document.body.appendChild(document.createElement("video"));
+
+    notifier.start();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    document.title = "New video title";
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenLastCalledWith("page-title-changed");
+    notifier.stop();
+  });
+
+  it("notifies when the SPA URL changes without replacing the video element", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "MutationObserver",
+      class NoopMutationObserver {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    window.history.replaceState({}, "", "/watch/old");
+    const notify = vi.fn();
+    const notifier = createVideoChangeNotifier({
+      debounceMs: 100,
+      highFrequencyLifetimeMs: 15_000,
+      notify,
+      pollIntervalMs: 1_000,
+    });
+    document.body.appendChild(document.createElement("video"));
+
+    notifier.start();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    window.history.replaceState({}, "", "/watch/new");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenLastCalledWith("page-location-changed");
     notifier.stop();
   });
 

@@ -2,10 +2,23 @@ appName: SyncPlay
 tabSource: Source
 tabRoom: Room Settings
 tabChat: Room Chat
+sourceAuto: Auto
+sourceAutoDescription: Automatically share the main video of the host's active tab.
+autoEnable: Enable auto takeover
+autoDisable: Disable auto takeover
 sourceSniff: Site Sniffer
 sourceScreen: Screen Share
 sourceUpload: Local Player
 detected: Detected Video Resources
+followAuto: Auto
+followAutoDescription: Follow the tab the host is watching
+currentPlayback: Now Playing
+waitingPlayback: Waiting for video
+webVideoStream: Web video stream
+autoMode: Auto follow
+manualMode: Manual source
+autoFollowEmptyTitle: Auto follow is on
+autoFollowEmptyDescription: When the host switches browser tabs, the room automatically shares the main video in that tab.
 mockOrigin: Tab
 refreshSniff: Rescan
 noVideo: No video detected on this page.

@@ -30,6 +30,11 @@ export function createContentChatWidgetController() {
     render();
   }
 
+  function setMessages(nextMessages: ExtensionChatMessage[]) {
+    messages = nextMessages;
+    render();
+  }
+
   function render() {
     destroy();
     if (!visible) {
@@ -161,11 +166,28 @@ export function createContentChatWidgetController() {
         if (!value) {
           return;
         }
-        addMessage({
-          id: `local-${Date.now()}`,
-          sender: "You",
-          text: value,
-        });
+        input.value = "";
+        void browser.runtime
+          .sendMessage({
+            type: "screenmate:send-chat-message",
+            text: value,
+          })
+          .then((response) => {
+            if (!isRecord(response) || response.ok !== true) {
+              addMessage({
+                id: `send-failed-${Date.now()}`,
+                sender: "System",
+                text: "Message could not be sent. Please try again.",
+              });
+            }
+          })
+          .catch(() => {
+            addMessage({
+              id: `send-failed-${Date.now()}`,
+              sender: "System",
+              text: "Message could not be sent. Please try again.",
+            });
+          });
       };
 
       root.append(body, form);
@@ -182,6 +204,7 @@ export function createContentChatWidgetController() {
   return {
     addMessage,
     hide,
+    setMessages,
     show,
   };
 }
@@ -193,4 +216,8 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

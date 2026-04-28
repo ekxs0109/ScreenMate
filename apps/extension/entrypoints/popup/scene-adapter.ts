@@ -1,14 +1,20 @@
 import type { RoomChatMessage, ViewerRosterEntry } from "@screenmate/shared";
 import type { TabVideoSource } from "../background";
 import type { HostRoomSnapshot } from "../background/host-room-snapshot";
+import type { PreparedSourceState } from "../background";
 import { getPopupViewModel } from "./view-model";
 import type { ExtensionMockState } from "./mock-state";
 import type {
   ExtensionChatMessage,
   ExtensionSceneModel,
+  PopupFooterModel,
+  SourceType,
   SniffTabSummary,
   ViewerConnectionRow,
 } from "./scene-model";
+
+const OFFSCREEN_ATTACHMENT_TAB_ID = -1;
+const OFFSCREEN_ATTACHMENT_FRAME_ID = -1;
 
 type BusyAction = "primary" | "stop" | null;
 
@@ -20,11 +26,15 @@ export function buildExtensionSceneModel(input: {
   isBusy: boolean;
   busyAction: BusyAction;
   viewerRoomUrl: string | null;
+  followActiveTabVideo?: boolean;
+  preparedSourceState?: PreparedSourceState;
   mock: ExtensionMockState;
 }): ExtensionSceneModel {
   const viewModel = getPopupViewModel(input.snapshot);
-  const hasShared =
+  const hasOpenRoomSession =
     input.snapshot.roomId !== null && input.snapshot.roomLifecycle !== "closed";
+  const hasAttachedSource = input.snapshot.sourceState === "attached";
+  const canStopRoom = hasOpenRoomSession;
   const hasActiveRealRoom =
     input.snapshot.roomId !== null &&
     input.snapshot.roomLifecycle !== "idle" &&
@@ -32,27 +42,56 @@ export function buildExtensionSceneModel(input: {
   const sniffCards = input.videos.map((video, index) =>
     buildSniffCard(video, index, input.selectedVideoId),
   );
+  const screenReady = input.preparedSourceState?.kind === "screen" &&
+    input.preparedSourceState.ready;
+  const uploadReady = input.preparedSourceState?.kind === "upload" &&
+    input.preparedSourceState.ready;
+  const localFile = input.preparedSourceState?.kind === "upload"
+    ? input.preparedSourceState.metadata
+    : null;
+  const activeSourceIndicator = getActiveSourceIndicator({
+    followActiveTabVideo: input.followActiveTabVideo === true,
+    preparedSourceState: input.preparedSourceState,
+    selectedVideoId: input.selectedVideoId,
+    snapshot: input.snapshot,
+  });
+  const chatVisible = hasOpenRoomSession;
+  const activeTab = chatVisible || input.mock.activeTab !== "chat"
+    ? input.mock.activeTab
+    : "source";
 
   return {
     header: {
       title: "ScreenMate",
       statusText: viewModel.statusText,
+      playback: {
+        label: getPlaybackLabel(input.snapshot.sourceLabel),
+        mode: input.followActiveTabVideo === true ? "auto" : "manual",
+        state: input.snapshot.sourceState === "attached" ? "active" : "waiting",
+      },
     },
     tabs: {
-      active: hasShared || input.mock.activeTab !== "chat" ? input.mock.activeTab : "source",
-      hasShared,
+      active: activeTab,
+      hasOpenRoomSession,
+      hasAttachedSource,
+      canStopRoom,
+      roomBadgeVisible: hasOpenRoomSession,
+      chatVisible,
     },
     sourceTab: {
       activeSourceType: input.mock.activeSourceType,
-      screenReady: input.mock.screenReady,
-      uploadReady: !!input.mock.localFile || input.mock.uploadReady,
-      localFile: input.mock.localFile ?? null,
+      activeSourceIndicator,
+      screenReady,
+      uploadReady,
+      localFile,
       isRefreshing: input.mock.isRefreshing,
-      sectionKinds: ["sniff", "screen", "upload"],
+      followActiveTabVideo: input.followActiveTabVideo === true,
+      sectionKinds: ["auto", "sniff", "screen", "upload"],
       sniffCards,
       sniffGroups: groupSniffCards(input.sniffTabs ?? [], sniffCards),
     },
     roomTab: {
+      state: hasOpenRoomSession ? "active" : "empty",
       roomId: input.snapshot.roomId,
       shareUrl: input.viewerRoomUrl,
       viewerCount: input.snapshot.viewerCount,
@@ -67,20 +106,18 @@ export function buildExtensionSceneModel(input: {
         ? input.snapshot.chatMessages.map(toExtensionChatMessage)
         : input.mock.messages,
     },
-    footer: {
-      primaryLabel:
-        input.isBusy && input.busyAction === "primary"
-          ? "Working..."
-          : viewModel.primaryActionLabel,
-      primaryDisabled:
-        input.isBusy ||
-        (input.mock.activeSourceType === "sniff" && input.selectedVideoId === null) ||
-        (input.mock.activeSourceType === "screen" && !input.mock.screenReady) ||
-        (input.mock.activeSourceType === "upload" && !input.mock.localFile),
-      secondaryLabel:
-        input.isBusy && input.busyAction === "stop" ? "Stopping room..." : "End Share",
-      secondaryDisabled: input.isBusy || !viewModel.canStop,
-    },
+    footer: deriveFooter({
+      activePopupTab: activeTab,
+      activeSourceType: input.mock.activeSourceType,
+      busyAction: input.busyAction,
+      canStopRoom,
+      followActiveTabVideo: input.followActiveTabVideo === true,
+      hasOpenRoomSession,
+      hasSelectedVideo: input.selectedVideoId !== null,
+      isBusy: input.isBusy,
+      screenReady,
+      uploadReady,
+    }),
     meta: {
       hasSelectedSource: input.selectedVideoId !== null,
       isBusy: input.isBusy,
@@ -88,6 +125,165 @@ export function buildExtensionSceneModel(input: {
       message: input.snapshot.message,
     },
   };
+}
+
+function deriveFooter(input: {
+  activePopupTab: "source" | "room" | "chat";
+  activeSourceType: SourceType;
+  busyAction: BusyAction;
+  canStopRoom: boolean;
+  followActiveTabVideo: boolean;
+  hasOpenRoomSession: boolean;
+  hasSelectedVideo: boolean;
+  isBusy: boolean;
+  screenReady: boolean;
+  uploadReady: boolean;
+}): PopupFooterModel {
+  const canUseSelectedSource =
+    input.activeSourceType === "auto"
+      ? input.followActiveTabVideo
+      : input.activeSourceType === "sniff"
+        ? input.hasSelectedVideo || input.followActiveTabVideo
+        : input.activeSourceType === "screen"
+          ? input.screenReady
+          : input.uploadReady;
+
+  if (!input.hasOpenRoomSession) {
+    if (input.activeSourceType === "auto" && !input.followActiveTabVideo) {
+      return { variant: "hidden" };
+    }
+
+    return {
+      variant: "start-room",
+      disabled: input.isBusy || !canUseSelectedSource,
+      busy: input.isBusy && input.busyAction === "primary",
+    };
+  }
+
+  if (input.activePopupTab === "room" || input.followActiveTabVideo) {
+    return {
+      variant: "end-share",
+      disabled: input.isBusy || !input.canStopRoom,
+      busy: input.isBusy && input.busyAction === "stop",
+    };
+  }
+
+  return {
+    variant: "change-source",
+    confirmDisabled: input.isBusy || !canUseSelectedSource,
+    busy: input.isBusy && input.busyAction === "primary",
+  };
+}
+
+function getActiveSourceIndicator(input: {
+  followActiveTabVideo: boolean;
+  preparedSourceState?: PreparedSourceState;
+  selectedVideoId: string | null;
+  snapshot: HostRoomSnapshot;
+}): SourceType | null {
+  if (
+    input.snapshot.sourceState !== "attached" ||
+    input.snapshot.activeTabId === null ||
+    input.snapshot.activeFrameId === null
+  ) {
+    return null;
+  }
+
+  if (
+    input.snapshot.activeTabId === OFFSCREEN_ATTACHMENT_TAB_ID &&
+    input.snapshot.activeFrameId === OFFSCREEN_ATTACHMENT_FRAME_ID
+  ) {
+    return getActiveOffscreenSourceIndicator(
+      input.snapshot.sourceLabel,
+      input.preparedSourceState,
+    );
+  }
+
+  if (input.followActiveTabVideo) {
+    return "auto";
+  }
+
+  if (
+    input.selectedVideoId?.startsWith(
+      `${input.snapshot.activeTabId}:${input.snapshot.activeFrameId}:`,
+    )
+  ) {
+    return "sniff";
+  }
+
+  return "sniff";
+}
+
+function getActiveOffscreenSourceIndicator(
+  sourceLabel: string | null,
+  preparedSourceState: PreparedSourceState | undefined,
+): SourceType | null {
+  if (isScreenShareSourceLabel(sourceLabel)) {
+    return "screen";
+  }
+
+  if (sourceLabel) {
+    if (
+      preparedSourceState?.kind === "screen" &&
+      preparedSourceState.ready &&
+      preparedSourceState.label === sourceLabel
+    ) {
+      return "screen";
+    }
+
+    if (
+      preparedSourceState?.kind === "upload" &&
+      preparedSourceState.ready &&
+      preparedSourceState.label === sourceLabel
+    ) {
+      return "upload";
+    }
+
+    return "upload";
+  }
+
+  if (preparedSourceState?.kind === "screen" && preparedSourceState.ready) {
+    return "screen";
+  }
+
+  if (preparedSourceState?.kind === "upload" && preparedSourceState.ready) {
+    return "upload";
+  }
+
+  return null;
+}
+
+function isScreenShareSourceLabel(sourceLabel: string | null) {
+  return (
+    sourceLabel === "Shared screen" ||
+    sourceLabel === "Shared window" ||
+    sourceLabel === "Shared browser tab"
+  );
+}
+
+function getPlaybackLabel(sourceLabel: string | null) {
+  if (!sourceLabel) {
+    return "";
+  }
+
+  const trimmed = sourceLabel.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (trimmed.startsWith("blob:")) {
+    return trimmed;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const fileName = decodeURIComponent(
+      url.pathname.split("/").filter(Boolean).pop() ?? "",
+    );
+    return fileName || url.hostname || trimmed;
+  } catch {
+    return trimmed;
+  }
 }
 
 function toViewerConnectionRow(viewer: ViewerRosterEntry): ViewerConnectionRow {

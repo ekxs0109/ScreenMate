@@ -1,5 +1,6 @@
 import { browser, type Browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
+import type { RoomChatMessage } from "@screenmate/shared";
 import { createLogger } from "../lib/logger";
 import { createContentChatWidgetController } from "./content/content-chat-widget";
 import { createSourceAttachmentRuntime } from "./content/source-attachment";
@@ -49,6 +50,10 @@ export type ContentControlMessage =
       label: string;
       active?: boolean;
     }
+  | {
+      type: "screenmate:update-chat-messages";
+      messages: RoomChatMessage[];
+    }
   | { type: "screenmate:clear-preview" };
 
 type ContentMessage = ListVideosMessage | ContentControlMessage;
@@ -64,7 +69,8 @@ type ListenerResponse =
         visibleIndex: number;
       };
     }
-  | { ok: true };
+  | { ok: true }
+  | undefined;
 
 const contentLogger = createLogger("content");
 const VIDEO_CHANGE_EVENT_NAMES = [
@@ -128,6 +134,15 @@ export function createVideoMessageListener(
           .then((response) => {
             chatWidget.show();
             sendResponse(response);
+          })
+          .catch((error) => {
+            contentLogger.warn("Could not attach source for active room.", {
+              error: error instanceof Error ? error.message : String(error),
+              href: window.location.href,
+              roomId: message.roomSession.roomId,
+              videoId: message.videoId,
+            });
+            sendResponse(undefined);
           });
       });
 
@@ -146,6 +161,14 @@ export function createVideoMessageListener(
             >[0],
           )
           .then(() => {
+            sendResponse({ ok: true });
+          })
+          .catch((error) => {
+            contentLogger.warn("Could not apply inbound signaling in content runtime.", {
+              error: error instanceof Error ? error.message : String(error),
+              href: window.location.href,
+              messageType: message.envelope.messageType,
+            });
             sendResponse({ ok: true });
           });
       });
@@ -193,6 +216,18 @@ export function createVideoMessageListener(
     }
 
     if (
+      message.type === "screenmate:update-chat-messages" &&
+      Array.isArray(message.messages)
+    ) {
+      queueMicrotask(() => {
+        chatWidget.setMessages(message.messages.map(toExtensionChatMessage));
+        sendResponse({ ok: true });
+      });
+
+      return true;
+    }
+
+    if (
       message.type === "screenmate:preview-video" &&
       typeof message.videoId === "string" &&
       typeof message.frameId === "number" &&
@@ -219,6 +254,14 @@ export function createVideoMessageListener(
     }
 
     return undefined;
+  };
+}
+
+function toExtensionChatMessage(message: RoomChatMessage) {
+  return {
+    id: message.messageId,
+    sender: message.senderRole === "host" ? "Host" : message.senderName,
+    text: message.text,
   };
 }
 
@@ -311,6 +354,8 @@ export function createVideoChangeNotifier({
   let highFrequencyTimeout: ReturnType<typeof setTimeout> | null = null;
   let lastSeenVideoCount = 0;
   let lastSeenSrcSignature = "";
+  let lastSeenDocumentTitle = "";
+  let lastSeenLocationHref = "";
   const trackedVideos = new Set<HTMLVideoElement>();
   const lastThumbnailRefreshAtByVideo = new WeakMap<HTMLVideoElement, number>();
   const srcObjectIds = new WeakMap<object, number>();
@@ -391,16 +436,22 @@ export function createVideoChangeNotifier({
   const updateLandscapeSignature = () => {
     lastSeenVideoCount = collectPageVideos().length;
     lastSeenSrcSignature = getVideoSrcSignature();
+    lastSeenDocumentTitle = document.title;
+    lastSeenLocationHref = window.location.href;
   };
 
   const checkLandscape = () => {
     refreshTrackedVideos();
     const currentPageVideoCount = collectPageVideos().length;
     const currentSrcSignature = getVideoSrcSignature();
+    const currentDocumentTitle = document.title;
+    const currentLocationHref = window.location.href;
     const videoCountChanged = currentPageVideoCount !== lastSeenVideoCount;
     const srcChanged = currentSrcSignature !== lastSeenSrcSignature;
+    const titleChanged = currentDocumentTitle !== lastSeenDocumentTitle;
+    const locationChanged = currentLocationHref !== lastSeenLocationHref;
 
-    if (!videoCountChanged && !srcChanged) {
+    if (!videoCountChanged && !srcChanged && !titleChanged && !locationChanged) {
       return;
     }
 
@@ -408,11 +459,23 @@ export function createVideoChangeNotifier({
       currentCount: currentPageVideoCount,
       href: window.location.href,
       previousCount: lastSeenVideoCount,
+      locationChanged,
       srcChanged,
+      titleChanged,
     });
     lastSeenVideoCount = currentPageVideoCount;
     lastSeenSrcSignature = currentSrcSignature;
-    scheduleNotify(videoCountChanged ? "video-count-changed" : "video-src-changed");
+    lastSeenDocumentTitle = currentDocumentTitle;
+    lastSeenLocationHref = currentLocationHref;
+    scheduleNotify(
+      videoCountChanged
+        ? "video-count-changed"
+        : srcChanged
+          ? "video-src-changed"
+          : locationChanged
+            ? "page-location-changed"
+            : "page-title-changed",
+    );
   };
 
   const startPolling = (intervalMs: number) => {
@@ -448,6 +511,7 @@ export function createVideoChangeNotifier({
           "hidden",
         ],
         childList: true,
+        characterData: true,
         subtree: true,
       });
       window.addEventListener("hashchange", handlePageLifecycleEvent);

@@ -131,6 +131,11 @@ class FakePeerConnection {
     this.ontrack?.({ streams: [stream] });
     this.onconnectionstatechange?.();
   }
+
+  emitConnectionState(state: RTCPeerConnectionState) {
+    this.connectionState = state;
+    this.onconnectionstatechange?.();
+  }
 }
 
 function createMemoryStorage(): Storage {
@@ -1281,6 +1286,119 @@ describe("ViewerSession", () => {
     expect(secondPeer.remoteDescription).toEqual({
       type: "offer",
       sdp: "reattach-offer",
+    });
+  });
+
+  it("does not surface direct connectivity errors when a failed peer is replaced by a new offer", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeWebSocket();
+    const initialPeer = new FakePeerConnection();
+    const firstOfferPeer = new FakePeerConnection();
+    const secondOfferPeer = new FakePeerConnection();
+    const peers = [initialPeer, firstOfferPeer, secondOfferPeer];
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peers.shift() as never,
+      initialDisplayName: "Mina",
+      connectionFailureGraceMs: 50,
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "offer",
+        timestamp: 10,
+        payload: {
+          targetSessionId: "viewer_1",
+          sdp: "host-offer",
+        },
+      }),
+    );
+    await Promise.resolve();
+    firstOfferPeer.emitConnectionState("failed");
+
+    expect(session.getSnapshot()).not.toMatchObject({
+      status: "error",
+      errorCode: "DIRECT_CONNECTIVITY_FAILED",
+    });
+
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_2",
+        role: "host",
+        messageType: "offer",
+        timestamp: 11,
+        payload: {
+          targetSessionId: "viewer_1",
+          sdp: "reattach-offer",
+        },
+      }),
+    );
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(secondOfferPeer.remoteDescription).toEqual({
+      type: "offer",
+      sdp: "reattach-offer",
+    });
+    expect(session.getSnapshot()).toMatchObject({
+      status: "connecting",
+      errorCode: null,
+    });
+  });
+
+  it("surfaces direct connectivity errors when a failed peer is not recovered", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeWebSocket();
+    const initialPeer = new FakePeerConnection();
+    const offerPeer = new FakePeerConnection();
+    const peers = [initialPeer, offerPeer];
+    const session = new ViewerSession({
+      apiBaseUrl: "https://api.example",
+      fetchFn: createJoinFetch(),
+      createWebSocket: () => socket as never,
+      createPeerConnection: () => peers.shift() as never,
+      initialDisplayName: "Mina",
+      connectionFailureGraceMs: 50,
+      metricsIntervalMs: 60_000,
+    });
+
+    await session.join("room_demo");
+    socket.emitOpen();
+    socket.emitMessage(
+      JSON.stringify({
+        roomId: "room_demo",
+        sessionId: "host_1",
+        role: "host",
+        messageType: "offer",
+        timestamp: 10,
+        payload: {
+          targetSessionId: "viewer_1",
+          sdp: "host-offer",
+        },
+      }),
+    );
+    await Promise.resolve();
+    offerPeer.emitConnectionState("failed");
+
+    expect(session.getSnapshot()).not.toMatchObject({
+      status: "error",
+      errorCode: "DIRECT_CONNECTIVITY_FAILED",
+    });
+
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(session.getSnapshot()).toMatchObject({
+      status: "error",
+      errorCode: "DIRECT_CONNECTIVITY_FAILED",
     });
   });
 

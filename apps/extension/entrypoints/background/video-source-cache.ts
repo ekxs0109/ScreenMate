@@ -103,22 +103,21 @@ export class VideoSourceCache {
     await this.persist(null);
   }
 
-  async setForFrame(tabId: number, frameId: number, videos: TabVideoSource[]) {
+  async setForFrame(
+    tabId: number,
+    frameId: number,
+    videos: TabVideoSource[],
+    tabMetadata?: SniffTabSummary,
+  ) {
     await this.restore();
-    if (!this.tabs.has(tabId)) {
-      const tabTitle = videos.find((video) => video.tabTitle)?.tabTitle;
-      this.tabs.set(tabId, {
-        tabId,
-        ...(tabTitle !== undefined && { title: tabTitle }),
-      });
-    }
+    const tab = this.upsertTab(tabId, videos, tabMetadata);
 
     const otherFrameVideos = (this.cache.get(tabId) ?? []).filter(
       (video) => video.frameId !== frameId,
     );
     const nextVideos = [
-      ...otherFrameVideos,
-      ...videos.map((video) => ({ ...video, frameId, tabId })),
+      ...otherFrameVideos.map((video) => withTabTitle(video, tab.title)),
+      ...videos.map((video) => withTabTitle({ ...video, frameId, tabId }, tab.title)),
     ];
 
     if (nextVideos.length === 0) {
@@ -231,6 +230,25 @@ export class VideoSourceCache {
     this.cache.set(tabId, existing);
   }
 
+  private upsertTab(
+    tabId: number,
+    videos: TabVideoSource[],
+    tabMetadata?: SniffTabSummary,
+  ): SniffTabSummary {
+    const existing = this.tabs.get(tabId);
+    const tabTitle = videos.find((video) => video.tabTitle)?.tabTitle;
+    const nextTab = {
+      tabId,
+      ...(existing?.title !== undefined && { title: existing.title }),
+      ...(existing?.url !== undefined && { url: existing.url }),
+      ...(tabTitle !== undefined && { title: tabTitle }),
+      ...(tabMetadata?.title !== undefined && { title: tabMetadata.title }),
+      ...(tabMetadata?.url !== undefined && { url: tabMetadata.url }),
+    };
+    this.tabs.set(tabId, nextTab);
+    return nextTab;
+  }
+
   private async persist(error: string | null) {
     const now = Date.now();
     this.stateMeta = {
@@ -275,6 +293,20 @@ function normalizeVideoSniffState(
           : null,
     refreshId: typeof state.refreshId === "string" ? state.refreshId : null,
     error: typeof state.error === "string" ? state.error : null,
+  };
+}
+
+function withTabTitle(
+  video: TabVideoSource,
+  tabTitle: string | undefined,
+): TabVideoSource {
+  if (tabTitle === undefined) {
+    return video;
+  }
+
+  return {
+    ...video,
+    tabTitle,
   };
 }
 

@@ -1,7 +1,12 @@
 import { browser, type Browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
 import { storage } from "wxt/utils/storage";
-import { getScreenMateApiBaseUrl } from "../lib/config";
+import type { RoomChatMessage } from "@screenmate/shared";
+import {
+  getScreenMateApiBaseUrl,
+  getScreenMateViewerBaseUrl,
+} from "../lib/config";
+import type { LocalMediaMetadata } from "../lib/local-media-store";
 import { createLogger } from "../lib/logger";
 import {
   requestRoomCreation,
@@ -28,21 +33,52 @@ import {
 import type { VideoSource as LocalVideoSource } from "./content/video-detector";
 
 type SourceFingerprintMatch = Omit<SourceFingerprint, "frameId" | "tabId">;
+const OFFSCREEN_ATTACHMENT_TAB_ID = -1;
+const OFFSCREEN_ATTACHMENT_FRAME_ID = -1;
+
+export type StartSharingSource =
+  | { kind: "tab-video"; tabId: number; frameId: number; videoId: string }
+  | { kind: "active-tab-video" }
+  | { kind: "prepared-offscreen"; sourceType: "screen" | "upload" };
 
 export type HostMessage =
   | { type: "screenmate:get-room-session" }
+  | { type: "screenmate:get-prepared-source-state" }
+  | { type: "screenmate:clear-prepared-source-state" }
   | { type: "screenmate:send-chat-message"; text: string }
   | { type: "screenmate:set-room-password"; password: string }
   | { type: "screenmate:list-videos"; refresh?: boolean }
   | { type: "screenmate:get-video-sniff-state" }
   | { type: "screenmate:ensure-video-sniff-state" }
   | { type: "screenmate:refresh-video-sniff-state" }
-  | { type: "screenmate:start-room"; frameId: number; tabId?: number }
+  | { type: "screenmate:get-follow-active-tab-video-state" }
+  | { type: "screenmate:set-follow-active-tab-video"; enabled: boolean }
   | {
-      type: "screenmate:attach-source";
-      videoId: string;
-      frameId: number;
-      tabId?: number;
+      type: "screenmate:prepare-screen-source";
+      captureType: "screen" | "window" | "tab";
+    }
+  | {
+      type: "screenmate:prepare-local-file-source";
+      fileId: string;
+      metadata: LocalMediaMetadata;
+    }
+  | {
+      type: "screenmate:start-sharing";
+      source: StartSharingSource;
+    }
+  | {
+      type: "screenmate:sync-local-playback";
+      action: "play" | "pause" | "seek";
+      currentTime?: number;
+    }
+  | {
+      type: "screenmate:offscreen-signal-outbound";
+      envelope: Record<string, unknown>;
+    }
+  | {
+      type: "screenmate:offscreen-source-detached";
+      roomId: string;
+      reason: "track-ended" | "content-invalidated" | "manual-detach";
     }
   | { type: "screenmate:stop-room" }
   | {
@@ -86,6 +122,7 @@ export type TabVideoSource = LocalVideoSource & {
 };
 
 export type PreviewAck = { ok: true };
+export type FollowActiveTabVideoState = { enabled: boolean };
 export type InternalHostNetworkMessage = {
   type: "screenmate:create-room";
   apiBaseUrl: string;
@@ -105,6 +142,13 @@ type AttachSourceResponse = {
   fingerprint: SourceFingerprintMatch;
 };
 
+type AttachSourceInFrameRequest = {
+  type: "screenmate:attach-source";
+  videoId: string;
+  frameId: number;
+  tabId?: number;
+};
+
 type TabContentMessage =
   | Extract<HostMessage, { type: "screenmate:list-videos" }>
   | Extract<HostMessage, { type: "screenmate:preview-video" }>
@@ -122,12 +166,18 @@ type TabContentMessage =
   | {
       type: "screenmate:signal-inbound";
       envelope: SignalEnvelope;
+    }
+  | {
+      type: "screenmate:update-chat-messages";
+      messages: RoomChatMessage[];
     };
 
 type HandlerResponse =
   | HostRoomSnapshot
   | TabVideoSource[]
   | VideoSniffState
+  | PreparedSourceState
+  | FollowActiveTabVideoState
   | PreviewAck
   | {
       ok: boolean;
@@ -144,11 +194,56 @@ type InternalHostNetworkResponse =
   | RoomAccessResponse
   | InternalHostNetworkErrorResponse;
 
+export type PreparedSourceState =
+  | { status: "prepared-source"; kind: null; ready: false; label: null; metadata: null; error: string | null }
+  | {
+      status: "prepared-source";
+      kind: "screen";
+      ready: true;
+      label: string;
+      metadata: null;
+      captureType: "screen" | "window" | "tab";
+      error: null;
+    }
+  | {
+      status: "prepared-source";
+      kind: "upload";
+      ready: true;
+      label: string;
+      metadata: LocalMediaMetadata;
+      fileId: string;
+      error: null;
+    };
+
 const backgroundLogger = createLogger("background");
 const VIDEO_SNIFF_AUTO_REFRESH_TTL_MS = 30_000;
 const VIDEO_SNIFF_STUCK_REFRESH_MS = 60_000;
+const FOLLOW_ACTIVE_TAB_VIDEO_DEBOUNCE_MS = 700;
+function createEmptyPreparedSourceState(): PreparedSourceState {
+  return {
+    status: "prepared-source",
+    kind: null,
+    ready: false,
+    label: null,
+    metadata: null,
+    error: null,
+  };
+}
+type AttachmentSignalTarget = {
+  tabId: number;
+  frameId: number;
+};
+type AttachmentRoutingState = {
+  pendingAttachmentTarget: AttachmentSignalTarget | null;
+  followActiveTabVideoPromise: Promise<HostRoomSnapshot> | null;
+};
+type FollowActiveTabVideoStateStorage = {
+  getValue: () => Promise<FollowActiveTabVideoState | null>;
+  setValue: (state: FollowActiveTabVideoState) => Promise<void>;
+};
 type HostMessageHandlerDependencies = {
   apiBaseUrl?: string;
+  viewerBaseUrl?: string;
   createRoom: (apiBaseUrl: string) => Promise<InternalHostNetworkResponse>;
   queryActiveTabId: () => Promise<number | null>;
   queryCurrentWindowTabs?: () => Promise<
@@ -158,22 +253,71 @@ type HostMessageHandlerDependencies = {
   runtime: HostRoomRuntime;
   videoCache?: VideoSourceCache;
   videoListScanPromise?: Promise<TabVideoSource[]> | null;
+  followActiveTabVideoStateStorage?: FollowActiveTabVideoStateStorage;
+  attachmentRoutingState?: AttachmentRoutingState;
   sendTabMessage: (
     tabId: number,
     message: TabContentMessage,
     options?: { frameId?: number },
   ) => Promise<TabMessageResponse>;
   forwardInboundSignal: (envelope: SignalEnvelope) => void;
+  preparedSourceState?: PreparedSourceState;
+  ensureOffscreenDocument?: () => Promise<void>;
+  sendOffscreenMessage?: (
+    message: OffscreenControlMessage,
+  ) => Promise<TabMessageResponse>;
 };
+
+type OffscreenControlMessage =
+  | { type: "screenmate:offscreen-get-prepared-display-media-state" }
+  | { type: "screenmate:offscreen-clear-prepared-source" }
+  | {
+      type: "screenmate:offscreen-prepare-display-media";
+      captureType: "screen" | "window" | "tab";
+    }
+  | {
+      type: "screenmate:offscreen-attach-display-media";
+      roomSession: NonNullable<ReturnType<HostRoomRuntime["getAttachSession"]>>;
+      sourceLabel: string;
+    }
+  | {
+      type: "screenmate:offscreen-attach-local-file";
+      roomSession: NonNullable<ReturnType<HostRoomRuntime["getAttachSession"]>>;
+      fileId: string;
+      metadata: LocalMediaMetadata;
+    }
+  | {
+      type: "screenmate:offscreen-signal-inbound";
+      envelope: SignalEnvelope;
+    }
+  | {
+      type: "screenmate:offscreen-update-ice-servers";
+      iceServers: RTCIceServer[];
+    }
+  | {
+      type: "screenmate:offscreen-local-playback-control";
+      action: "play" | "pause" | "seek";
+      currentTime?: number;
+    }
+  | { type: "screenmate:offscreen-detach-source" };
 
 type InternalHostNetworkHandlerDependencies = {
   fetchImpl: typeof fetch;
 };
 
+export function createAttachmentRoutingState(): AttachmentRoutingState {
+  return {
+    pendingAttachmentTarget: null,
+    followActiveTabVideoPromise: null,
+  };
+}
+
 export function createHostMessageHandler(
   dependencies: HostMessageHandlerDependencies,
 ) {
-  const apiBaseUrl = dependencies.apiBaseUrl ?? getScreenMateApiBaseUrl();
+  dependencies.attachmentRoutingState ??= createAttachmentRoutingState();
+  let preparedSourceState =
+    dependencies.preparedSourceState ?? createEmptyPreparedSourceState();
 
   return async (message: unknown): Promise<HandlerResponse | undefined> => {
     if (!isHostMessage(message)) {
@@ -182,6 +326,95 @@ export function createHostMessageHandler(
 
     if (message.type === "screenmate:get-room-session") {
       return dependencies.runtime.getSnapshot();
+    }
+
+    if (message.type === "screenmate:get-prepared-source-state") {
+      preparedSourceState = await refreshPreparedSourceStateFromOffscreen(
+        dependencies,
+        preparedSourceState,
+      );
+      return preparedSourceState;
+    }
+
+    if (message.type === "screenmate:clear-prepared-source-state") {
+      preparedSourceState = createEmptyPreparedSourceState();
+      try {
+        await dependencies.sendOffscreenMessage?.({
+          type: "screenmate:offscreen-clear-prepared-source",
+        });
+      } catch (error) {
+        backgroundLogger.debug("Could not clear offscreen prepared source.", {
+          error: toErrorMessage(error),
+        });
+      }
+      return preparedSourceState;
+    }
+
+    if (message.type === "screenmate:prepare-screen-source") {
+      if (!dependencies.ensureOffscreenDocument || !dependencies.sendOffscreenMessage) {
+        preparedSourceState = {
+          status: "prepared-source",
+          kind: null,
+          ready: false,
+          label: null,
+          metadata: null,
+          error: "Offscreen screen capture is not available in this browser.",
+        };
+        return preparedSourceState;
+      }
+
+      try {
+        await dependencies.ensureOffscreenDocument();
+        const response = await dependencies.sendOffscreenMessage({
+          type: "screenmate:offscreen-prepare-display-media",
+          captureType: message.captureType,
+        });
+        if (!isAttachSourceResponse(response)) {
+          preparedSourceState = {
+            status: "prepared-source",
+            kind: null,
+            ready: false,
+            label: null,
+            metadata: null,
+            error: "Screen capture was cancelled.",
+          };
+          return preparedSourceState;
+        }
+
+        preparedSourceState = {
+          status: "prepared-source",
+          kind: "screen",
+          ready: true,
+          label: response.sourceLabel,
+          metadata: null,
+          captureType: message.captureType,
+          error: null,
+        };
+        return preparedSourceState;
+      } catch (error) {
+        preparedSourceState = {
+          status: "prepared-source",
+          kind: null,
+          ready: false,
+          label: null,
+          metadata: null,
+          error: toErrorMessage(error),
+        };
+        return preparedSourceState;
+      }
+    }
+
+    if (message.type === "screenmate:prepare-local-file-source") {
+      preparedSourceState = {
+        status: "prepared-source",
+        kind: "upload",
+        ready: true,
+        label: message.metadata.name,
+        metadata: message.metadata,
+        fileId: message.fileId,
+        error: null,
+      };
+      return preparedSourceState;
     }
 
     if (message.type === "screenmate:send-chat-message") {
@@ -200,7 +433,31 @@ export function createHostMessageHandler(
 
     if (message.type === "screenmate:stop-room") {
       await detachCurrentAttachmentOwner(dependencies);
+      preparedSourceState = createEmptyPreparedSourceState();
       return dependencies.runtime.close("Room closed.");
+    }
+
+    if (message.type === "screenmate:offscreen-source-detached") {
+      const snapshot = dependencies.runtime.getSnapshot();
+      if (!isOffscreenAttachmentOwner(snapshot)) {
+        return snapshot;
+      }
+
+      return dependencies.runtime.markRecovering(message.reason);
+    }
+
+    if (message.type === "screenmate:offscreen-signal-outbound") {
+      dependencies.runtime.sendSignal(message.envelope);
+      return { ok: true };
+    }
+
+    if (message.type === "screenmate:sync-local-playback") {
+      await dependencies.sendOffscreenMessage?.({
+        type: "screenmate:offscreen-local-playback-control",
+        action: message.action,
+        currentTime: message.currentTime,
+      });
+      return { ok: true };
     }
 
     if (message.type === "screenmate:source-detached") {
@@ -214,7 +471,21 @@ export function createHostMessageHandler(
 
     if (message.type === "screenmate:signal-outbound") {
       const snapshot = dependencies.runtime.getSnapshot();
-      if (!isCurrentAttachmentOwner(snapshot, message)) {
+      if (!isCurrentOrPendingAttachmentOwner(dependencies, snapshot, message)) {
+        backgroundLogger.warn("Dropping outbound signal from non-owner content.", {
+          activeFrameId: snapshot.activeFrameId,
+          activeTabId: snapshot.activeTabId,
+          messageFrameId: message.frameId ?? null,
+          messageTabId: message.tabId ?? null,
+          messageType: readSignalMessageType(message.envelope),
+          pendingFrameId:
+            dependencies.attachmentRoutingState?.pendingAttachmentTarget?.frameId ??
+            null,
+          pendingTabId:
+            dependencies.attachmentRoutingState?.pendingAttachmentTarget?.tabId ??
+            null,
+          sourceState: snapshot.sourceState,
+        });
         return { ok: true };
       }
 
@@ -228,6 +499,40 @@ export function createHostMessageHandler(
         : null;
     if (message.type === "screenmate:get-video-sniff-state") {
       return getVideoSniffState(dependencies);
+    }
+
+    if (message.type === "screenmate:get-follow-active-tab-video-state") {
+      return getFollowActiveTabVideoState(dependencies);
+    }
+
+    if (message.type === "screenmate:set-follow-active-tab-video") {
+      const state = { enabled: message.enabled };
+      await setFollowActiveTabVideoState(dependencies, state);
+      return state;
+    }
+
+    if (message.type === "screenmate:start-sharing") {
+      if (message.source.kind === "prepared-offscreen") {
+        preparedSourceState = await refreshPreparedSourceStateFromOffscreen(
+          dependencies,
+          preparedSourceState,
+        );
+        const snapshot = await startSharing(
+          dependencies,
+          preparedSourceState,
+          message.source,
+        );
+        if (
+          message.source.sourceType === "screen" &&
+          snapshot.sourceState === "attached" &&
+          isOffscreenAttachmentOwner(snapshot)
+        ) {
+          preparedSourceState = createEmptyPreparedSourceState();
+        }
+        return snapshot;
+      }
+
+      return startSharing(dependencies, preparedSourceState, message.source);
     }
 
     if (message.type === "screenmate:ensure-video-sniff-state") {
@@ -275,42 +580,16 @@ export function createHostMessageHandler(
       return broadcastMessageToTab(dependencies, tabId, message);
     }
 
-    if (message.type === "screenmate:start-room") {
-      const roomResponse = await dependencies.createRoom(apiBaseUrl);
-      if (!isRoomCreateResponse(roomResponse)) {
-        return createHostRoomSnapshot({
-          message: isInternalHostNetworkErrorResponse(roomResponse)
-            ? roomResponse.error
-            : "Room creation returned an incomplete response.",
-        });
-      }
-
-      const snapshot = await dependencies.runtime.startRoom({
-        roomId: roomResponse.roomId,
-        hostSessionId: roomResponse.hostSessionId ?? "host",
-        hostToken: roomResponse.hostToken,
-        signalingUrl: roomResponse.signalingUrl,
-        iceServers: roomResponse.iceServers ?? [],
-        turnCredentialExpiresAt: roomResponse.turnCredentialExpiresAt ?? null,
-        activeTabId: tabId,
-        activeFrameId: message.frameId,
-        viewerSessionIds: [],
-        viewerCount: 0,
-        viewerRoster: [],
-        chatMessages: [],
-        sourceFingerprint: null,
-        recoverByTimestamp: null,
-      });
-      await dependencies.runtime.connectSignaling(dependencies.forwardInboundSignal);
-      return snapshot;
-    }
-
-    if (message.type === "screenmate:attach-source") {
-      return attachSourceInFrame(dependencies, tabId, message);
-    }
-
     if (message.type === "screenmate:content-ready") {
       if (typeof message.tabId === "number") {
+        const tabMetadata = await querySniffTabById(dependencies, message.tabId);
+        if (isScreenMateViewerUrl(tabMetadata?.url, dependencies.viewerBaseUrl)) {
+          backgroundLogger.info("Ignoring content-ready from ScreenMate viewer tab.", {
+            tabId: message.tabId,
+          });
+          return dependencies.runtime.getSnapshot();
+        }
+
         await getVideoCache(dependencies).setForFrame(
           message.tabId,
           message.frameId,
@@ -319,7 +598,11 @@ export function createHostMessageHandler(
             frameId: message.frameId,
             tabId: message.tabId as number,
           })),
+          tabMetadata ?? undefined,
         );
+      }
+      if (await shouldFollowContentReadyTab(dependencies, tabId)) {
+        return followActiveTabVideoOnce(dependencies, tabId);
       }
       return maybeReattachSource(dependencies, tabId, message);
     }
@@ -407,11 +690,22 @@ export default defineBackground(() => {
     apiBaseUrl,
     storage: browser.storage.session,
     onSnapshotUpdated() {
+      const snapshot = runtime.getSnapshot();
       void browser.runtime
         .sendMessage({ type: "screenmate:room-snapshot-updated" })
         .catch(() => {
           // No popup may be open to receive the notification.
         });
+      void notifyAttachedContentChat({
+        snapshot,
+        sendTabMessage(tabId, message, options) {
+          return browser.tabs.sendMessage(
+            tabId,
+            message,
+            options,
+          ) as Promise<TabMessageResponse>;
+        },
+      });
     },
   });
   const videoSniffStateStorage = storage.defineItem<VideoSniffState>(
@@ -420,11 +714,23 @@ export default defineBackground(() => {
       fallback: createEmptyVideoSniffState(),
     },
   );
+  const followActiveTabVideoStateStorage =
+    storage.defineItem<FollowActiveTabVideoState>(
+      "local:screenmate-follow-active-tab-video-state",
+      {
+        fallback: { enabled: false },
+      },
+    );
   const videoCache = new VideoSourceCache(videoSniffStateStorage);
+  const attachmentRoutingState = createAttachmentRoutingState();
   const internalHandler = createInternalHostNetworkHandler({
     fetchImpl: fetch,
   });
+  const ensureOffscreenDocument = createOffscreenDocumentEnsurer();
+  const sendOffscreenMessage = (message: OffscreenControlMessage) =>
+    browser.runtime.sendMessage(message) as Promise<TabMessageResponse>;
   const forwardInboundSignal = createForwardInboundSignalHandler({
+    attachmentRoutingState,
     runtime,
     sendTabMessage(tabId, message, options) {
       return browser.tabs.sendMessage(
@@ -433,8 +739,9 @@ export default defineBackground(() => {
         options,
       ) as Promise<TabMessageResponse>;
     },
+    sendOffscreenMessage,
   });
-  const handler = createHostMessageHandler({
+  const messageDependencies: HostMessageHandlerDependencies = {
     apiBaseUrl,
     createRoom: async (requestedApiBaseUrl) => {
       return (
@@ -478,6 +785,10 @@ export default defineBackground(() => {
     },
     runtime,
     videoCache,
+    followActiveTabVideoStateStorage,
+    attachmentRoutingState,
+    ensureOffscreenDocument,
+    sendOffscreenMessage,
     sendTabMessage(tabId, message, options) {
       return browser.tabs.sendMessage(
         tabId,
@@ -486,7 +797,8 @@ export default defineBackground(() => {
       ) as Promise<TabMessageResponse>;
     },
     forwardInboundSignal,
-  });
+  };
+  const handler = createHostMessageHandler(messageDependencies);
 
   void runtime
     .restoreFromStorage()
@@ -510,7 +822,126 @@ export default defineBackground(() => {
   browser.tabs.onRemoved.addListener((tabId) => {
     void videoCache.removeTab(tabId);
   });
+
+  const scheduleFollowActiveTabVideo = createFollowActiveTabVideoScheduler({
+    dependencies: messageDependencies,
+  });
+
+  browser.tabs.onActivated.addListener(({ tabId }) => {
+    scheduleFollowActiveTabVideo(tabId);
+  });
+
+  browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (!tab.active || changeInfo.status !== "complete") {
+      return;
+    }
+
+    scheduleFollowActiveTabVideo(tabId);
+  });
 });
+
+export async function notifyAttachedContentChat({
+  snapshot,
+  sendTabMessage,
+}: {
+  snapshot: HostRoomSnapshot;
+  sendTabMessage: (
+    tabId: number,
+    message: Extract<TabContentMessage, { type: "screenmate:update-chat-messages" }>,
+    options: { frameId: number },
+  ) => Promise<TabMessageResponse>;
+}) {
+  if (
+    snapshot.sourceState !== "attached" ||
+    snapshot.activeTabId === null ||
+    snapshot.activeFrameId === null ||
+    isOffscreenAttachmentOwner(snapshot)
+  ) {
+    return false;
+  }
+
+  try {
+    await sendTabMessage(
+      snapshot.activeTabId,
+      {
+        type: "screenmate:update-chat-messages",
+        messages: snapshot.chatMessages,
+      },
+      { frameId: snapshot.activeFrameId },
+    );
+    return true;
+  } catch (error) {
+    backgroundLogger.debug("Could not push chat messages to attached content.", {
+      activeFrameId: snapshot.activeFrameId,
+      activeTabId: snapshot.activeTabId,
+      error: toErrorMessage(error),
+    });
+    return false;
+  }
+}
+
+function createOffscreenDocumentEnsurer() {
+  let creating: Promise<void> | null = null;
+
+  return async () => {
+    const chromeApi = getChromeApi();
+    const offscreen = chromeApi?.offscreen;
+    if (!offscreen?.createDocument) {
+      throw new Error("Offscreen documents are not available.");
+    }
+
+    const offscreenUrl = browser.runtime.getURL("/offscreen.html");
+    if (offscreen.hasDocument && await offscreen.hasDocument()) {
+      return;
+    }
+
+    const contexts = await chromeApi?.runtime?.getContexts?.({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+      documentUrls: [offscreenUrl],
+    });
+    if (contexts && contexts.length > 0) {
+      return;
+    }
+
+    creating ??= offscreen
+      .createDocument({
+        url: "offscreen.html",
+        reasons: ["DISPLAY_MEDIA", "USER_MEDIA", "WEB_RTC"],
+        justification:
+          "ScreenMate keeps screen and local video streams alive while the popup is closed.",
+      })
+      .catch((error: unknown) => {
+        if (!String(error).includes("Only a single offscreen document")) {
+          throw error;
+        }
+      })
+      .finally(() => {
+        creating = null;
+      });
+    await creating;
+  };
+}
+
+type ChromeRuntimeApi = {
+  offscreen?: {
+    createDocument?: (parameters: {
+      url: string;
+      reasons: string[];
+      justification: string;
+    }) => Promise<void>;
+    hasDocument?: () => Promise<boolean>;
+  };
+  runtime?: {
+    getContexts?: (parameters: {
+      contextTypes: string[];
+      documentUrls?: string[];
+    }) => Promise<Array<unknown>>;
+  };
+};
+
+function getChromeApi() {
+  return (globalThis as typeof globalThis & { chrome?: ChromeRuntimeApi }).chrome;
+}
 
 export function createInternalHostNetworkHandler(
   dependencies: InternalHostNetworkHandlerDependencies,
@@ -575,6 +1006,7 @@ export function createInternalHostNetworkHandler(
 }
 
 export function createForwardInboundSignalHandler(dependencies: {
+  attachmentRoutingState?: AttachmentRoutingState;
   runtime: Pick<
     HostRoomRuntime,
     "getSnapshot" | "shouldRefreshHostIce" | "refreshHostIce"
@@ -584,8 +1016,17 @@ export function createForwardInboundSignalHandler(dependencies: {
     message: TabContentMessage,
     options?: { frameId?: number },
   ) => Promise<TabMessageResponse>;
+  sendOffscreenMessage?: (
+    message: OffscreenControlMessage,
+  ) => Promise<TabMessageResponse>;
 }) {
   function getActiveAttachmentTarget() {
+    const pendingTarget = dependencies.attachmentRoutingState
+      ?.pendingAttachmentTarget;
+    if (pendingTarget) {
+      return pendingTarget;
+    }
+
     const snapshot = dependencies.runtime.getSnapshot();
 
     if (
@@ -623,14 +1064,21 @@ export function createForwardInboundSignalHandler(dependencies: {
         }
         const refreshedTarget = getActiveAttachmentTarget();
         if (refreshedTarget) {
-          await dependencies.sendTabMessage(
-            refreshedTarget.tabId,
-            {
-              type: "screenmate:update-ice-servers",
+          if (isOffscreenSignalTarget(refreshedTarget)) {
+            await dependencies.sendOffscreenMessage?.({
+              type: "screenmate:offscreen-update-ice-servers",
               iceServers: refreshed.iceServers,
-            },
-            { frameId: refreshedTarget.frameId },
-          );
+            });
+          } else {
+            await dependencies.sendTabMessage(
+              refreshedTarget.tabId,
+              {
+                type: "screenmate:update-ice-servers",
+                iceServers: refreshed.iceServers,
+              },
+              { frameId: refreshedTarget.frameId },
+            );
+          }
         }
       } catch (error) {
         backgroundLogger.warn("Could not refresh host ICE before forwarding.", {
@@ -644,18 +1092,46 @@ export function createForwardInboundSignalHandler(dependencies: {
 
     const target = getActiveAttachmentTarget();
     if (!target) {
+      backgroundLogger.warn("Could not forward inbound signal because no attachment target exists.", {
+        messageType: envelope.messageType,
+        pendingFrameId:
+          dependencies.attachmentRoutingState?.pendingAttachmentTarget?.frameId ??
+          null,
+        pendingTabId:
+          dependencies.attachmentRoutingState?.pendingAttachmentTarget?.tabId ??
+          null,
+      });
       return;
     }
 
+    backgroundLogger.debug("Forwarding inbound signal to content attachment target.", {
+      frameId: target.frameId,
+      messageType: envelope.messageType,
+      pendingFrameId:
+        dependencies.attachmentRoutingState?.pendingAttachmentTarget?.frameId ??
+        null,
+      pendingTabId:
+        dependencies.attachmentRoutingState?.pendingAttachmentTarget?.tabId ??
+        null,
+      tabId: target.tabId,
+    });
+
     try {
-      await dependencies.sendTabMessage(
-        target.tabId,
-        {
-          type: "screenmate:signal-inbound",
+      if (isOffscreenSignalTarget(target)) {
+        await dependencies.sendOffscreenMessage?.({
+          type: "screenmate:offscreen-signal-inbound",
           envelope,
-        },
-        { frameId: target.frameId },
-      );
+        });
+      } else {
+        await dependencies.sendTabMessage(
+          target.tabId,
+          {
+            type: "screenmate:signal-inbound",
+            envelope,
+          },
+          { frameId: target.frameId },
+        );
+      }
     } catch (error) {
       backgroundLogger.warn("Could not forward inbound signal to content.", {
         activeFrameId: target.frameId,
@@ -665,6 +1141,13 @@ export function createForwardInboundSignalHandler(dependencies: {
       });
     }
   };
+}
+
+function isOffscreenSignalTarget(target: AttachmentSignalTarget) {
+  return (
+    target.tabId === OFFSCREEN_ATTACHMENT_TAB_ID &&
+    target.frameId === OFFSCREEN_ATTACHMENT_FRAME_ID
+  );
 }
 
 async function listVideosForTab(
@@ -763,6 +1246,224 @@ async function getVideoSniffState(
   return state;
 }
 
+async function getFollowActiveTabVideoState(
+  dependencies: HostMessageHandlerDependencies,
+): Promise<FollowActiveTabVideoState> {
+  if (!dependencies.followActiveTabVideoStateStorage) {
+    return { enabled: false };
+  }
+
+  const stored = await dependencies.followActiveTabVideoStateStorage.getValue();
+  return stored?.enabled === true ? { enabled: true } : { enabled: false };
+}
+
+async function setFollowActiveTabVideoState(
+  dependencies: HostMessageHandlerDependencies,
+  state: FollowActiveTabVideoState,
+) {
+  await dependencies.followActiveTabVideoStateStorage?.setValue(state);
+}
+
+async function shouldFollowContentReadyTab(
+  dependencies: HostMessageHandlerDependencies,
+  tabId: number,
+) {
+  const state = await getFollowActiveTabVideoState(dependencies);
+  if (!state.enabled) {
+    return false;
+  }
+
+  if (await isScreenMateViewerTab(dependencies, tabId)) {
+    backgroundLogger.info("Ignoring content-ready follow from ScreenMate viewer tab.", {
+      tabId,
+    });
+    return false;
+  }
+
+  return await dependencies.queryActiveTabId() === tabId;
+}
+
+function createFollowActiveTabVideoScheduler({
+  debounceMs = FOLLOW_ACTIVE_TAB_VIDEO_DEBOUNCE_MS,
+  dependencies,
+}: {
+  debounceMs?: number;
+  dependencies: HostMessageHandlerDependencies;
+}) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let pendingTabId: number | null = null;
+
+  return (tabId: number | null) => {
+    pendingTabId = tabId;
+    if (timer) {
+      clearTimeout(timer);
+    }
+
+    timer = setTimeout(() => {
+      timer = null;
+      const nextTabId = pendingTabId;
+      pendingTabId = null;
+
+      void getFollowActiveTabVideoState(dependencies)
+        .then((state) => {
+          if (!state.enabled) {
+            return undefined;
+          }
+
+          return followActiveTabVideoOnce(dependencies, nextTabId);
+        })
+        .catch((error) => {
+          backgroundLogger.warn("Could not follow active tab video.", {
+            error: toErrorMessage(error),
+            tabId: nextTabId,
+          });
+        });
+    }, debounceMs);
+  };
+}
+
+export async function followActiveTabVideoOnce(
+  dependencies: HostMessageHandlerDependencies,
+  activeTabId: number | null,
+): Promise<HostRoomSnapshot> {
+  dependencies.attachmentRoutingState ??= createAttachmentRoutingState();
+  if (dependencies.attachmentRoutingState.followActiveTabVideoPromise) {
+    backgroundLogger.info("Joining in-flight active tab follow.", {
+      activeTabId,
+    });
+    return dependencies.attachmentRoutingState.followActiveTabVideoPromise;
+  }
+
+  const followPromise = followActiveTabVideoOnceUnserialized(
+    dependencies,
+    activeTabId,
+  );
+  dependencies.attachmentRoutingState.followActiveTabVideoPromise = followPromise;
+
+  try {
+    return await followPromise;
+  } finally {
+    if (
+      dependencies.attachmentRoutingState.followActiveTabVideoPromise ===
+      followPromise
+    ) {
+      dependencies.attachmentRoutingState.followActiveTabVideoPromise = null;
+    }
+  }
+}
+
+async function followActiveTabVideoOnceUnserialized(
+  dependencies: HostMessageHandlerDependencies,
+  activeTabId: number | null,
+): Promise<HostRoomSnapshot> {
+  const snapshot = dependencies.runtime.getSnapshot();
+  if (
+    snapshot.roomId === null ||
+    snapshot.roomLifecycle === "idle" ||
+    snapshot.roomLifecycle === "closed"
+  ) {
+    backgroundLogger.info("Skipping active tab follow because no room is open.", {
+      activeTabId,
+      roomLifecycle: snapshot.roomLifecycle,
+    });
+    return snapshot;
+  }
+
+  if (activeTabId === null) {
+    await detachCurrentAttachmentOwner(dependencies, snapshot);
+    return dependencies.runtime.markMissing("No video attached.");
+  }
+
+  if (await isScreenMateViewerTab(dependencies, activeTabId)) {
+    backgroundLogger.info("Active tab follow ignored the ScreenMate viewer tab.", {
+      activeTabId,
+    });
+    await detachCurrentAttachmentOwner(dependencies, snapshot);
+    return dependencies.runtime.markMissing("No video attached.");
+  }
+
+  const videos = await listVideosForTab(dependencies, activeTabId);
+  await getVideoCache(dependencies).setForTab(activeTabId, videos);
+  const bestVideo = selectBestFollowVideo(videos);
+
+  if (!bestVideo) {
+    backgroundLogger.info("Active tab follow found no usable video.", {
+      activeTabId,
+      videoCount: videos.length,
+    });
+    await detachCurrentAttachmentOwner(dependencies, snapshot);
+    return dependencies.runtime.markMissing("No video attached.");
+  }
+
+  const currentFingerprint = dependencies.runtime.getSourceFingerprint();
+  if (
+    currentFingerprint &&
+    bestVideo.fingerprint &&
+    isSameAttachedFollowSource(currentFingerprint, bestVideo)
+  ) {
+    backgroundLogger.info("Active tab follow skipped duplicate source.", {
+      activeTabId,
+      frameId: bestVideo.frameId,
+      videoId: bestVideo.id,
+    });
+    return snapshot;
+  }
+
+  backgroundLogger.info("Active tab follow attaching best video.", {
+    activeTabId,
+    frameId: bestVideo.frameId,
+    isPlaying: bestVideo.isPlaying === true,
+    label: bestVideo.label,
+    videoId: bestVideo.id,
+    visibleArea: bestVideo.visibleArea ?? null,
+  });
+
+  return attachSourceInFrame(dependencies, activeTabId, {
+    type: "screenmate:attach-source",
+    frameId: bestVideo.frameId,
+    tabId: activeTabId,
+    videoId: bestVideo.id,
+  });
+}
+
+function isSameAttachedFollowSource(
+  stored: SourceFingerprint,
+  candidate: TabVideoSource,
+) {
+  if (
+    stored.tabId !== candidate.tabId ||
+    stored.frameId !== candidate.frameId ||
+    !candidate.fingerprint
+  ) {
+    return false;
+  }
+
+  if (stored.primaryUrl && candidate.fingerprint.primaryUrl) {
+    return stored.primaryUrl === candidate.fingerprint.primaryUrl;
+  }
+
+  return isExactFingerprintMatch(stored, candidate.fingerprint);
+}
+
+function selectBestFollowVideo(videos: TabVideoSource[]): TabVideoSource | null {
+  return videos
+    .filter((video) => video.isVisible !== false)
+    .sort(compareFollowVideoCandidates)[0] ?? null;
+}
+
+function compareFollowVideoCandidates(
+  left: TabVideoSource,
+  right: TabVideoSource,
+) {
+  const leftPlaying = left.isPlaying === true ? 1 : 0;
+  const rightPlaying = right.isPlaying === true ? 1 : 0;
+  if (leftPlaying !== rightPlaying) {
+    return rightPlaying - leftPlaying;
+  }
+
+  return (right.visibleArea ?? 0) - (left.visibleArea ?? 0);
+}
+
 async function ensureVideoSniffState(
   dependencies: HostMessageHandlerDependencies,
   activeTabId: number | null,
@@ -815,7 +1516,9 @@ async function scanVideosAcrossTabs(
   const windowTabs = await queryWindowTabs(dependencies, activeTabId);
   const sniffTabs = windowTabs.map(toSniffTabSummary);
   await videoCache.markScanning(sniffTabs);
-  const scannableTabs = windowTabs.filter(isScannableTab);
+  const scannableTabs = windowTabs.filter((tab) =>
+    isScannableSourceTab(tab, dependencies.viewerBaseUrl),
+  );
 
   backgroundLogger.info("Scanning normal browser tabs for videos.", {
     scannableTabCount: scannableTabs.length,
@@ -932,12 +1635,75 @@ function toSniffTabSummary(tab: { id: number; title?: string; url?: string }): S
   };
 }
 
-function isScannableTab(tab: { id: number; url?: string }) {
+function isScannableSourceTab(
+  tab: { id: number; url?: string },
+  viewerBaseUrl?: string,
+) {
   if (!tab.url) {
     return true;
   }
 
-  return tab.url.startsWith("http://") || tab.url.startsWith("https://");
+  if (!(tab.url.startsWith("http://") || tab.url.startsWith("https://"))) {
+    return false;
+  }
+
+  return !isScreenMateViewerUrl(tab.url, viewerBaseUrl);
+}
+
+async function isScreenMateViewerTab(
+  dependencies: HostMessageHandlerDependencies,
+  tabId: number,
+) {
+  const tab = await querySniffTabById(dependencies, tabId);
+  return isScreenMateViewerUrl(tab?.url, dependencies.viewerBaseUrl);
+}
+
+async function querySniffTabById(
+  dependencies: HostMessageHandlerDependencies,
+  tabId: number,
+): Promise<SniffTabSummary | null> {
+  if (!dependencies.queryCurrentWindowTabs) {
+    return null;
+  }
+
+  const tab = (await dependencies.queryCurrentWindowTabs()).find(
+    (candidate) => candidate.id === tabId,
+  );
+  return tab ? toSniffTabSummary(tab) : null;
+}
+
+export function isScreenMateViewerUrl(
+  value: string | null | undefined,
+  viewerBaseUrl = getScreenMateViewerBaseUrl(),
+) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    const viewerBase = new URL(viewerBaseUrl);
+    const sameConfiguredOrigin = url.origin === viewerBase.origin;
+    const sameLocalViewerPort =
+      url.port === viewerBase.port &&
+      viewerBase.port === "4173" &&
+      isLocalhostName(url.hostname) &&
+      isLocalhostName(viewerBase.hostname);
+
+    if (!sameConfiguredOrigin && !sameLocalViewerPort) {
+      return false;
+    }
+
+    const basePath = viewerBase.pathname.replace(/\/+$/, "");
+    const roomPrefix = `${basePath}/rooms`.replace(/\/{2,}/g, "/");
+    return url.pathname === roomPrefix || url.pathname.startsWith(`${roomPrefix}/`);
+  } catch {
+    return false;
+  }
+}
+
+function isLocalhostName(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 function getVideoCache(dependencies: HostMessageHandlerDependencies) {
@@ -945,11 +1711,112 @@ function getVideoCache(dependencies: HostMessageHandlerDependencies) {
   return dependencies.videoCache;
 }
 
+async function startSharing(
+  dependencies: HostMessageHandlerDependencies,
+  preparedSourceState: PreparedSourceState,
+  source: StartSharingSource,
+) {
+  if (source.kind === "prepared-offscreen") {
+    return startPreparedOffscreenSource(
+      dependencies,
+      preparedSourceState,
+      source.sourceType,
+    );
+  }
+
+  if (source.kind === "active-tab-video") {
+    const activeTabId = await dependencies.queryActiveTabId();
+    if (activeTabId === null) {
+      return createHostRoomSnapshot({
+        ...dependencies.runtime.getSnapshot(),
+        message: "Could not find an active tab to continue.",
+      });
+    }
+
+    const roomSnapshot = await ensureHostRoomSession(dependencies, {
+      activeFrameId: 0,
+      activeTabId,
+    });
+    if (
+      roomSnapshot.roomId === null ||
+      roomSnapshot.roomLifecycle === "closed"
+    ) {
+      return roomSnapshot;
+    }
+
+    return followActiveTabVideoOnce(dependencies, activeTabId);
+  }
+
+  const roomSnapshot = await ensureHostRoomSession(dependencies, {
+    activeFrameId: source.frameId,
+    activeTabId: source.tabId,
+  });
+  if (
+    roomSnapshot.roomId === null ||
+    roomSnapshot.roomLifecycle === "closed"
+  ) {
+    return roomSnapshot;
+  }
+
+  return attachSourceInFrame(dependencies, source.tabId, {
+    type: "screenmate:attach-source",
+    frameId: source.frameId,
+    tabId: source.tabId,
+    videoId: source.videoId,
+  });
+}
+
+async function ensureHostRoomSession(
+  dependencies: HostMessageHandlerDependencies,
+  owner: { activeTabId: number; activeFrameId: number },
+) {
+  const snapshot = dependencies.runtime.getSnapshot();
+  if (
+    snapshot.roomId !== null &&
+    snapshot.roomLifecycle !== "idle" &&
+    snapshot.roomLifecycle !== "closed"
+  ) {
+    return snapshot;
+  }
+
+  const roomResponse = await dependencies.createRoom(
+    dependencies.apiBaseUrl ?? getScreenMateApiBaseUrl(),
+  );
+  if (!isRoomCreateResponse(roomResponse)) {
+    return createHostRoomSnapshot({
+      ...snapshot,
+      message: isInternalHostNetworkErrorResponse(roomResponse)
+        ? roomResponse.error
+        : "Room creation returned an incomplete response.",
+    });
+  }
+
+  const nextSnapshot = await dependencies.runtime.startRoom({
+    roomId: roomResponse.roomId,
+    hostSessionId: roomResponse.hostSessionId ?? "host",
+    hostToken: roomResponse.hostToken,
+    signalingUrl: roomResponse.signalingUrl,
+    iceServers: roomResponse.iceServers ?? [],
+    turnCredentialExpiresAt: roomResponse.turnCredentialExpiresAt ?? null,
+    activeTabId: owner.activeTabId,
+    activeFrameId: owner.activeFrameId,
+    viewerSessionIds: [],
+    viewerCount: 0,
+    viewerRoster: [],
+    chatMessages: [],
+    sourceFingerprint: null,
+    recoverByTimestamp: null,
+  });
+  await dependencies.runtime.connectSignaling(dependencies.forwardInboundSignal);
+  return nextSnapshot;
+}
+
 async function attachSourceInFrame(
   dependencies: HostMessageHandlerDependencies,
   tabId: number,
-  message: Extract<HostMessage, { type: "screenmate:attach-source" }>,
+  message: AttachSourceInFrameRequest,
 ) {
+  dependencies.attachmentRoutingState ??= createAttachmentRoutingState();
   const roomSession = await getAttachSessionForNegotiation(dependencies);
   if (!roomSession) {
     backgroundLogger.warn("Manual source attach skipped because no room session is available.", {
@@ -980,6 +1847,18 @@ async function attachSourceInFrame(
   ) {
     await detachCurrentAttachmentOwner(dependencies, snapshot);
   }
+
+  const pendingTarget = {
+    tabId,
+    frameId: message.frameId,
+  };
+  dependencies.attachmentRoutingState.pendingAttachmentTarget = pendingTarget;
+  backgroundLogger.info("Pending attachment target registered.", {
+    frameId: pendingTarget.frameId,
+    roomId: roomSession.roomId,
+    tabId: pendingTarget.tabId,
+    videoId: message.videoId,
+  });
 
   try {
     const response = await dependencies.sendTabMessage(
@@ -1026,6 +1905,185 @@ async function attachSourceInFrame(
       videoId: message.videoId,
     });
     return dependencies.runtime.markMissing("No video attached.");
+  } finally {
+    if (
+      dependencies.attachmentRoutingState.pendingAttachmentTarget?.tabId ===
+        pendingTarget.tabId &&
+      dependencies.attachmentRoutingState.pendingAttachmentTarget?.frameId ===
+        pendingTarget.frameId
+    ) {
+      dependencies.attachmentRoutingState.pendingAttachmentTarget = null;
+      backgroundLogger.info("Pending attachment target cleared.", {
+        frameId: pendingTarget.frameId,
+        roomId: roomSession.roomId,
+        tabId: pendingTarget.tabId,
+        videoId: message.videoId,
+      });
+    }
+  }
+}
+
+async function startPreparedOffscreenSource(
+  dependencies: HostMessageHandlerDependencies,
+  preparedSourceState: PreparedSourceState,
+  requestedSourceType: "screen" | "upload",
+) {
+  if (
+    !preparedSourceState.ready ||
+    (requestedSourceType === "screen" && preparedSourceState.kind !== "screen") ||
+    (requestedSourceType === "upload" && preparedSourceState.kind !== "upload")
+  ) {
+    return createHostRoomSnapshot({
+      ...dependencies.runtime.getSnapshot(),
+      message: "No prepared source is ready.",
+    });
+  }
+
+  if (!dependencies.sendOffscreenMessage || !dependencies.ensureOffscreenDocument) {
+    return createHostRoomSnapshot({
+      ...dependencies.runtime.getSnapshot(),
+      message: "Offscreen streaming is not available in this browser.",
+    });
+  }
+
+  try {
+    await dependencies.ensureOffscreenDocument();
+  } catch (error) {
+    backgroundLogger.warn("Could not prepare offscreen document.", {
+      error: toErrorMessage(error),
+      sourceType: requestedSourceType,
+    });
+    return createHostRoomSnapshot({
+      ...dependencies.runtime.getSnapshot(),
+      message: "Offscreen streaming is not available in this browser.",
+    });
+  }
+
+  let snapshot = dependencies.runtime.getSnapshot();
+  if (
+    snapshot.roomId === null ||
+    snapshot.roomLifecycle === "idle" ||
+    snapshot.roomLifecycle === "closed"
+  ) {
+    const roomResponse = await dependencies.createRoom(
+      dependencies.apiBaseUrl ?? getScreenMateApiBaseUrl(),
+    );
+    if (!isRoomCreateResponse(roomResponse)) {
+      return createHostRoomSnapshot({
+        message: isInternalHostNetworkErrorResponse(roomResponse)
+          ? roomResponse.error
+          : "Room creation returned an incomplete response.",
+      });
+    }
+
+    snapshot = await dependencies.runtime.startRoom({
+      roomId: roomResponse.roomId,
+      hostSessionId: roomResponse.hostSessionId ?? "host",
+      hostToken: roomResponse.hostToken,
+      signalingUrl: roomResponse.signalingUrl,
+      iceServers: roomResponse.iceServers ?? [],
+      turnCredentialExpiresAt: roomResponse.turnCredentialExpiresAt ?? null,
+      activeTabId: OFFSCREEN_ATTACHMENT_TAB_ID,
+      activeFrameId: OFFSCREEN_ATTACHMENT_FRAME_ID,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+    await dependencies.runtime.connectSignaling(dependencies.forwardInboundSignal);
+  } else if (!isOffscreenAttachmentOwner(snapshot)) {
+    await detachCurrentAttachmentOwner(dependencies, snapshot);
+  }
+
+  const roomSession = await getAttachSessionForNegotiation(dependencies);
+  if (!roomSession) {
+    return dependencies.runtime.getSnapshot();
+  }
+
+  dependencies.attachmentRoutingState ??= createAttachmentRoutingState();
+  const pendingTarget = {
+    tabId: OFFSCREEN_ATTACHMENT_TAB_ID,
+    frameId: OFFSCREEN_ATTACHMENT_FRAME_ID,
+  };
+  dependencies.attachmentRoutingState.pendingAttachmentTarget = pendingTarget;
+
+  try {
+    const response =
+      preparedSourceState.kind === "screen"
+        ? await dependencies.sendOffscreenMessage({
+            type: "screenmate:offscreen-attach-display-media",
+            roomSession,
+            sourceLabel: preparedSourceState.label,
+          })
+        : await dependencies.sendOffscreenMessage({
+            type: "screenmate:offscreen-attach-local-file",
+            roomSession,
+            fileId: preparedSourceState.fileId,
+            metadata: preparedSourceState.metadata,
+          });
+
+    if (!isAttachSourceResponse(response)) {
+      return dependencies.runtime.markMissing("No offscreen source attached.");
+    }
+
+    return dependencies.runtime.setAttachedSource(response.sourceLabel, {
+      ...response.fingerprint,
+      frameId: OFFSCREEN_ATTACHMENT_FRAME_ID,
+      tabId: OFFSCREEN_ATTACHMENT_TAB_ID,
+    });
+  } catch (error) {
+    backgroundLogger.warn("Could not attach prepared offscreen source.", {
+      error: toErrorMessage(error),
+      sourceType: requestedSourceType,
+    });
+    return dependencies.runtime.markMissing("No offscreen source attached.");
+  } finally {
+    if (isAttachmentTargetOwner(
+      dependencies.attachmentRoutingState.pendingAttachmentTarget,
+      pendingTarget,
+    )) {
+      dependencies.attachmentRoutingState.pendingAttachmentTarget = null;
+    }
+  }
+}
+
+async function refreshPreparedSourceStateFromOffscreen(
+  dependencies: HostMessageHandlerDependencies,
+  currentState: PreparedSourceState,
+): Promise<PreparedSourceState> {
+  if (
+    currentState.ready ||
+    !dependencies.ensureOffscreenDocument ||
+    !dependencies.sendOffscreenMessage
+  ) {
+    return currentState;
+  }
+
+  try {
+    await dependencies.ensureOffscreenDocument();
+    const response = await dependencies.sendOffscreenMessage({
+      type: "screenmate:offscreen-get-prepared-display-media-state",
+    });
+    if (!isAttachSourceResponse(response)) {
+      return currentState;
+    }
+
+    return {
+      status: "prepared-source",
+      kind: "screen",
+      ready: true,
+      label: response.sourceLabel,
+      metadata: null,
+      captureType: "screen",
+      error: null,
+    };
+  } catch (error) {
+    backgroundLogger.debug("No prepared offscreen source could be restored.", {
+      error: toErrorMessage(error),
+    });
+    return currentState;
   }
 }
 
@@ -1033,6 +2091,19 @@ async function detachCurrentAttachmentOwner(
   dependencies: HostMessageHandlerDependencies,
   snapshot = dependencies.runtime.getSnapshot(),
 ) {
+  if (isOffscreenAttachmentOwner(snapshot)) {
+    try {
+      await dependencies.sendOffscreenMessage?.({
+        type: "screenmate:offscreen-detach-source",
+      });
+    } catch (error) {
+      backgroundLogger.warn("Could not detach offscreen source.", {
+        error: toErrorMessage(error),
+      });
+    }
+    return;
+  }
+
   if (
     typeof snapshot.activeTabId !== "number" ||
     typeof snapshot.activeFrameId !== "number"
@@ -1225,10 +2296,49 @@ function isHostMessage(message: unknown): message is HostMessage {
 
   switch (message.type) {
     case "screenmate:get-room-session":
+    case "screenmate:get-prepared-source-state":
+    case "screenmate:clear-prepared-source-state":
     case "screenmate:get-video-sniff-state":
     case "screenmate:ensure-video-sniff-state":
     case "screenmate:refresh-video-sniff-state":
+    case "screenmate:get-follow-active-tab-video-state":
       return true;
+    case "screenmate:set-follow-active-tab-video":
+      return typeof message.enabled === "boolean";
+    case "screenmate:prepare-screen-source":
+      return (
+        message.captureType === "screen" ||
+        message.captureType === "window" ||
+        message.captureType === "tab"
+      );
+    case "screenmate:prepare-local-file-source":
+      return (
+        typeof message.fileId === "string" &&
+        isRecord(message.metadata) &&
+        typeof message.metadata.id === "string" &&
+        typeof message.metadata.name === "string" &&
+        typeof message.metadata.size === "number" &&
+        typeof message.metadata.type === "string"
+      );
+    case "screenmate:start-sharing":
+      return isStartSharingSource(message.source);
+    case "screenmate:sync-local-playback":
+      return (
+        (message.action === "play" ||
+          message.action === "pause" ||
+          message.action === "seek") &&
+        (typeof message.currentTime === "undefined" ||
+          typeof message.currentTime === "number")
+      );
+    case "screenmate:offscreen-signal-outbound":
+      return isRecord(message.envelope);
+    case "screenmate:offscreen-source-detached":
+      return (
+        typeof message.roomId === "string" &&
+        (message.reason === "track-ended" ||
+          message.reason === "content-invalidated" ||
+          message.reason === "manual-detach")
+      );
     case "screenmate:send-chat-message":
       return typeof message.text === "string" && message.text.trim().length > 0;
     case "screenmate:set-room-password":
@@ -1241,17 +2351,6 @@ function isHostMessage(message: unknown): message is HostMessage {
     case "screenmate:stop-room":
     case "screenmate:clear-preview":
       return true;
-    case "screenmate:start-room":
-      return (
-        typeof message.frameId === "number" &&
-        (typeof message.tabId === "undefined" || typeof message.tabId === "number")
-      );
-    case "screenmate:attach-source":
-      return (
-        typeof message.videoId === "string" &&
-        typeof message.frameId === "number" &&
-        (typeof message.tabId === "undefined" || typeof message.tabId === "number")
-      );
     case "screenmate:content-ready":
       return (
         typeof message.frameId === "number" &&
@@ -1281,6 +2380,30 @@ function isHostMessage(message: unknown): message is HostMessage {
     default:
       return false;
   }
+}
+
+function isStartSharingSource(source: unknown): source is StartSharingSource {
+  if (!isRecord(source) || typeof source.kind !== "string") {
+    return false;
+  }
+
+  if (source.kind === "active-tab-video") {
+    return true;
+  }
+
+  if (source.kind === "prepared-offscreen") {
+    return source.sourceType === "screen" || source.sourceType === "upload";
+  }
+
+  if (source.kind === "tab-video") {
+    return (
+      typeof source.tabId === "number" &&
+      typeof source.frameId === "number" &&
+      typeof source.videoId === "string"
+    );
+  }
+
+  return false;
 }
 
 function normalizeIncomingFrameMessage(
@@ -1330,6 +2453,52 @@ function isCurrentAttachmentOwner(
   }
 
   return true;
+}
+
+function isOffscreenAttachmentOwner(
+  snapshot: Pick<HostRoomSnapshot, "activeFrameId" | "activeTabId">,
+) {
+  return (
+    snapshot.activeTabId === OFFSCREEN_ATTACHMENT_TAB_ID &&
+    snapshot.activeFrameId === OFFSCREEN_ATTACHMENT_FRAME_ID
+  );
+}
+
+function isCurrentOrPendingAttachmentOwner(
+  dependencies: Pick<HostMessageHandlerDependencies, "attachmentRoutingState">,
+  snapshot: Pick<HostRoomSnapshot, "activeFrameId" | "activeTabId">,
+  message: {
+    frameId?: number | null;
+    tabId?: number | null;
+  },
+) {
+  if (isCurrentAttachmentOwner(snapshot, message)) {
+    return true;
+  }
+
+  const pendingTarget =
+    dependencies.attachmentRoutingState?.pendingAttachmentTarget;
+  return isAttachmentTargetOwner(pendingTarget, message);
+}
+
+function isAttachmentTargetOwner(
+  target: AttachmentSignalTarget | null | undefined,
+  message: {
+    frameId?: number | null;
+    tabId?: number | null;
+  },
+) {
+  return (
+    !!target &&
+    message.tabId === target.tabId &&
+    message.frameId === target.frameId
+  );
+}
+
+function readSignalMessageType(envelope: Record<string, unknown>) {
+  return typeof envelope.messageType === "string"
+    ? envelope.messageType
+    : null;
 }
 
 export function shouldForwardSignalToContentRuntime(

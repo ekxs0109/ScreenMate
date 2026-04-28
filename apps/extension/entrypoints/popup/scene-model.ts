@@ -1,5 +1,5 @@
 export type PopupTab = "source" | "room" | "chat";
-export type SourceType = "sniff" | "screen" | "upload";
+export type SourceType = "auto" | "sniff" | "screen" | "upload";
 export type SectionProvenance = "real" | "mock" | "mixed";
 
 export type ExtensionChatMessage = {
@@ -45,17 +45,33 @@ export type ViewerConnectionRow = {
   isGood: boolean;
 };
 
+export type PopupFooterModel =
+  | { variant: "hidden" }
+  | { variant: "start-room"; disabled: boolean; busy: boolean }
+  | { variant: "end-share"; disabled: boolean; busy: boolean }
+  | { variant: "change-source"; confirmDisabled: boolean; busy: boolean };
+
 export type ExtensionSceneModel = {
   header: {
     title: string;
     statusText: string;
+    playback: {
+      label: string;
+      mode: "auto" | "manual";
+      state: "active" | "waiting";
+    };
   };
   tabs: {
     active: PopupTab;
-    hasShared: boolean;
+    hasOpenRoomSession: boolean;
+    hasAttachedSource: boolean;
+    canStopRoom: boolean;
+    roomBadgeVisible: boolean;
+    chatVisible: boolean;
   };
   sourceTab: {
     activeSourceType: SourceType;
+    activeSourceIndicator: SourceType | null;
     sniffCards: SniffVideoCard[];
     sniffGroups: SniffVideoGroup[];
     screenReady: boolean;
@@ -66,9 +82,11 @@ export type ExtensionSceneModel = {
       type: string;
     } | null;
     isRefreshing: boolean;
+    followActiveTabVideo: boolean;
     sectionKinds: SourceType[];
   };
   roomTab: {
+    state: "empty" | "active";
     roomId: string | null;
     shareUrl: string | null;
     viewerCount: number;
@@ -79,12 +97,7 @@ export type ExtensionSceneModel = {
   chatTab: {
     messages: ExtensionChatMessage[];
   };
-  footer: {
-    primaryLabel: string;
-    primaryDisabled: boolean;
-    secondaryLabel: string;
-    secondaryDisabled: boolean;
-  };
+  footer: PopupFooterModel;
   meta: {
     hasSelectedSource: boolean;
     isBusy: boolean;

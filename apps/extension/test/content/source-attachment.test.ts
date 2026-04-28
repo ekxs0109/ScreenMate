@@ -526,6 +526,101 @@ describe("createSourceAttachmentRuntime", () => {
     });
   });
 
+  it("waits for captured streams to expose tracks before negotiating", async () => {
+    document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
+    const video = document.getElementById("host") as HTMLVideoElement;
+    setVideoRect(video, 640, 360);
+    const track = createMockTrack() as unknown as MediaStreamTrack;
+    const captureStream = vi
+      .fn()
+      .mockReturnValueOnce({ getTracks: () => [] })
+      .mockReturnValue({ getTracks: () => [track] });
+
+    Object.defineProperty(video, "captureStream", {
+      configurable: true,
+      value: captureStream,
+    });
+
+    MockRTCPeerConnection.instances = [];
+    const onSignal = vi.fn();
+    const runtime = createSourceAttachmentRuntime({
+      now: () => 50,
+      onSignal,
+      onSourceDetached: vi.fn(),
+      RTCPeerConnectionImpl: MockRTCPeerConnection as never,
+      captureStreamTrackTimeoutMs: 1_000,
+    });
+
+    const attachPromise = runtime.attachSource({
+      roomId: "room_123",
+      sessionId: "host_1",
+      videoId: getVideoHandle(video),
+      viewerSessionIds: ["viewer_1"],
+      iceServers: [],
+    });
+    await Promise.resolve();
+    await runtime.handleSignal({
+      messageType: "viewer-joined",
+      sessionId: "host_1",
+      payload: {
+        viewerSessionId: "viewer_2",
+      },
+    });
+
+    expect(MockRTCPeerConnection.instances).toHaveLength(0);
+
+    video.dispatchEvent(new Event("loadedmetadata"));
+    await attachPromise;
+
+    expect(captureStream).toHaveBeenCalledTimes(2);
+    expect(MockRTCPeerConnection.instances).toHaveLength(2);
+    expect(MockRTCPeerConnection.instances[0]?.transceivers).toHaveLength(1);
+    expect(onSignal).toHaveBeenCalledWith(expect.objectContaining({
+      messageType: "offer",
+      payload: expect.objectContaining({
+        targetSessionId: "viewer_1",
+      }),
+    }));
+    expect(onSignal).toHaveBeenCalledWith(expect.objectContaining({
+      messageType: "offer",
+      payload: expect.objectContaining({
+        targetSessionId: "viewer_2",
+      }),
+    }));
+  });
+
+  it("rejects captured streams that never expose a video track", async () => {
+    document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
+    const video = document.getElementById("host") as HTMLVideoElement;
+    setVideoRect(video, 640, 360);
+    const audioTrack = createMockTrack("audio") as unknown as MediaStreamTrack;
+
+    Object.defineProperty(video, "captureStream", {
+      configurable: true,
+      value: vi.fn(() => ({ getTracks: () => [audioTrack] })),
+    });
+
+    MockRTCPeerConnection.instances = [];
+    const runtime = createSourceAttachmentRuntime({
+      now: () => 55,
+      onSignal: vi.fn(),
+      onSourceDetached: vi.fn(),
+      RTCPeerConnectionImpl: MockRTCPeerConnection as never,
+      captureStreamTrackTimeoutMs: 0,
+    });
+
+    await expect(
+      runtime.attachSource({
+        roomId: "room_123",
+        sessionId: "host_1",
+        videoId: getVideoHandle(video),
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [],
+      }),
+    ).rejects.toThrow(errorCodes.NO_VIDEO_FOUND);
+    expect(MockRTCPeerConnection.instances).toHaveLength(0);
+  });
+
   it("removes departed viewer peers and renegotiates when they rejoin", async () => {
     document.body.innerHTML = `<video id="host" src="https://example.com/host.mp4"></video>`;
     const video = document.getElementById("host") as HTMLVideoElement;

@@ -2,10 +2,23 @@ appName: SyncPlay
 tabSource: メディア元
 tabRoom: ルーム設定
 tabChat: チャット
+sourceAuto: 自動
+sourceAutoDescription: ホストのアクティブタブのメイン動画を自動で共有します。
+autoEnable: 自動引き継ぎを有効化
+autoDisable: 自動引き継ぎを無効化
 sourceSniff: スニッファー
 sourceScreen: 画面共有
 sourceUpload: ファイルアップロード
 detected: 検出されたメディア
+followAuto: 自動
+followAutoDescription: ホストが見ているタブを追従
+currentPlayback: 再生中
+waitingPlayback: 動画待機中
+webVideoStream: Web 動画ストリーム
+autoMode: 自動追従
+manualMode: 手動選択
+autoFollowEmptyTitle: 自動追従がオンです
+autoFollowEmptyDescription: ホストがブラウザータブを切り替えると、そのタブ内のメイン動画を自動で共有します。
 mockOrigin: タブ
 refreshSniff: 再スキャン
 noVideo: このページで動画が見つかりません。

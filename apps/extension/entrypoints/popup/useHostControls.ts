@@ -3,6 +3,7 @@ import { storage } from "wxt/utils/storage";
 import { useEffect, useRef, useState } from "react";
 import type { RoomChatMessage, ViewerRosterEntry } from "@screenmate/shared";
 import type { HostMessage, TabVideoSource } from "../background";
+import type { PreparedSourceState } from "../background";
 import {
   createHostRoomSnapshot,
   type HostRoomLifecycle,
@@ -56,32 +57,57 @@ export function buildSnapshotRequest(): Extract<
   return { type: "screenmate:get-room-session" };
 }
 
-export function buildStartSharingRequests(
-  snapshot: HostRoomSnapshot,
-  selectedVideo: Pick<TabVideoSource, "tabId" | "frameId" | "id">,
-): Array<
-  | Extract<HostMessage, { type: "screenmate:start-room" }>
-  | Extract<HostMessage, { type: "screenmate:attach-source" }>
-> {
-  const attachRequest: Extract<HostMessage, { type: "screenmate:attach-source" }> = {
-    type: "screenmate:attach-source",
-    tabId: selectedVideo.tabId,
-    frameId: selectedVideo.frameId,
-    videoId: selectedVideo.id,
-  };
+export function buildStartSharingRequest(
+  _snapshot: HostRoomSnapshot,
+  selectedVideo: Pick<TabVideoSource, "tabId" | "frameId" | "id"> | null,
+  options: {
+    autoAttach?: boolean;
+    preparedSourceState?: PreparedSourceState;
+    sourceType?: "auto" | "sniff" | "screen" | "upload";
+  } = {},
+): Extract<HostMessage, { type: "screenmate:start-sharing" }> | null {
+  if (options.sourceType === "screen" || options.sourceType === "upload") {
+    const preparedSourceState = options.preparedSourceState;
+    if (
+      !preparedSourceState?.ready ||
+      preparedSourceState.kind !== options.sourceType
+    ) {
+      return null;
+    }
 
-  if (snapshot.roomId && snapshot.roomLifecycle !== "closed") {
-    return [attachRequest];
+    return {
+      type: "screenmate:start-sharing",
+      source: {
+        kind: "prepared-offscreen",
+        sourceType: options.sourceType,
+      },
+    };
   }
 
-  return [
-    {
-      type: "screenmate:start-room",
+  if (options.sourceType === "auto" || (!selectedVideo && options.autoAttach)) {
+    if (!options.autoAttach) {
+      return null;
+    }
+
+    return {
+      type: "screenmate:start-sharing",
+      source: { kind: "active-tab-video" },
+    };
+  }
+
+  if (!selectedVideo) {
+    return null;
+  }
+
+  return {
+    type: "screenmate:start-sharing",
+    source: {
+      kind: "tab-video",
       tabId: selectedVideo.tabId,
       frameId: selectedVideo.frameId,
+      videoId: selectedVideo.id,
     },
-    attachRequest,
-  ];
+  };
 }
 
 export function buildStopSharingRequest(): Extract<
@@ -89,6 +115,13 @@ export function buildStopSharingRequest(): Extract<
   { type: "screenmate:stop-room" }
 > {
   return { type: "screenmate:stop-room" };
+}
+
+export function buildPreparedSourceStateRequest(): Extract<
+  HostMessage,
+  { type: "screenmate:get-prepared-source-state" }
+> {
+  return { type: "screenmate:get-prepared-source-state" };
 }
 
 export function buildSendChatMessageRequest(
@@ -121,6 +154,16 @@ export function useHostControls({
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [isSniffRefreshing, setIsSniffRefreshing] = useState(false);
   const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
+  const [followActiveTabVideo, setFollowActiveTabVideoState] = useState(false);
+  const [preparedSourceState, setPreparedSourceState] =
+    useState<PreparedSourceState>({
+      status: "prepared-source",
+      kind: null,
+      ready: false,
+      label: null,
+      metadata: null,
+      error: null,
+    });
   const refreshVideosRef = useRef<
     (options?: SyncOptions) => Promise<void>
   >(
@@ -189,6 +232,34 @@ export function useHostControls({
               }),
             );
           }
+        });
+
+    const syncFollowActiveTabVideoState = () =>
+      browser.runtime
+        .sendMessage({ type: "screenmate:get-follow-active-tab-video-state" })
+        .then((state) => {
+          if (!isCancelled && isRecord(state)) {
+            setFollowActiveTabVideoState(state.enabled === true);
+          }
+        })
+        .catch((error) => {
+          popupLogger.warn("Could not read automatic follow state.", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+    const syncPreparedSourceState = () =>
+      browser.runtime
+        .sendMessage(buildPreparedSourceStateRequest())
+        .then((state) => {
+          if (!isCancelled) {
+            setPreparedSourceState(normalizePreparedSourceState(state));
+          }
+        })
+        .catch((error) => {
+          popupLogger.warn("Could not read prepared source state.", {
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
 
     const applyVideoSniffState = (nextState: unknown) => {
@@ -329,6 +400,10 @@ export function useHostControls({
         });
         void syncSnapshot();
       }
+
+      if (message.type === "screenmate:follow-active-tab-video-updated") {
+        setFollowActiveTabVideoState(message.enabled === true);
+      }
     };
 
     const unwatchVideoSniffState = videoSniffStateStorage.watch((nextState) => {
@@ -336,6 +411,8 @@ export function useHostControls({
     });
 
     void syncSnapshot();
+    void syncFollowActiveTabVideoState();
+    void syncPreparedSourceState();
     void syncCachedVideoSniffState().then(() => {
       void ensureVideoSniffState();
     });
@@ -366,23 +443,38 @@ export function useHostControls({
     };
   }, []);
 
-  const startOrAttach = async () => {
-    const selectedVideo = videos.find(
-      (video) => getVideoSelectionKey(video) === selectedVideoKey,
-    );
-    const requests = selectedVideo
-      ? buildStartSharingRequests(snapshot, selectedVideo)
-      : [];
-
-    popupLogger.info("Room action requested.", {
-      selectedVideoKey,
+  const startSharing = async (
+    sourceType: "auto" | "sniff" | "screen" | "upload",
+    options: { autoAttach?: boolean } = {},
+  ) => {
+    const selectedVideo =
+      videos.find((video) => getVideoSelectionKey(video) === selectedVideoKey) ??
+      parseVideoSelectionKey(selectedVideoKey);
+    const autoAttach = options.autoAttach ?? followActiveTabVideo;
+    const request = buildStartSharingRequest(snapshot, selectedVideo ?? null, {
+      autoAttach,
+      preparedSourceState,
+      sourceType,
     });
 
-    if (!selectedVideo) {
+    popupLogger.info("Room action requested.", {
+      autoAttach,
+      requestType: request?.type ?? null,
+      sourceKind: request?.source.kind ?? null,
+      selectedFrameId: selectedVideo?.frameId ?? null,
+      selectedTabId: selectedVideo?.tabId ?? null,
+      selectedVideoKey,
+      selectedVideoResolved: Boolean(selectedVideo),
+    });
+
+    if (!request) {
       setSnapshot((current) =>
         createHostRoomSnapshot({
           ...current,
-          message: "No video elements found on this page.",
+          message:
+            sourceType === "screen" || sourceType === "upload"
+              ? "No prepared source is ready."
+              : "No video elements found on this page.",
         }),
       );
       return;
@@ -397,30 +489,22 @@ export function useHostControls({
             ? current.roomLifecycle
             : "opening",
         sourceState:
-          current.roomId !== null && current.roomLifecycle !== "closed"
+          request &&
+          current.roomId !== null &&
+          current.roomLifecycle !== "closed"
             ? "attaching"
             : current.sourceState,
-        activeFrameId: selectedVideo.frameId,
+        activeFrameId: selectedVideo?.frameId ?? current.activeFrameId,
         message: null,
       }),
     );
 
     try {
-      for (const request of requests) {
-        const response = await browser.runtime.sendMessage(request);
-        const nextSnapshot = normalizeSnapshot(response);
+      const response = await browser.runtime.sendMessage(request);
+      const nextSnapshot = normalizeSnapshot(response);
 
-        reportRoomActionResult(popupLogger, nextSnapshot, response);
-        setSnapshot(nextSnapshot);
-
-        if (
-          request.type === "screenmate:start-room" &&
-          (nextSnapshot.roomId === null ||
-            nextSnapshot.roomLifecycle === "closed")
-        ) {
-          return;
-        }
-      }
+      reportRoomActionResult(popupLogger, nextSnapshot, response);
+      setSnapshot(nextSnapshot);
     } catch (error) {
       popupLogger.error("Room action runtime request failed.", {
         error: error instanceof Error ? error.message : String(error),
@@ -436,6 +520,94 @@ export function useHostControls({
       );
     } finally {
       setBusyAction(null);
+    }
+  };
+
+  const prepareScreenSource = async (captureType: "screen" | "window" | "tab") => {
+    try {
+      const response = await browser.runtime.sendMessage({
+        type: "screenmate:prepare-screen-source",
+        captureType,
+      } satisfies Extract<HostMessage, { type: "screenmate:prepare-screen-source" }>);
+      const normalized = normalizePreparedSourceState(response);
+      setPreparedSourceState(normalized);
+      if (normalized.error) {
+        setSnapshot((current) =>
+          createHostRoomSnapshot({
+            ...current,
+            message: normalized.error,
+          }),
+        );
+      }
+      return normalized;
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Could not prepare screen sharing.";
+      const fallback = {
+        kind: null,
+        status: "prepared-source",
+        ready: false,
+        label: null,
+        metadata: null,
+        error: message,
+      } satisfies PreparedSourceState;
+      setPreparedSourceState(fallback);
+      return fallback;
+    }
+  };
+
+  const clearPreparedSourceState = async () => {
+    const emptyState = {
+      status: "prepared-source",
+      kind: null,
+      ready: false,
+      label: null,
+      metadata: null,
+      error: null,
+    } satisfies PreparedSourceState;
+    setPreparedSourceState(emptyState);
+    try {
+      const response = await browser.runtime.sendMessage({
+        type: "screenmate:clear-prepared-source-state",
+      } satisfies Extract<HostMessage, { type: "screenmate:clear-prepared-source-state" }>);
+      setPreparedSourceState(normalizePreparedSourceState(response));
+    } catch (error) {
+      popupLogger.warn("Could not clear prepared source state.", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const prepareLocalFileSource = async (input: {
+    fileId: string;
+    metadata: NonNullable<Extract<PreparedSourceState, { kind: "upload" }>["metadata"]>;
+  }) => {
+    try {
+      const response = await browser.runtime.sendMessage({
+        type: "screenmate:prepare-local-file-source",
+        fileId: input.fileId,
+        metadata: input.metadata,
+      } satisfies Extract<HostMessage, { type: "screenmate:prepare-local-file-source" }>);
+      const normalized = normalizePreparedSourceState(response);
+      setPreparedSourceState(normalized);
+      return normalized;
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Could not prepare local file.";
+      const fallback = {
+        kind: null,
+        status: "prepared-source",
+        ready: false,
+        label: null,
+        metadata: null,
+        error: message,
+      } satisfies PreparedSourceState;
+      setPreparedSourceState(fallback);
+      return fallback;
     }
   };
 
@@ -495,6 +667,24 @@ export function useHostControls({
     }
   };
 
+  const setFollowActiveTabVideo = async (enabled: boolean) => {
+    setFollowActiveTabVideoState(enabled);
+    try {
+      const response = await browser.runtime.sendMessage({
+        type: "screenmate:set-follow-active-tab-video",
+        enabled,
+      } satisfies Extract<HostMessage, { type: "screenmate:set-follow-active-tab-video" }>);
+      if (isRecord(response)) {
+        setFollowActiveTabVideoState(response.enabled === true);
+      }
+    } catch (error) {
+      setFollowActiveTabVideoState((current) => !current);
+      popupLogger.warn("Could not update automatic follow state.", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   const sendChatMessage = async (text: string) => {
     try {
       const response = await browser.runtime.sendMessage(
@@ -510,7 +700,7 @@ export function useHostControls({
         setSnapshot((current) =>
           createHostRoomSnapshot({
             ...current,
-            message: "Could not save the room password.",
+            message: "Could not send the chat message.",
           }),
         );
       }
@@ -563,10 +753,16 @@ export function useHostControls({
       }),
     previewVideo,
     clearVideoPreview,
-    startOrAttach,
+    startSharing,
+    prepareScreenSource,
+    prepareLocalFileSource,
+    clearPreparedSourceState,
     stopRoom,
     sendChatMessage,
     saveRoomPassword,
+    followActiveTabVideo,
+    preparedSourceState,
+    setFollowActiveTabVideo,
     isBusy: busyAction !== null,
     busyAction,
     isRefreshing: isSniffRefreshing || isManualRefreshPending,
@@ -619,6 +815,76 @@ export function normalizeSnapshot(value: unknown): HostRoomSnapshot {
         : null,
     message: typeof candidate.message === "string" ? candidate.message : null,
   });
+}
+
+export function normalizePreparedSourceState(value: unknown): PreparedSourceState {
+  if (!isRecord(value)) {
+    return {
+      status: "prepared-source",
+      kind: null,
+      ready: false,
+      label: null,
+      metadata: null,
+      error: null,
+    };
+  }
+
+  if (
+    value.kind === "screen" &&
+    value.ready === true &&
+    typeof value.label === "string" &&
+    (value.captureType === "screen" ||
+      value.captureType === "window" ||
+      value.captureType === "tab")
+  ) {
+    return {
+      kind: "screen",
+      status: "prepared-source",
+      ready: true,
+      label: value.label,
+      metadata: null,
+      captureType: value.captureType,
+      error: null,
+    };
+  }
+
+  if (
+    value.kind === "upload" &&
+    value.ready === true &&
+    typeof value.label === "string" &&
+    typeof value.fileId === "string" &&
+    isRecord(value.metadata) &&
+    typeof value.metadata.id === "string" &&
+    typeof value.metadata.name === "string" &&
+    typeof value.metadata.size === "number" &&
+    typeof value.metadata.type === "string" &&
+    typeof value.metadata.updatedAt === "number"
+  ) {
+    return {
+      kind: "upload",
+      status: "prepared-source",
+      ready: true,
+      label: value.label,
+      metadata: {
+        id: value.metadata.id,
+        name: value.metadata.name,
+        size: value.metadata.size,
+        type: value.metadata.type,
+        updatedAt: value.metadata.updatedAt,
+      },
+      fileId: value.fileId,
+      error: null,
+    };
+  }
+
+  return {
+    kind: null,
+    status: "prepared-source",
+    ready: false,
+    label: null,
+    metadata: null,
+    error: typeof value.error === "string" ? value.error : null,
+  };
 }
 
 function isViewerRosterEntry(value: unknown): value is ViewerRosterEntry {
@@ -690,6 +956,33 @@ function normalizeVideos(value: unknown): TabVideoSource[] {
       duration: typeof item.duration === "number" ? item.duration : null,
       format: typeof item.format === "string" ? item.format : null,
       isVisible: item.isVisible !== false,
+      isPlaying: item.isPlaying === true,
+      readyState: typeof item.readyState === "number" ? item.readyState : null,
+      visibleArea: typeof item.visibleArea === "number" ? item.visibleArea : 0,
+      fingerprint: isRecord(item.fingerprint)
+        ? {
+            primaryUrl:
+              typeof item.fingerprint.primaryUrl === "string"
+                ? item.fingerprint.primaryUrl
+                : null,
+            pageUrl:
+              typeof item.fingerprint.pageUrl === "string"
+                ? item.fingerprint.pageUrl
+                : null,
+            elementId:
+              typeof item.fingerprint.elementId === "string"
+                ? item.fingerprint.elementId
+                : null,
+            label:
+              typeof item.fingerprint.label === "string"
+                ? item.fingerprint.label
+                : item.label,
+            visibleIndex:
+              typeof item.fingerprint.visibleIndex === "number"
+                ? item.fingerprint.visibleIndex
+                : 0,
+          }
+        : undefined,
       tabId: item.tabId,
       tabTitle: typeof item.tabTitle === "string" ? item.tabTitle : undefined,
       frameId: item.frameId,
@@ -837,6 +1130,24 @@ function getVideoSelectionKey(
   video: Pick<TabVideoSource, "id" | "tabId" | "frameId">,
 ): string {
   return `${video.tabId}:${video.frameId}:${video.id}`;
+}
+
+export function parseVideoSelectionKey(
+  key: string | null,
+): Pick<TabVideoSource, "id" | "tabId" | "frameId"> | null {
+  if (!key) {
+    return null;
+  }
+
+  const [tabIdText, frameIdText, ...videoIdParts] = key.split(":");
+  const tabId = Number(tabIdText);
+  const frameId = Number(frameIdText);
+  const id = videoIdParts.join(":");
+  if (!Number.isInteger(tabId) || !Number.isInteger(frameId) || !id) {
+    return null;
+  }
+
+  return { tabId, frameId, id };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

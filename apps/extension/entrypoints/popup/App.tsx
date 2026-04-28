@@ -26,7 +26,6 @@ function App() {
   const setActiveSourceType = usePopupUiStore(
     (state) => state.setActiveSourceType,
   );
-  const toggleScreenReady = usePopupUiStore((state) => state.toggleScreenReady);
   const setPasswordDraft = usePopupUiStore((state) => state.setPasswordDraft);
   const markPasswordSaved = usePopupUiStore((state) => state.markPasswordSaved);
   const setActiveRoomTab = usePopupUiStore((state) => state.setActiveRoomTab);
@@ -51,10 +50,15 @@ function App() {
     refreshVideos,
     previewVideo,
     clearVideoPreview,
-    startOrAttach,
+    startSharing,
     stopRoom,
     sendChatMessage,
     saveRoomPassword,
+    followActiveTabVideo,
+    setFollowActiveTabVideo,
+    preparedSourceState,
+    prepareScreenSource,
+    clearPreparedSourceState,
     isBusy,
     busyAction,
     isRefreshing,
@@ -81,6 +85,8 @@ function App() {
         isBusy,
         busyAction,
         viewerRoomUrl,
+        followActiveTabVideo,
+        preparedSourceState,
         mock: {
           activeTab,
           activeSourceType,
@@ -115,6 +121,8 @@ function App() {
       viewerRoomUrl,
       localFile,
       sendChatMessage,
+      followActiveTabVideo,
+      preparedSourceState,
     ],
   );
 
@@ -157,59 +165,52 @@ function App() {
         onSelectSourceType={setActiveSourceType}
         onSelectSource={(id) => {
           setSelectedVideoId(id);
+          if (followActiveTabVideo) {
+            void setFollowActiveTabVideo(false);
+          }
         }}
         onPreviewSource={previewVideo}
         onClearSourcePreview={clearVideoPreview}
         onRefreshSniff={async () => {
           await refreshVideos();
         }}
+        onToggleFollowActiveTabVideo={(enabled) => {
+          void (async () => {
+            await setFollowActiveTabVideo(enabled);
+            if (enabled) {
+              await startSharing("auto", { autoAttach: true });
+              setActiveRoomTab();
+            }
+          })();
+        }}
         onSniffScrollChange={setSniffScrollTop}
         onOpenPlayer={() => {
           browser.tabs.create({ url: browser.runtime.getURL("/player.html") });
         }}
         onCaptureScreen={async (type) => {
-          try {
-            const constraints: DisplayMediaStreamOptions = {
-              video: {
-                // displaySurface is part of modern spec but might not be in all type defs
-                displaySurface: type === "window" ? "window" : type === "tab" ? "browser" : "monitor",
-              },
-              audio: {
-                // Enable audio toggle in the picker
-                echoCancellation: true,
-                noiseSuppression: true,
-              },
-            };
-
-            const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
-            
-            console.log(`Captured video stream (${type}):`, stream);
-            console.log("Video tracks:", stream.getVideoTracks());
-            console.log("Audio tracks:", stream.getAudioTracks());
-
-            // Listen for the user stopping the share via the browser's "Stop sharing" bar
-            stream.getVideoTracks()[0].onended = () => {
-              console.log("Screen sharing ended by user/browser.");
-              toggleScreenReady(); // Toggle back to initial state
-            };
-
-            toggleScreenReady();
-          } catch (error) {
-            if ((error as Error).name === "NotAllowedError") {
-              console.warn("User cancelled screen capture picker.");
-            } else {
-              console.error("Failed to get display media:", error);
+          const prepared = await prepareScreenSource(type);
+          if (prepared.kind === "screen" && prepared.ready) {
+            if (followActiveTabVideo) {
+              void setFollowActiveTabVideo(false);
             }
           }
         }}
-        onToggleScreenReady={toggleScreenReady}
-        onSelectLocalFile={setLocalFile}
+        onToggleScreenReady={clearPreparedSourceState}
+        onSelectLocalFile={(file) => {
+          setLocalFile(file);
+          if (followActiveTabVideo) {
+            void setFollowActiveTabVideo(false);
+          }
+        }}
         onClearLocalFile={clearLocalFile}
         onStartOrAttach={async () => {
-          await startOrAttach();
+          await startSharing(activeSourceType);
           setActiveRoomTab();
         }}
         onStopRoom={async () => {
+          if (followActiveTabVideo) {
+            void setFollowActiveTabVideo(false);
+          }
           await stopRoom();
           setSourceTab();
         }}

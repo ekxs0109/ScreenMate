@@ -27,6 +27,7 @@ const viewerSessionLogger = createLogger("viewer:session");
 const maxDisplayNameLength = 80;
 const maxChatMessageLength = 500;
 const viewerRoomStoragePrefix = "screenmate.viewerSession.";
+const directConnectivityFailureGraceMs = 1_500;
 
 type StoredViewerRoomSession = {
   displayName: string;
@@ -41,6 +42,7 @@ type ViewerSessionOptions = {
   fetchFn?: typeof fetch;
   createWebSocket?: CreateWebSocket;
   createPeerConnection?: (config: RTCConfiguration) => PeerConnectionLike;
+  connectionFailureGraceMs?: number;
   now?: () => number;
 };
 
@@ -51,6 +53,7 @@ export class ViewerSession {
   private peerClient: ReturnType<typeof createViewerPeerConnection> | null = null;
   private joinResponse: JoinRoomResponse | null = null;
   private metricsTimer: ReturnType<typeof setInterval> | null = null;
+  private connectionFailureTimer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0;
 
   constructor(private readonly options: ViewerSessionOptions) {}
@@ -336,6 +339,7 @@ export class ViewerSession {
           return;
         }
 
+        this.cancelConnectionFailureError();
         this.update({
           remoteStream: stream,
           sourceState: "attached",
@@ -359,16 +363,12 @@ export class ViewerSession {
           return;
         }
 
+        if (state === "connected") {
+          this.cancelConnectionFailureError();
+        }
+
         if (state === "failed") {
-          viewerSessionLogger.error("Viewer peer connectivity failed.", {
-            roomId: joined.roomId,
-            sessionId: joined.sessionId,
-            state,
-          });
-          this.update({
-            status: "error",
-            errorCode: errorCodes.DIRECT_CONNECTIVITY_FAILED,
-          });
+          this.scheduleConnectionFailureError(peerClient, generation, joined, socketClient);
         }
 
         if (state === "disconnected") {
@@ -421,6 +421,7 @@ export class ViewerSession {
           roomId: message.roomId,
           targetSessionId: message.payload.targetSessionId,
         });
+        this.cancelConnectionFailureError();
         const previousPeerClient = this.peerClient;
         this.peerClient = null;
         previousPeerClient?.close();
@@ -470,6 +471,7 @@ export class ViewerSession {
           sourceState: message.payload.sourceState,
           viewerCount: message.payload.viewerCount,
         });
+        this.cancelConnectionFailureError();
         this.update({
           roomState: message.payload.state,
           sourceState: message.payload.sourceState,
@@ -547,6 +549,7 @@ export class ViewerSession {
       sessionId: this.snapshot.sessionId,
       status: this.snapshot.status,
     });
+    this.cancelConnectionFailureError();
     this.stopMetricsTimer();
     const socketClient = this.socketClient;
     this.socketClient = null;
@@ -572,6 +575,52 @@ export class ViewerSession {
   private update(patch: Partial<ViewerSessionState> | ViewerSessionState) {
     this.snapshot = { ...this.snapshot, ...patch };
     this.emit();
+  }
+
+  private scheduleConnectionFailureError(
+    peerClient: ReturnType<typeof createViewerPeerConnection>,
+    generation: number,
+    joined: JoinRoomResponse,
+    socketClient: ReturnType<typeof createSocketClient>,
+  ) {
+    this.cancelConnectionFailureError();
+    const graceMs =
+      this.options.connectionFailureGraceMs ?? directConnectivityFailureGraceMs;
+
+    viewerSessionLogger.warn("Viewer peer connectivity failed; waiting briefly for reoffer.", {
+      graceMs,
+      roomId: joined.roomId,
+      sessionId: joined.sessionId,
+    });
+
+    this.connectionFailureTimer = setTimeout(() => {
+      this.connectionFailureTimer = null;
+      if (
+        this.peerClient !== peerClient ||
+        !this.isCurrentSocket(generation, joined, socketClient)
+      ) {
+        return;
+      }
+
+      viewerSessionLogger.error("Viewer peer connectivity failed.", {
+        roomId: joined.roomId,
+        sessionId: joined.sessionId,
+        state: "failed",
+      });
+      this.update({
+        status: "error",
+        errorCode: errorCodes.DIRECT_CONNECTIVITY_FAILED,
+      });
+    }, graceMs);
+  }
+
+  private cancelConnectionFailureError() {
+    if (!this.connectionFailureTimer) {
+      return;
+    }
+
+    clearTimeout(this.connectionFailureTimer);
+    this.connectionFailureTimer = null;
   }
 
   private persistCurrentViewerRoomSession() {

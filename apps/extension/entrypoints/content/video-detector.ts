@@ -5,6 +5,7 @@ let nextVideoHandle = 1;
 export type VideoSource = {
   id: string;
   label: string;
+  fingerprint?: VideoCandidate["fingerprint"];
   primaryUrl?: string | null;
   posterUrl?: string | null;
   thumbnailUrl?: string | null;
@@ -13,6 +14,9 @@ export type VideoSource = {
   duration?: number | null;
   format?: string | null;
   isVisible?: boolean;
+  isPlaying?: boolean;
+  readyState?: number | null;
+  visibleArea?: number;
 };
 
 export type VideoCandidate = {
@@ -60,6 +64,10 @@ function getVideoArea(video: HTMLVideoElement): number {
   return rect.width * rect.height;
 }
 
+function isPlayingVideo(video: HTMLVideoElement): boolean {
+  return !video.paused && !video.ended;
+}
+
 function collectVideosFromRoot(
   root: ParentNode,
   videos: HTMLVideoElement[],
@@ -90,6 +98,13 @@ function rankVideos(left: HTMLVideoElement, right: HTMLVideoElement): number {
 
   if (leftVisible !== rightVisible) {
     return leftVisible ? -1 : 1;
+  }
+
+  const leftPlaying = leftVisible && isPlayingVideo(left);
+  const rightPlaying = rightVisible && isPlayingVideo(right);
+
+  if (leftPlaying !== rightPlaying) {
+    return leftPlaying ? -1 : 1;
   }
 
   return getVideoArea(right) - getVideoArea(left);
@@ -143,18 +158,27 @@ export function findVisibleVideoByHandle(
 }
 
 export function listVisibleVideoSources(): VideoSource[] {
-  return collectPageVideos().map((video, index) => ({
-    id: getVideoHandle(video),
-    label: formatVideoLabel(video, index),
-    primaryUrl: video.currentSrc || video.src || null,
-    posterUrl: video.getAttribute("poster"),
-    thumbnailUrl: captureVideoFrameThumbnail(video),
-    width: video.videoWidth || null,
-    height: video.videoHeight || null,
-    duration: Number.isFinite(video.duration) ? video.duration : null,
-    format: getVideoFormat(video),
-    isVisible: isRenderableVideo(video),
-  }));
+  return collectPageVideos().map((video, index) => {
+    const label = formatVideoLabel(video, index);
+    const isVisible = isRenderableVideo(video);
+
+    return {
+      id: getVideoHandle(video),
+      label,
+      fingerprint: getVideoFingerprint(video, label, index),
+      primaryUrl: video.currentSrc || video.src || null,
+      posterUrl: video.getAttribute("poster"),
+      thumbnailUrl: captureVideoFrameThumbnail(video),
+      width: video.videoWidth || null,
+      height: video.videoHeight || null,
+      duration: Number.isFinite(video.duration) ? video.duration : null,
+      format: getVideoFormat(video),
+      isVisible,
+      isPlaying: isVisible && isPlayingVideo(video),
+      readyState: typeof video.readyState === "number" ? video.readyState : null,
+      visibleArea: isVisible ? getVideoArea(video) : 0,
+    };
+  });
 }
 
 export function listVisibleVideoCandidates(): VideoCandidate[] {
@@ -164,13 +188,7 @@ export function listVisibleVideoCandidates(): VideoCandidate[] {
     return {
       id: getVideoHandle(video),
       label,
-      fingerprint: {
-        primaryUrl: video.currentSrc || video.src || video.getAttribute("poster"),
-        pageUrl: window.location.href,
-        elementId: video.id || null,
-        label,
-        visibleIndex: index,
-      },
+      fingerprint: getVideoFingerprint(video, label, index),
     };
   });
 }
@@ -188,15 +206,23 @@ export function listAllPageVideoCandidates(): VideoCandidate[] {
     return {
       id: getVideoHandle(video),
       label,
-      fingerprint: {
-        primaryUrl: video.currentSrc || video.src || video.getAttribute("poster"),
-        pageUrl: window.location.href,
-        elementId: video.id || null,
-        label,
-        visibleIndex: index,
-      },
+      fingerprint: getVideoFingerprint(video, label, index),
     };
   });
+}
+
+function getVideoFingerprint(
+  video: HTMLVideoElement,
+  label: string,
+  visibleIndex: number,
+): VideoCandidate["fingerprint"] {
+  return {
+    primaryUrl: video.currentSrc || video.src || video.getAttribute("poster"),
+    pageUrl: window.location.href,
+    elementId: video.id || null,
+    label,
+    visibleIndex,
+  };
 }
 
 export function getVideoDetectionDiagnostics(): VideoDetectionDiagnostics {

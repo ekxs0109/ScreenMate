@@ -27,7 +27,8 @@ import {
   UploadCloud,
   Users,
   X,
-  } from "lucide-react";
+  Zap,
+} from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { cn } from "../../lib/utils";
@@ -54,6 +55,7 @@ export function ExtensionPopupPresenter({
   onPreviewSource,
   onClearSourcePreview,
   onRefreshSniff,
+  onToggleFollowActiveTabVideo = () => { },
   onSniffScrollChange,
   onCaptureScreen,
   onOpenPlayer,
@@ -85,6 +87,7 @@ export function ExtensionPopupPresenter({
   onPreviewSource: (id: string) => void;
   onClearSourcePreview: () => void;
   onRefreshSniff: () => void;
+  onToggleFollowActiveTabVideo?: (enabled: boolean) => void;
   onSniffScrollChange: (scrollTop: number) => void;
   onCaptureScreen: (type: "screen" | "window" | "tab") => void;
   onOpenPlayer: () => void;
@@ -102,6 +105,15 @@ export function ExtensionPopupPresenter({
 }) {
   const shouldShowMetaMessage =
     scene.meta.message !== null && scene.meta.message !== "Room closed.";
+  const isAutoFollow = scene.sourceTab.followActiveTabVideo;
+  const effectiveSourceType = scene.sourceTab.activeSourceType;
+  const playbackLabel =
+    formatPlaybackLabel(scene.header.playback.label, copy) ||
+    (scene.header.playback.state === "active"
+      ? copy.currentPlayback
+      : copy.waitingPlayback);
+  const playbackModeLabel =
+    scene.header.playback.mode === "auto" ? copy.autoMode : copy.manualMode;
   const [collapsedSniffGroupIds, setCollapsedSniffGroupIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -140,18 +152,44 @@ export function ExtensionPopupPresenter({
           : "h-[min(600px,calc(100dvh-2rem))] w-[min(400px,calc(100vw-2rem))] rounded-2xl shadow-2xl",
       )}
     >
-      <header className="shrink-0 flex items-center justify-between p-4 border-b border-border bg-zinc-50/80 dark:bg-zinc-950/80 backdrop-blur transition-colors">
-        <div className="min-w-0">
-          <span className="font-bold text-lg tracking-tight">{copy.appName}</span>
+      <header className="shrink-0 border-b border-border bg-zinc-50/85 dark:bg-zinc-950/85 backdrop-blur transition-colors p-3 flex items-center gap-2">
+        <div className="flex-1 min-w-0 flex items-center gap-2 px-1">
+          <span
+            className={cn(
+              "size-2 rounded-full shrink-0",
+              scene.header.playback.state === "active"
+                ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.55)] flex-none"
+                : "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)] flex-none",
+            )}
+          />
+          <div className="min-w-0 flex-1 flex items-center gap-1.5">
+            <span className="shrink-0 font-black tracking-tight text-[13px] text-foreground">
+              {copy.appName}
+            </span>
+            <span className="shrink-0 text-[11px] text-muted-foreground/30 dark:text-muted-foreground/50">/</span>
+            <span
+              className={cn(
+                "shrink-0 text-[11px] font-semibold",
+                scene.header.playback.mode === "auto" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+              )}
+            >
+              {playbackModeLabel}
+            </span>
+            <span className="shrink-0 text-[11px] text-muted-foreground/30 dark:text-muted-foreground/50">·</span>
+            <span className="truncate text-[11px] font-medium text-muted-foreground" title={playbackLabel}>
+              {playbackLabel}
+            </span>
+          </div>
           <span data-testid="popup-room-status" className="sr-only">
             {scene.header.statusText}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+
+        <div className="flex items-center gap-1 shrink-0">
           <button
             aria-label={copy.themeLabel}
             className={cn(
-              "p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors border border-border bg-white dark:bg-zinc-900 shadow-sm flex items-center justify-center h-8 w-8",
+              "hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors flex items-center justify-center size-8",
               themeTriggerClassName,
             )}
             onClick={onThemeToggle}
@@ -161,7 +199,7 @@ export function ExtensionPopupPresenter({
             {themeIcon}
           </button>
           <button
-            className="p-1.5 text-muted-foreground hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors border border-border bg-white dark:bg-zinc-900 shadow-sm flex items-center justify-center h-8 w-8"
+            className="text-muted-foreground hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors flex items-center justify-center size-8"
             onClick={onOpenPopout}
             aria-label={copy.popout}
             title={copy.popout}
@@ -183,9 +221,9 @@ export function ExtensionPopupPresenter({
           </TabsTrigger>
           <TabsTrigger data-testid="popup-tab-room" className="rounded-none border-b-[3px] border-transparent px-4 pb-2.5 pt-0 text-sm font-semibold shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors" value="room">
             {copy.tabRoom}
-            {scene.tabs.hasShared && <span className="ml-2 inline-block size-2 rounded-full bg-green-500 animate-pulse" />}
+            {scene.tabs.roomBadgeVisible && <span className="ml-2 inline-block size-2 rounded-full bg-green-500 animate-pulse" />}
           </TabsTrigger>
-          {scene.tabs.hasShared && (
+          {scene.tabs.chatVisible && (
             <TabsTrigger data-testid="popup-tab-chat" className="rounded-none border-b-[3px] border-transparent px-4 pb-2.5 pt-0 text-sm font-semibold shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors" value="chat">
               {copy.tabChat}
             </TabsTrigger>
@@ -197,22 +235,34 @@ export function ExtensionPopupPresenter({
             <div className="flex h-full min-h-0 flex-col">
               <div className="shrink-0 p-4 pb-0">
                 <div className="p-1 bg-zinc-100 dark:bg-zinc-900/50 rounded-lg flex items-center shadow-inner">
-                  <SourceTypeButton active={scene.sourceTab.activeSourceType === "sniff"} icon={<Search className="w-3.5 h-3.5 shrink-0" />} label={copy.sourceSniff} onClick={() => onSelectSourceType("sniff")} />
-                  <SourceTypeButton active={scene.sourceTab.activeSourceType === "screen"} icon={<MonitorUp className="w-3.5 h-3.5 shrink-0" />} label={copy.sourceScreen} onClick={() => onSelectSourceType("screen")} />
-                  <SourceTypeButton active={scene.sourceTab.activeSourceType === "upload"} icon={<UploadCloud className="w-3.5 h-3.5 shrink-0" />} label={copy.sourceUpload} onClick={() => onSelectSourceType("upload")} />
+                  <SourceTypeButton active={scene.sourceTab.activeSourceType === "auto"} sourceActive={scene.sourceTab.activeSourceIndicator === "auto"} icon={<Zap className="w-3.5 h-3.5 shrink-0" />} label={copy.sourceAuto} onClick={() => onSelectSourceType("auto")} />
+                  <SourceTypeButton active={scene.sourceTab.activeSourceType === "sniff"} sourceActive={scene.sourceTab.activeSourceIndicator === "sniff"} icon={<Search className="w-3.5 h-3.5 shrink-0" />} label={copy.sourceSniff} onClick={() => onSelectSourceType("sniff")} />
+                  <SourceTypeButton active={scene.sourceTab.activeSourceType === "screen"} sourceActive={scene.sourceTab.activeSourceIndicator === "screen"} icon={<MonitorUp className="w-3.5 h-3.5 shrink-0" />} label={copy.sourceScreen} onClick={() => onSelectSourceType("screen")} />
+                  <SourceTypeButton active={scene.sourceTab.activeSourceType === "upload"} sourceActive={scene.sourceTab.activeSourceIndicator === "upload"} icon={<UploadCloud className="w-3.5 h-3.5 shrink-0" />} label={copy.sourceUpload} onClick={() => onSelectSourceType("upload")} />
                 </div>
               </div>
-              {scene.sourceTab.activeSourceType === "sniff" ? (
+              {effectiveSourceType === "auto" ? (
+                <PopupScrollArea className="min-h-0 flex-1" contentClassName="p-4 pb-8 flex flex-col gap-4 min-h-full">
+                  <AutoTabPanel
+                    copy={copy}
+                    enabled={isAutoFollow}
+                    playbackLabel={playbackLabel}
+                    playbackState={scene.header.playback.state}
+                    onEnable={() => onToggleFollowActiveTabVideo(true)}
+                    onDisable={() => onToggleFollowActiveTabVideo(false)}
+                  />
+                </PopupScrollArea>
+              ) : effectiveSourceType === "sniff" ? (
                 <div className="flex min-h-0 flex-1 flex-col">
-                  <div className="shrink-0 px-4 pb-3 pt-4">
-                    <div className="flex items-center justify-between text-[10px] font-bold text-muted-foreground px-1">
-                      <div className="flex items-center gap-1.5 uppercase tracking-widest">
+                  <div className="shrink-0 px-4 pb-2 pt-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-1">
                         <LinkIcon className="w-3 h-3" />
                         {copy.detected}
                       </div>
-                      <button onClick={onRefreshSniff} aria-label={copy.refreshSniff} className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 hover:text-blue-700 transition-colors px-2 py-1 bg-blue-50 dark:bg-blue-900/20 rounded disabled:opacity-70" type="button" disabled={scene.sourceTab.isRefreshing}>
+                      <button onClick={onRefreshSniff} aria-label={copy.refreshSniff} className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 hover:text-blue-700 transition-colors bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded disabled:opacity-70" type="button" disabled={scene.sourceTab.isRefreshing}>
                         <RefreshCw className={cn("w-3.5 h-3.5", scene.sourceTab.isRefreshing && "animate-spin")} />
-                        <span className="font-semibold">{copy.refreshSniff}</span>
+                        <span className="text-[10px] font-bold">{copy.refreshSniff}</span>
                       </button>
                     </div>
                   </div>
@@ -313,7 +363,7 @@ export function ExtensionPopupPresenter({
                 </div>
               ) : (
                 <PopupScrollArea className="min-h-0 flex-1" contentClassName="p-4 pb-8 flex flex-col gap-6 min-h-full">
-                  {scene.sourceTab.activeSourceType === "screen" && (
+                  {effectiveSourceType === "screen" && (
                     <div className="flex flex-col gap-4 flex-1">
                       <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
                         <MonitorUp className="w-3.5 h-3.5" />
@@ -358,7 +408,7 @@ export function ExtensionPopupPresenter({
                     </div>
                   )}
 
-                  {scene.sourceTab.activeSourceType === "upload" && (
+                  {effectiveSourceType === "upload" && (
                     <div className="flex flex-col gap-4 flex-1 pb-6">
                       <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
                         <FileVideo className="w-3.5 h-3.5" />
@@ -389,31 +439,21 @@ export function ExtensionPopupPresenter({
                   </div>
                 </div>
               )}
-              <div className="shrink-0 border-t border-border bg-card/95 p-4 backdrop-blur-md">
-                {!scene.tabs.hasShared ? (
-                  <button data-testid="popup-start-or-attach" onClick={onStartOrAttach} className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none" disabled={scene.footer.primaryDisabled} type="button">
-                    <Play className="w-4 h-4 fill-current" />
-                    {copy.generateShare}
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-3 w-full">
-                    <button onClick={() => onSelectTab("room")} className="flex-1 py-3.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900/80 dark:hover:bg-zinc-800 text-sm font-bold rounded-xl transition-colors border border-transparent flex items-center justify-center text-foreground" type="button">
-                      {copy.cancel}
-                    </button>
-                    <button onClick={onStartOrAttach} className="flex-1 py-3.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none" disabled={scene.footer.primaryDisabled} type="button">
-                      <RefreshCw className="w-4 h-4" />
-                      {copy.changeSource}
-                    </button>
-                  </div>
-                )}
-              </div>
+              <PopupFooterActions
+                copy={copy}
+                scene={scene}
+                context="source"
+                onCancel={() => onSelectTab("room")}
+                onStartOrAttach={onStartOrAttach}
+                onStopRoom={onStopRoom}
+              />
             </div>
           </TabsContent>
 
           <TabsContent value="room" className="mt-0 h-full outline-none">
             <div className="flex h-full min-h-0 flex-col">
               <PopupScrollArea className="min-h-0 flex-1" contentClassName="p-4 flex flex-col gap-6">
-                {!scene.tabs.hasShared ? (
+                {scene.roomTab.state === "empty" ? (
                   <div className="flex-1 flex flex-col items-center justify-center text-center gap-4 opacity-70 px-8 py-20 min-h-[400px] animate-in fade-in duration-500">
                     <div className="size-16 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mb-2">
                       <Info className="w-8 h-8 text-muted-foreground" />
@@ -517,18 +557,20 @@ export function ExtensionPopupPresenter({
                   </>
                 )}
               </PopupScrollArea>
-              {scene.tabs.hasShared && (
-                <div className="shrink-0 border-t border-border bg-card/95 p-4 backdrop-blur-md">
-                  <button onClick={onStopRoom} className="w-full py-3.5 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-900/50 rounded-xl font-bold transition-[background-color,transform,box-shadow] text-sm flex items-center justify-center gap-2 shadow-sm active:scale-[0.98] disabled:opacity-50" disabled={scene.footer.secondaryDisabled} type="button">
-                    <X className="w-4 h-4 stroke-[3]" />
-                    {copy.endShare}
-                  </button>
-                </div>
+              {scene.tabs.hasOpenRoomSession && (
+                <PopupFooterActions
+                  copy={copy}
+                  scene={scene}
+                  context="room"
+                  onCancel={() => onSelectTab("room")}
+                  onStartOrAttach={onStartOrAttach}
+                  onStopRoom={onStopRoom}
+                />
               )}
             </div>
           </TabsContent>
 
-          {scene.tabs.hasShared && (
+          {scene.tabs.chatVisible && (
             <TabsContent value="chat" className="mt-0 h-full outline-none">
               <div className="flex h-full min-h-0 flex-col animate-in fade-in slide-in-from-right-2 duration-200">
                 <ChatPane messages={scene.chatTab.messages} onSend={onSendChat} placeholder={copy.chatPlaceholder} />
@@ -541,17 +583,171 @@ export function ExtensionPopupPresenter({
   );
 }
 
-function SourceTypeButton({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {
+function PopupFooterActions({
+  context,
+  copy,
+  onCancel,
+  onStartOrAttach,
+  onStopRoom,
+  scene,
+}: {
+  context: "source" | "room";
+  copy: ExtensionDictionary;
+  onCancel: () => void;
+  onStartOrAttach: () => void;
+  onStopRoom: () => void;
+  scene: ExtensionSceneModel;
+}) {
+  if (scene.footer.variant === "hidden") {
+    return null;
+  }
+
+  return (
+    <div className="shrink-0 border-t border-border bg-card/95 backdrop-blur-md p-4">
+      {scene.footer.variant === "end-share" ? (
+        <button
+          data-testid="popup-stop-room"
+          onClick={onStopRoom}
+          disabled={scene.footer.disabled}
+          type="button"
+          className="w-full py-3.5 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-900/50 rounded-xl font-bold transition-[background-color,transform,box-shadow] text-sm flex items-center justify-center gap-2 shadow-sm active:scale-[0.98] disabled:opacity-50"
+        >
+          <X className="w-4 h-4 stroke-[3]" />
+          {copy.endShare}
+        </button>
+      ) : scene.footer.variant === "start-room" ? (
+        <button
+          data-testid="popup-start-or-attach"
+          onClick={onStartOrAttach}
+          className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+          disabled={scene.footer.disabled}
+          type="button"
+        >
+          <Play className="w-4 h-4 fill-current" />
+          {copy.generateShare}
+        </button>
+      ) : (
+        <div className="flex items-center gap-3 w-full">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-3.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900/80 dark:hover:bg-zinc-800 text-sm font-bold rounded-xl transition-colors border border-transparent flex items-center justify-center text-foreground"
+            type="button"
+          >
+            {copy.cancel}
+          </button>
+          <button
+            onClick={onStartOrAttach}
+            className="flex-1 py-3.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+            disabled={scene.footer.confirmDisabled}
+            type="button"
+          >
+            <RefreshCw className="w-4 h-4" />
+            {copy.changeSource}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SourceTypeButton({ active, icon, label, onClick, sourceActive }: { active: boolean; icon: ReactNode; label: string; onClick: () => void; sourceActive?: boolean }) {
   return (
     <button
       onClick={onClick}
       type="button"
-      className={cn("flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold rounded-md transition-[background-color,color,box-shadow,border-color] border", active ? "bg-white dark:bg-zinc-800 shadow-sm border-zinc-200 dark:border-zinc-700 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
+      className={cn("relative flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold rounded-md transition-[background-color,color,box-shadow,border-color] border", active ? "bg-white dark:bg-zinc-800 shadow-sm border-zinc-200 dark:border-zinc-700 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
     >
       {icon}
       <span className="truncate">{label}</span>
+      {sourceActive && (
+        <span aria-hidden="true" className="absolute top-1 right-1 size-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]" />
+      )}
     </button>
   );
+}
+
+function AutoTabPanel({
+  copy,
+  enabled,
+  playbackLabel,
+  playbackState,
+  onEnable,
+  onDisable,
+}: {
+  copy: ExtensionDictionary;
+  enabled: boolean;
+  playbackLabel: string;
+  playbackState: "active" | "waiting";
+  onEnable: () => void;
+  onDisable: () => void;
+}) {
+  if (!enabled) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center p-8 mt-2 text-center rounded-2xl border border-dashed border-border bg-zinc-50/50 dark:bg-zinc-900/20">
+        <div className="mb-5 flex size-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 ring-8 ring-emerald-50 dark:ring-emerald-900/10 shadow-sm">
+          <Zap className="size-7" />
+        </div>
+        <h3 className="mb-2 text-sm font-bold text-foreground tracking-tight">
+          {copy.sourceAuto}
+        </h3>
+        <p className="text-[11px] text-muted-foreground max-w-[240px] leading-relaxed mb-6">
+          {copy.sourceAutoDescription}
+        </p>
+        <button
+          data-testid="popup-auto-enable"
+          onClick={onEnable}
+          type="button"
+          className="py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-1.5"
+        >
+          <Zap className="w-3.5 h-3.5 fill-current" />
+          {copy.autoEnable}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center p-8 mt-2 text-center rounded-2xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-900/10">
+      <div className="relative mb-5 flex size-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 ring-8 ring-emerald-50 dark:ring-emerald-900/10 shadow-sm">
+        <Target className="size-7" />
+        <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background shadow-sm">
+          <span className={cn(
+            "h-2.5 w-2.5 rounded-full",
+            playbackState === "active" ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-[pulse_2s_ease-in-out_infinite]" : "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]"
+          )} />
+        </span>
+      </div>
+      <h3 className="mb-2 text-sm font-bold text-foreground tracking-tight">
+        {copy.autoFollowEmptyTitle}
+      </h3>
+      <p className="text-[11px] text-muted-foreground max-w-[240px] leading-relaxed mb-5">
+        {copy.autoFollowEmptyDescription}
+      </p>
+
+      <div className="mb-5 flex items-center gap-2 rounded-full border border-border bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs shadow-sm">
+        <span className="px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 border text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
+          {copy.currentPlayback}
+        </span>
+        <span className="font-semibold text-foreground truncate max-w-[150px]" title={playbackLabel}>
+          {playbackLabel}
+        </span>
+      </div>
+
+      <button
+        data-testid="popup-auto-disable"
+        onClick={onDisable}
+        type="button"
+        className="py-2 px-4 bg-white hover:bg-zinc-50 dark:bg-zinc-950 dark:hover:bg-zinc-900 text-foreground font-semibold rounded-lg border border-border shadow-sm transition-colors text-xs active:scale-95"
+      >
+        {copy.autoDisable}
+      </button>
+    </div>
+  );
+}
+
+function formatPlaybackLabel(label: string, copy: ExtensionDictionary) {
+  const trimmed = label.trim();
+  return trimmed.startsWith("blob:") ? copy.webVideoStream : trimmed;
 }
 
 function CaptureOptionCard({ title, description, icon, onClick }: { title: string; description: string; icon: ReactNode; onClick: () => void }) {
@@ -675,8 +871,8 @@ function ChatPaneInner({ messages, onSend, placeholder, roundedBottom = false }:
         className="flex-1"
         contentClassName="p-4 flex flex-col gap-4 relative min-h-full bg-zinc-50/50 dark:bg-zinc-950/30"
       >
-        <div 
-          className="absolute inset-0 opacity-100 dark:opacity-0 pointer-events-none" 
+        <div
+          className="absolute inset-0 opacity-100 dark:opacity-0 pointer-events-none"
           style={{ backgroundImage: `url(${cubesPattern})` }}
         />
         {messages.map((message) => (

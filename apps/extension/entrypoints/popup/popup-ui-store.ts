@@ -58,12 +58,21 @@ export const usePopupUiStore = create<PopupUiStore>()(
     }),
     {
       name: "screenmate-popup-ui",
-      version: 1,
+      version: 2,
       storage: createJSONStorage(createPopupStateStorage),
+      migrate: (persistedState) => {
+        if (!persistedState || typeof persistedState !== "object") {
+          return persistedState;
+        }
+
+        return {
+          ...persistedState,
+          screenReady: false,
+        };
+      },
       partialize: (state) => ({
         activeTab: state.activeTab,
         activeSourceType: state.activeSourceType,
-        screenReady: state.screenReady,
         uploadReady: state.uploadReady,
         localFile: state.localFile,
         passwordDraft: state.passwordDraft,

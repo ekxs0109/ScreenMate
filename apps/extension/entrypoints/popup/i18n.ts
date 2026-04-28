@@ -5,10 +5,23 @@ export type ExtensionDictionary = {
   tabSource: string;
   tabRoom: string;
   tabChat: string;
+  sourceAuto: string;
+  sourceAutoDescription: string;
+  autoEnable: string;
+  autoDisable: string;
   sourceSniff: string;
   sourceScreen: string;
   sourceUpload: string;
   detected: string;
+  followAuto: string;
+  followAutoDescription: string;
+  currentPlayback: string;
+  waitingPlayback: string;
+  webVideoStream: string;
+  autoMode: string;
+  manualMode: string;
+  autoFollowEmptyTitle: string;
+  autoFollowEmptyDescription: string;
   mockOrigin: string;
   refreshSniff: string;
   noVideo: string;
@@ -56,10 +69,23 @@ export function getExtensionDictionary(): ExtensionDictionary {
     tabSource: i18n.t("tabSource"),
     tabRoom: i18n.t("tabRoom"),
     tabChat: i18n.t("tabChat"),
+    sourceAuto: i18n.t("sourceAuto"),
+    sourceAutoDescription: i18n.t("sourceAutoDescription"),
+    autoEnable: i18n.t("autoEnable"),
+    autoDisable: i18n.t("autoDisable"),
     sourceSniff: i18n.t("sourceSniff"),
     sourceScreen: i18n.t("sourceScreen"),
     sourceUpload: i18n.t("sourceUpload"),
     detected: i18n.t("detected"),
+    followAuto: i18n.t("followAuto"),
+    followAutoDescription: i18n.t("followAutoDescription"),
+    currentPlayback: i18n.t("currentPlayback"),
+    waitingPlayback: i18n.t("waitingPlayback"),
+    webVideoStream: i18n.t("webVideoStream"),
+    autoMode: i18n.t("autoMode"),
+    manualMode: i18n.t("manualMode"),
+    autoFollowEmptyTitle: i18n.t("autoFollowEmptyTitle"),
+    autoFollowEmptyDescription: i18n.t("autoFollowEmptyDescription"),
     mockOrigin: i18n.t("mockOrigin"),
     refreshSniff: i18n.t("refreshSniff"),
     noVideo: i18n.t("noVideo"),

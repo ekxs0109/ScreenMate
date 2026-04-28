@@ -51,7 +51,7 @@ export default defineConfig({
   },
   manifest: {
     default_locale: "en",
-    permissions: ["activeTab", "tabs", "webNavigation", "storage", "desktopCapture"],
+    permissions: ["activeTab", "tabs", "webNavigation", "storage", "offscreen"],
     host_permissions: ["http://*/*", "https://*/*"],
     web_accessible_resources: [
       {

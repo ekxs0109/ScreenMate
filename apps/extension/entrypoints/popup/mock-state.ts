@@ -29,7 +29,7 @@ export type ExtensionMockState = {
 export function createExtensionMockState(): ExtensionMockState {
   return {
     activeTab: "source",
-    activeSourceType: "sniff",
+    activeSourceType: "auto",
     screenReady: false,
     uploadReady: false,
     localFile: null,

@@ -31,13 +31,166 @@ describe("buildExtensionSceneModel", () => {
     });
 
     expect(scene.header.statusText).toBe("Room open · attached");
-    expect(scene.sourceTab.activeSourceType).toBe("sniff");
-    expect(scene.sourceTab.sectionKinds).toEqual(["sniff", "screen", "upload"]);
+    expect(scene.sourceTab.activeSourceType).toBe("auto");
+    expect(scene.sourceTab.activeSourceIndicator).toBe("sniff");
+    expect(scene.sourceTab.sectionKinds).toEqual(["auto", "sniff", "screen", "upload"]);
     expect(scene.roomTab.roomId).toBe("room_demo");
     expect(scene.roomTab.viewerCount).toBe(2);
     expect(scene.roomTab.viewerDetails).toHaveLength(0);
     expect(scene.roomTab.shareUrl).toBe("https://viewer.example/rooms/room_demo");
     expect(scene.chatTab.messages).toHaveLength(0);
+  });
+
+  it("reports automatic follow state and unblocks the primary action in sniff mode", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot(),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: null,
+      followActiveTabVideo: true,
+      mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
+    });
+
+    expect(scene.sourceTab.followActiveTabVideo).toBe(true);
+    expect(scene.header.playback.mode).toBe("auto");
+    expect(scene.footer).toEqual({
+      variant: "start-room",
+      disabled: false,
+      busy: false,
+    });
+  });
+
+  it("marks auto as the active source indicator only after an auto-follow source is attached", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        activeTabId: 42,
+        activeFrameId: 0,
+        sourceLabel: "Active tab video",
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      followActiveTabVideo: true,
+      mock: createExtensionMockState(),
+    });
+
+    expect(scene.sourceTab.activeSourceIndicator).toBe("auto");
+  });
+
+  it("marks offscreen screen as active only when the attached source is offscreen", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        activeTabId: -1,
+        activeFrameId: -1,
+        sourceLabel: "Shared screen",
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      preparedSourceState: {
+        status: "prepared-source",
+        kind: "screen",
+        ready: true,
+        label: "Shared screen",
+        metadata: null,
+        captureType: "screen",
+        error: null,
+      },
+      mock: { ...createExtensionMockState(), activeSourceType: "upload" },
+    });
+
+    expect(scene.sourceTab.activeSourceType).toBe("upload");
+    expect(scene.sourceTab.activeSourceIndicator).toBe("screen");
+  });
+
+  it("keeps the offscreen indicator on the attached screen source when another source is only prepared", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        activeTabId: -1,
+        activeFrameId: -1,
+        sourceLabel: "Shared screen",
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      preparedSourceState: {
+        status: "prepared-source",
+        kind: "upload",
+        ready: true,
+        label: "next-video.mp4",
+        metadata: {
+          id: "local-next",
+          name: "next-video.mp4",
+          size: 12,
+          type: "video/mp4",
+          updatedAt: 123,
+        },
+        fileId: "local-next",
+        error: null,
+      },
+      mock: { ...createExtensionMockState(), activeSourceType: "upload" },
+    });
+
+    expect(scene.sourceTab.uploadReady).toBe(true);
+    expect(scene.sourceTab.activeSourceIndicator).toBe("screen");
+  });
+
+  it("keeps manual sniff mode disabled until a video is selected", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot(),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: null,
+      mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
+    });
+
+    expect(scene.footer).toEqual({
+      variant: "start-room",
+      disabled: true,
+      busy: false,
+    });
+  });
+
+  it("does not treat stale popup screenReady mock state as a prepared screen source", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot(),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: null,
+      mock: {
+        ...createExtensionMockState(),
+        activeSourceType: "screen",
+        screenReady: true,
+      },
+    });
+
+    expect(scene.sourceTab.screenReady).toBe(false);
+    expect(scene.footer).toEqual({
+      variant: "start-room",
+      disabled: true,
+      busy: false,
+    });
   });
 
   it("prefers real room roster and chat over popup mock activity", () => {
