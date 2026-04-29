@@ -32,14 +32,48 @@ import {
   Maximize
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { saveLocalMediaFile } from "../../lib/local-media-store";
 import { HeaderControls } from "../../components/header-controls";
+import { ToastViewport, useToastQueue } from "../../components/toast";
+import { readLocalMediaFile, saveLocalMediaFile } from "../../lib/local-media-store";
+import type { LocalPlaybackState } from "../background";
 import { getExtensionDictionary } from "../popup/i18n";
 import { usePopupUiStore } from "../popup/popup-ui-store";
 import { buildExtensionSceneModel } from "../popup/scene-adapter";
 import { useHostControls } from "../popup/useHostControls";
 
 const cubesPattern = "/patterns/cubes.png";
+const RESTORED_PLAYBACK_SYNC_SUPPRESSION_MS = 750;
+
+function normalizeLocalPlaybackState(value: unknown): LocalPlaybackState | null {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("status" in value) ||
+    value.status !== "local-playback-state" ||
+    !("active" in value) ||
+    typeof value.active !== "boolean"
+  ) {
+    return null;
+  }
+
+  const candidate = value as Partial<LocalPlaybackState>;
+  return {
+    status: "local-playback-state",
+    active: candidate.active === true,
+    currentTime:
+      typeof candidate.currentTime === "number" &&
+      Number.isFinite(candidate.currentTime)
+        ? candidate.currentTime
+        : null,
+    duration:
+      typeof candidate.duration === "number" && Number.isFinite(candidate.duration)
+        ? candidate.duration
+        : null,
+    paused: typeof candidate.paused === "boolean" ? candidate.paused : null,
+    sourceLabel:
+      typeof candidate.sourceLabel === "string" ? candidate.sourceLabel : null,
+  };
+}
 
 export default function PlayerApp() {
   const { theme, setTheme, resolvedTheme } = useTheme();
@@ -53,6 +87,14 @@ export default function PlayerApp() {
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<DPlayer | null>(null);
   const fileUrlRef = useRef<string | null>(null);
+  const lastToastMessageRef = useRef<string | null>(null);
+  const attemptedPreparedUploadRestoreRef = useRef<string | null>(null);
+  const pendingPlaybackRestoreRef = useRef<LocalPlaybackState | null>(null);
+  const playbackSyncSuppressedRef = useRef(false);
+  const playbackSyncReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const { dismissToast, pushToast, toasts } = useToastQueue();
   
   // Random username generator 
   const [username, setUsername] = useState("Host");
@@ -69,8 +111,10 @@ export default function PlayerApp() {
     snapshot,
     isBusy,
     busyAction,
+    preparedSourceState,
     prepareLocalFileSource,
     sendChatMessage,
+    startSharing,
   } = useHostControls();
   const copy = getExtensionDictionary();
 
@@ -111,6 +155,35 @@ export default function PlayerApp() {
     playerRef.current = null;
   };
 
+  const releasePlaybackSyncSuppression = () => {
+    if (playbackSyncReleaseTimerRef.current) {
+      clearTimeout(playbackSyncReleaseTimerRef.current);
+      playbackSyncReleaseTimerRef.current = null;
+    }
+    playbackSyncSuppressedRef.current = false;
+  };
+
+  const suppressPlaybackSyncDuringRestore = () => {
+    releasePlaybackSyncSuppression();
+    playbackSyncSuppressedRef.current = true;
+    playbackSyncReleaseTimerRef.current = setTimeout(() => {
+      playbackSyncSuppressedRef.current = false;
+      playbackSyncReleaseTimerRef.current = null;
+    }, RESTORED_PLAYBACK_SYNC_SUPPRESSION_MS);
+  };
+
+  const readLocalPlaybackState = async () => {
+    try {
+      return normalizeLocalPlaybackState(
+        await browser.runtime.sendMessage({
+          type: "screenmate:get-local-playback-state",
+        }),
+      );
+    } catch {
+      return null;
+    }
+  };
+
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && file.type.startsWith('video/')) {
@@ -128,23 +201,50 @@ export default function PlayerApp() {
   };
 
   const handleLoadFile = async (file: File) => {
+    pendingPlaybackRestoreRef.current = null;
+    releasePlaybackSyncSuppression();
     if (fileUrlRef.current) {
       URL.revokeObjectURL(fileUrlRef.current);
     }
     const url = URL.createObjectURL(file);
-    const metadata = await saveLocalMediaFile(file);
     fileUrlRef.current = url;
     setFileUrl(url);
-    setLocalFile({ name: file.name, size: file.size, type: file.type });
     setActiveSourceType("upload");
-    await prepareLocalFileSource({
-      fileId: metadata.id,
-      metadata,
-    });
+    setLocalFile({ name: file.name, size: file.size, type: file.type });
     appendLocalMessage(`已加载本地视频: ${file.name} (Loaded local video)`);
+
+    try {
+      const metadata = await saveLocalMediaFile(file);
+      setLocalFile({
+        name: metadata.name,
+        size: metadata.size,
+        type: metadata.type,
+      });
+      const prepared = await prepareLocalFileSource({
+        fileId: metadata.id,
+        metadata,
+      });
+      if (prepared.kind === "upload" && prepared.ready) {
+        await startSharing("upload", {
+          preparedSourceState: prepared,
+        });
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Could not prepare the local video.";
+      pushToast(message, "error");
+    }
   };
 
   const handleClearFile = () => {
+    attemptedPreparedUploadRestoreRef.current =
+      preparedSourceState.kind === "upload" && preparedSourceState.ready
+        ? preparedSourceState.fileId
+        : attemptedPreparedUploadRestoreRef.current;
+    pendingPlaybackRestoreRef.current = null;
+    releasePlaybackSyncSuppression();
     if (fileUrlRef.current) {
       URL.revokeObjectURL(fileUrlRef.current);
       fileUrlRef.current = null;
@@ -180,7 +280,18 @@ export default function PlayerApp() {
   };
 
   useEffect(() => {
+    const message = snapshot.message;
+    if (!message || message === lastToastMessageRef.current) {
+      return;
+    }
+
+    lastToastMessageRef.current = message;
+    pushToast(message, "error");
+  }, [pushToast, snapshot.message]);
+
+  useEffect(() => {
     return () => {
+      releasePlaybackSyncSuppression();
       clearPlayerSurface();
       if (fileUrlRef.current) {
         URL.revokeObjectURL(fileUrlRef.current);
@@ -188,6 +299,55 @@ export default function PlayerApp() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (
+      preparedSourceState.kind !== "upload" ||
+      !preparedSourceState.ready ||
+      fileUrlRef.current ||
+      attemptedPreparedUploadRestoreRef.current === preparedSourceState.fileId
+    ) {
+      return;
+    }
+
+    attemptedPreparedUploadRestoreRef.current = preparedSourceState.fileId;
+    let isCancelled = false;
+
+    void (async () => {
+      const record = await readLocalMediaFile(preparedSourceState.fileId);
+      if (!record) {
+        return;
+      }
+
+      const playbackState = await readLocalPlaybackState();
+      const url = URL.createObjectURL(record.blob);
+      if (isCancelled || fileUrlRef.current) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      suppressPlaybackSyncDuringRestore();
+      pendingPlaybackRestoreRef.current = playbackState;
+      fileUrlRef.current = url;
+      setFileUrl(url);
+      setActiveSourceType("upload");
+      setLocalFile({
+        name: preparedSourceState.metadata.name,
+        size: preparedSourceState.metadata.size,
+        type: preparedSourceState.metadata.type,
+      });
+    })().catch((error) => {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Could not restore the local video preview.";
+      pushToast(message, "error");
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [preparedSourceState, pushToast, setActiveSourceType, setLocalFile]);
 
   useEffect(() => {
     clearPlayerSurface();
@@ -215,7 +375,15 @@ export default function PlayerApp() {
     nextPlayer.on("webfullscreen_cancel", handleWebFullscreenCancel);
 
     const video = nextPlayer.video ?? container.querySelector("video");
+    if (video) {
+      video.id ||= "screenmate-player-local-video";
+    }
+
     const syncPlayback = (action: "play" | "pause" | "seek") => {
+      if (playbackSyncSuppressedRef.current) {
+        return;
+      }
+
       void browser.runtime.sendMessage({
         type: "screenmate:sync-local-playback",
         action,
@@ -228,6 +396,38 @@ export default function PlayerApp() {
     video?.addEventListener("play", handlePlay);
     video?.addEventListener("pause", handlePause);
     video?.addEventListener("seeked", handleSeeked);
+
+    const restoredPlaybackState = pendingPlaybackRestoreRef.current;
+    pendingPlaybackRestoreRef.current = null;
+    if (video && restoredPlaybackState?.active) {
+      let didApplyPlaybackIntent = false;
+      const applyRestoredPlaybackState = () => {
+        if (typeof restoredPlaybackState.currentTime === "number") {
+          try {
+            video.currentTime = restoredPlaybackState.currentTime;
+          } catch {
+            // Some media elements reject seeks until metadata is available.
+          }
+        }
+
+        if (didApplyPlaybackIntent) {
+          return;
+        }
+        didApplyPlaybackIntent = true;
+        if (restoredPlaybackState.paused === false) {
+          void video.play?.().catch(() => undefined);
+        } else if (restoredPlaybackState.paused === true) {
+          video.pause?.();
+        }
+      };
+
+      applyRestoredPlaybackState();
+      if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
+        video.addEventListener("loadedmetadata", applyRestoredPlaybackState, {
+          once: true,
+        });
+      }
+    }
 
     return () => {
       video?.removeEventListener("play", handlePlay);
@@ -496,6 +696,7 @@ export default function PlayerApp() {
         </div>
       </main>
       </div>
+      <ToastViewport onDismiss={dismissToast} toasts={toasts} />
     </div>
   );
 }

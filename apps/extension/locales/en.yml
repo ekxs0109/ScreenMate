@@ -26,7 +26,7 @@ captureTitle: Capture Screen/Window
 captureDescription: Share a specific tab, app window, or entire desktop.
 captureButton: Select Content
 screenReady: Screen Ready
-screenReadyDescription: Source captured. Click the button below to start sharing.
+screenReadyDescription: Screen sharing has started. Reselect to change the source.
 reselect: Reselect
 captureEntireScreen: Entire Screen
 captureEntireScreenDesc: Share everything on your display
@@ -58,3 +58,11 @@ themeLabel: Theme
 themeLight: Light
 themeDark: Dark
 themeSystem: System
+sourceGateTitle: Create a room first
+sourceGateDescription: Create a sync room first, then choose Auto, Sniffer, Screen, or Local Player.
+switchSource: Switch
+activeSource: Active
+roomStatusIdle: No room
+roomStatusOpen: Room ready
+roomStatusStreaming: Playing
+roomStatusWaiting: Waiting

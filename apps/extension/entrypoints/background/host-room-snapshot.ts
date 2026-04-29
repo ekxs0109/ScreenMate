@@ -31,8 +31,8 @@ export type PersistedHostRoomSession = {
   signalingUrl: string;
   iceServers: RTCIceServer[];
   turnCredentialExpiresAt?: number | null;
-  activeTabId: number;
-  activeFrameId: number;
+  activeTabId: number | null;
+  activeFrameId: number | null;
   viewerSessionIds: string[];
   viewerCount: number;
   viewerRoster?: ViewerRosterEntry[];

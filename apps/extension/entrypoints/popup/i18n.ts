@@ -61,6 +61,14 @@ export type ExtensionDictionary = {
   themeLight: string;
   themeDark: string;
   themeSystem: string;
+  sourceGateTitle: string;
+  sourceGateDescription: string;
+  switchSource: string;
+  activeSource: string;
+  roomStatusIdle: string;
+  roomStatusOpen: string;
+  roomStatusStreaming: string;
+  roomStatusWaiting: string;
 };
 
 export function getExtensionDictionary(): ExtensionDictionary {
@@ -125,5 +133,13 @@ export function getExtensionDictionary(): ExtensionDictionary {
     themeLight: i18n.t("themeLight"),
     themeDark: i18n.t("themeDark"),
     themeSystem: i18n.t("themeSystem"),
+    sourceGateTitle: i18n.t("sourceGateTitle"),
+    sourceGateDescription: i18n.t("sourceGateDescription"),
+    switchSource: i18n.t("switchSource"),
+    activeSource: i18n.t("activeSource"),
+    roomStatusIdle: i18n.t("roomStatusIdle"),
+    roomStatusOpen: i18n.t("roomStatusOpen"),
+    roomStatusStreaming: i18n.t("roomStatusStreaming"),
+    roomStatusWaiting: i18n.t("roomStatusWaiting"),
   };
 }

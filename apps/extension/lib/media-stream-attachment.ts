@@ -318,6 +318,10 @@ export function createMediaStreamAttachmentRuntime(options: {
     teardownAttachment(reason);
   }
 
+  function detachForReplacement() {
+    teardownAttachment();
+  }
+
   function updateIceServers(iceServers: RTCIceServer[]) {
     if (!attachment) {
       return;
@@ -329,6 +333,7 @@ export function createMediaStreamAttachmentRuntime(options: {
   return {
     attachStream,
     beginViewerNegotiation,
+    detachForReplacement,
     handleSignal,
     updateIceServers,
     destroy,

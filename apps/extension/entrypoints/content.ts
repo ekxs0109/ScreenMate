@@ -90,6 +90,22 @@ const VIDEO_THUMBNAIL_REFRESH_EVENT_NAMES = [
   "seeked",
   "timeupdate",
 ] as const;
+const SCREENMATE_APP_MARKER = "screenmate-app";
+
+export type ScreenMatePageKind = "viewer";
+
+export function getScreenMatePageKind(
+  documentLike: Pick<Document, "documentElement" | "querySelector"> = document,
+): ScreenMatePageKind | null {
+  const appMarker =
+    documentLike.documentElement.getAttribute("data-screenmate-app") ??
+    documentLike
+      .querySelector(`meta[name="${SCREENMATE_APP_MARKER}"]`)
+      ?.getAttribute("content") ??
+    null;
+
+  return appMarker === "viewer" ? "viewer" : null;
+}
 
 export function createVideoMessageListener(
   sourceAttachmentRuntime?: ReturnType<typeof createSourceAttachmentRuntime>,
@@ -103,6 +119,15 @@ export function createVideoMessageListener(
   ) => {
     if (message.type === "screenmate:list-videos") {
       queueMicrotask(() => {
+        const screenmatePageKind = getScreenMatePageKind();
+        if (screenmatePageKind === "viewer") {
+          contentLogger.info("Ignoring list-videos on ScreenMate viewer page.", {
+            href: window.location.href,
+          });
+          sendResponse([]);
+          return;
+        }
+
         const videos = listVisibleVideoSources();
         const diagnostics = getVideoDetectionDiagnostics();
         contentLogger.info("Listed page videos.", {
@@ -265,6 +290,27 @@ function toExtensionChatMessage(message: RoomChatMessage) {
   };
 }
 
+export function createContentReadyNotifier({
+  createNotifier = createVideoChangeNotifier,
+  getPageKind = getScreenMatePageKind,
+  notify,
+}: {
+  createNotifier?: typeof createVideoChangeNotifier;
+  getPageKind?: () => ScreenMatePageKind | null;
+  notify: (reason?: string) => void;
+}) {
+  if (getPageKind() === "viewer") {
+    notify("initial");
+    return {
+      stop() {},
+    };
+  }
+
+  const notifier = createNotifier({ notify });
+  notifier.start();
+  return notifier;
+}
+
 export default defineContentScript({
   matches: ["<all_urls>"],
   allFrames: true,
@@ -301,15 +347,19 @@ export default defineContentScript({
     // non-renderable ones) so the background can fingerprint-match even
     // before the video element is fully initialised (e.g. Bilibili blob URLs).
     const notifyContentReady = (reason = "manual") => {
-      const videos = buildContentReadyVideos();
+      const screenmatePageKind = getScreenMatePageKind();
+      const videos =
+        screenmatePageKind === "viewer" ? [] : buildContentReadyVideos();
       contentLogger.info("Notifying content-ready.", {
         href: window.location.href,
         reason,
+        screenmatePageKind,
         totalVideos: videos.length,
       });
       void browser.runtime.sendMessage({
         type: "screenmate:content-ready",
         frameId: 0,
+        ...(screenmatePageKind !== null && { screenmatePageKind }),
         videos: videos.map((video) => ({
           ...video,
           frameId: 0,
@@ -319,10 +369,9 @@ export default defineContentScript({
 
     contentLogger.info("Content script booted.", getVideoDetectionDiagnostics());
     browser.runtime.onMessage.addListener(listener);
-    const videoChangeNotifier = createVideoChangeNotifier({
+    const videoChangeNotifier = createContentReadyNotifier({
       notify: notifyContentReady,
     });
-    videoChangeNotifier.start();
 
     ctx.onInvalidated(() => {
       videoChangeNotifier.stop();

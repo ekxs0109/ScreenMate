@@ -56,6 +56,14 @@ const messages = {
   themeLight: "Claro",
   themeDark: "Oscuro",
   themeSystem: "Sistema",
+  sourceGateTitle: "Crea una sala primero",
+  sourceGateDescription: "Crea una sala de sincronización antes de elegir recursos.",
+  switchSource: "Cambiar",
+  activeSource: "Activo",
+  roomStatusIdle: "Sin sala",
+  roomStatusOpen: "Sala creada",
+  roomStatusStreaming: "Reproduciendo",
+  roomStatusWaiting: "Esperando recurso",
 };
 
 vi.mock("#i18n", () => ({
@@ -114,8 +122,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
@@ -140,7 +146,7 @@ describe("ExtensionPopupPresenter", () => {
     ).toBeNull();
   });
 
-  it("reattaches the selected source when changing source in an active room", () => {
+  it("switches a sniff source from the item action in an active room", () => {
     const scene = buildExtensionSceneModel({
       snapshot: createHostRoomSnapshot({
         roomLifecycle: "open",
@@ -180,8 +186,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={onStartOrAttach}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
@@ -193,22 +197,27 @@ describe("ExtensionPopupPresenter", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Cambiar Fuente" }));
+    fireEvent.click(screen.getByTestId("popup-sniff-switch-42:0:screenmate-video-1"));
 
-    expect(onStartOrAttach).toHaveBeenCalledTimes(1);
+    expect(onStartOrAttach).toHaveBeenCalledWith("sniff", {
+      selectedVideoId: "42:0:screenmate-video-1",
+    });
     expect(onSelectTab).not.toHaveBeenCalledWith("room");
   });
 
   it("previews sniff cards on hover without selecting them", () => {
     const scene = buildExtensionSceneModel({
-      snapshot: createHostRoomSnapshot(),
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        roomId: "room_demo",
+      }),
       videos: [
         { id: "video-1", tabId: 42, frameId: 0, label: "Big Buck Bunny" },
       ],
       selectedVideoId: null,
       isBusy: false,
       busyAction: null,
-      viewerRoomUrl: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
       mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
     });
     const onPreviewSource = vi.fn();
@@ -235,8 +244,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
@@ -254,18 +261,21 @@ describe("ExtensionPopupPresenter", () => {
     fireEvent.pointerLeave(card);
 
     expect(onPreviewSource).toHaveBeenCalledWith("42:0:video-1");
-    expect(onSelectSource).toHaveBeenCalledWith("42:0:video-1");
+    expect(onSelectSource).not.toHaveBeenCalled();
     expect(onClearSourcePreview).toHaveBeenCalledTimes(1);
   });
 
   it("shows the Auto tab enable CTA when follow is off and invokes the toggle", () => {
     const scene = buildExtensionSceneModel({
-      snapshot: createHostRoomSnapshot(),
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        roomId: "room_demo",
+      }),
       videos: [],
       selectedVideoId: null,
       isBusy: false,
       busyAction: null,
-      viewerRoomUrl: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
       mock: createExtensionMockState(),
     });
     const onToggleFollowActiveTabVideo = vi.fn();
@@ -291,8 +301,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
@@ -314,12 +322,15 @@ describe("ExtensionPopupPresenter", () => {
 
   it("does not show the green source indicator merely for the selected source tab", () => {
     const scene = buildExtensionSceneModel({
-      snapshot: createHostRoomSnapshot(),
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        roomId: "room_demo",
+      }),
       videos: [],
       selectedVideoId: null,
       isBusy: false,
       busyAction: null,
-      viewerRoomUrl: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
       mock: {
         ...createExtensionMockState(),
         activeSourceType: "screen",
@@ -347,8 +358,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
@@ -420,8 +429,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
@@ -448,7 +455,7 @@ describe("ExtensionPopupPresenter", () => {
     ).toBeFalsy();
   });
 
-  it("shows the Auto tab status card and End Share footer when follow is on", () => {
+  it("shows the Auto tab status card without a footer when follow is on", () => {
     const scene = buildExtensionSceneModel({
       snapshot: createHostRoomSnapshot({
         roomLifecycle: "open",
@@ -489,8 +496,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={onStopRoom}
         onSavePassword={vi.fn()}
@@ -508,12 +513,10 @@ describe("ExtensionPopupPresenter", () => {
     const disableButton = screen.getByTestId("popup-auto-disable");
     fireEvent.click(disableButton);
     expect(onToggleFollowActiveTabVideo).toHaveBeenCalledWith(false);
-
-    fireEvent.click(screen.getByTestId("popup-stop-room"));
-    expect(onStopRoom).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("popup-stop-room")).toBeNull();
   });
 
-  it("shows the create room footer instead of End Share when auto follow is on without a room", () => {
+  it("creates a room directly from the gate when no room exists", () => {
     const scene = buildExtensionSceneModel({
       snapshot: createHostRoomSnapshot(),
       videos: [],
@@ -524,8 +527,7 @@ describe("ExtensionPopupPresenter", () => {
       followActiveTabVideo: true,
       mock: createExtensionMockState(),
     });
-    const onStartOrAttach = vi.fn();
-    const onStopRoom = vi.fn();
+    const onCreateRoom = vi.fn();
 
     render(
       <ExtensionPopupPresenter
@@ -548,10 +550,9 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
-        onStartOrAttach={onStartOrAttach}
-        onStopRoom={onStopRoom}
+        onCreateRoom={onCreateRoom}
+        onStartOrAttach={vi.fn()}
+        onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
         onPasswordChange={vi.fn()}
         onCopyLink={vi.fn()}
@@ -561,22 +562,25 @@ describe("ExtensionPopupPresenter", () => {
       />,
     );
 
-    expect(screen.queryByTestId("popup-stop-room")).toBeNull();
-    fireEvent.click(screen.getByTestId("popup-start-or-attach"));
-    expect(onStartOrAttach).toHaveBeenCalledTimes(1);
-    expect(onStopRoom).not.toHaveBeenCalled();
+    expect(screen.getByText("Crea una sala primero")).toBeTruthy();
+    expect(screen.queryByTestId("popup-start-or-attach")).toBeNull();
+    fireEvent.click(screen.getByTestId("popup-create-room"));
+    expect(onCreateRoom).toHaveBeenCalledTimes(1);
   });
 
   it("shows a neutral placeholder instead of a generated image when a video has no poster", () => {
     const scene = buildExtensionSceneModel({
-      snapshot: createHostRoomSnapshot(),
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        roomId: "room_demo",
+      }),
       videos: [
         { id: "video-1", tabId: 42, frameId: 0, label: "Big Buck Bunny" },
       ],
       selectedVideoId: null,
       isBusy: false,
       busyAction: null,
-      viewerRoomUrl: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
       mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
     });
 
@@ -600,8 +604,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
@@ -618,7 +620,10 @@ describe("ExtensionPopupPresenter", () => {
 
   it("collapses and expands sniff tab groups", () => {
     const scene = buildExtensionSceneModel({
-      snapshot: createHostRoomSnapshot(),
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        roomId: "room_demo",
+      }),
       sniffTabs: [
         { tabId: 42, title: "Bilibili" },
         { tabId: 84, title: "No video tab" },
@@ -629,7 +634,7 @@ describe("ExtensionPopupPresenter", () => {
       selectedVideoId: null,
       isBusy: false,
       busyAction: null,
-      viewerRoomUrl: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
       mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
     });
 
@@ -653,8 +658,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
@@ -682,7 +685,10 @@ describe("ExtensionPopupPresenter", () => {
 
   it("keeps the detected resources header outside the scrollable list", () => {
     const scene = buildExtensionSceneModel({
-      snapshot: createHostRoomSnapshot(),
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        roomId: "room_demo",
+      }),
       sniffTabs: [
         { tabId: 42, title: "Bilibili" },
         { tabId: 84, title: "No video tab" },
@@ -693,7 +699,7 @@ describe("ExtensionPopupPresenter", () => {
       selectedVideoId: null,
       isBusy: false,
       busyAction: null,
-      viewerRoomUrl: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
       mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
     });
 
@@ -717,8 +723,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
@@ -799,8 +803,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}
@@ -863,8 +865,6 @@ describe("ExtensionPopupPresenter", () => {
         onToggleScreenReady={vi.fn()}
         onCaptureScreen={vi.fn()}
         onOpenPlayer={vi.fn()}
-        onSelectLocalFile={vi.fn()}
-        onClearLocalFile={vi.fn()}
         onStartOrAttach={vi.fn()}
         onStopRoom={vi.fn()}
         onSavePassword={vi.fn()}

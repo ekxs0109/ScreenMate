@@ -3,7 +3,10 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ThemeProvider } from "./components/theme-provider";
 import { ViewerI18nProvider } from "./i18n";
+import { markScreenMateViewerPage } from "./screenmate-page-marker";
 import "./app.css";
+
+markScreenMateViewerPage();
 
 const rootElement = document.getElementById("root");
 

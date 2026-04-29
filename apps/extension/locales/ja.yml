@@ -26,7 +26,7 @@ captureTitle: 画面 / ウィンドウをキャプチャ
 captureDescription: 特定のタブ、アプリウィンドウ、またはデスクトップ全体を共有します
 captureButton: 共有コンテンツを選択
 screenReady: 画面準備完了
-screenReadyDescription: キャプチャ成功。下のボタンをクリックして共有を開始します。
+screenReadyDescription: 画面共有を開始しました。変更する場合は再選択してください。
 reselect: 再選択
 uploadDropzone: クリックまたはドラッグしてアップロード
 roomId: ルーム ID
@@ -50,3 +50,11 @@ themeLabel: テーマ
 themeLight: ライト
 themeDark: ダーク
 themeSystem: システム
+sourceGateTitle: 先にルームを作成
+sourceGateDescription: 同期ルームを作成してから、自動、検出、画面、ローカルプレーヤーを選択します。
+switchSource: 切替
+activeSource: 配信中
+roomStatusIdle: ルーム未作成
+roomStatusOpen: ルーム作成済み
+roomStatusStreaming: 再生中
+roomStatusWaiting: 待機中

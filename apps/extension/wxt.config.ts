@@ -1,5 +1,6 @@
 import { defineConfig } from "wxt";
 import tailwindcss from "@tailwindcss/vite";
+import { codeInspectorPlugin } from "code-inspector-plugin";
 import { existsSync } from "node:fs";
 import path from "path";
 
@@ -43,6 +44,63 @@ const { chromiumArgs, chromiumBinaries } = resolveChromiumLaunchConfig(
   process.env,
 );
 
+export function isCodeInspectorDevProcess(
+  env: NodeJS.ProcessEnv = process.env,
+  argv = process.argv,
+) {
+  return (
+    env.NODE_ENV !== "test" &&
+    env.VITEST !== "true" &&
+    !argv.some(
+      (arg) =>
+        arg === "build" ||
+        arg === "prepare" ||
+        arg === "preview" ||
+        arg.includes("vitest"),
+    )
+  );
+}
+
+export const extensionCodeInspectorOptions = {
+  bundler: "vite",
+  dev: () => isCodeInspectorDevProcess(),
+  exclude: [/.*/],
+  include: [
+    /[\\/]entrypoints[\\/]popup[\\/]/,
+    /[\\/]entrypoints[\\/]player[\\/]/,
+  ],
+  injectTo: [
+    path.resolve(__dirname, "entrypoints/popup/main.tsx"),
+    path.resolve(__dirname, "entrypoints/player/main.tsx"),
+  ],
+  skipSnippets: ["htmlScript"],
+} satisfies Parameters<typeof codeInspectorPlugin>[0];
+
+export function createExtensionCodeInspectorPlugin() {
+  const plugin = codeInspectorPlugin(extensionCodeInspectorOptions);
+  const transform = plugin.transform;
+
+  return {
+    ...plugin,
+    transform(
+      this: unknown,
+      code: string,
+      id: string,
+      options?: { ssr?: boolean },
+    ) {
+      if (options?.ssr) {
+        return code;
+      }
+
+      if (typeof transform === "function") {
+        return transform.call(this, code, id, options);
+      }
+
+      return transform?.handler?.call(this, code, id, options) ?? code;
+    },
+  };
+}
+
 export default defineConfig({
   modules: ["@wxt-dev/module-react", "@wxt-dev/i18n/module"],
   webExt: {
@@ -61,7 +119,7 @@ export default defineConfig({
     ],
   },
   vite: () => ({
-    plugins: [tailwindcss()],
+    plugins: [createExtensionCodeInspectorPlugin(), tailwindcss()],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "."),

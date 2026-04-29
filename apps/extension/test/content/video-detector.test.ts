@@ -10,8 +10,10 @@ import {
   listVisibleVideoSources,
 } from "../../entrypoints/content/video-detector";
 import {
+  createContentReadyNotifier,
   createVideoChangeNotifier,
   createVideoMessageListener,
+  getScreenMatePageKind,
 } from "../../entrypoints/content";
 
 function setVideoRect(element: Element | null, width: number, height: number) {
@@ -22,6 +24,9 @@ function setVideoRect(element: Element | null, width: number, height: number) {
 }
 
 afterEach(() => {
+  document.documentElement.removeAttribute("data-screenmate-app");
+  document.head.innerHTML = "";
+  document.body.innerHTML = "";
   vi.restoreAllMocks();
 });
 
@@ -348,6 +353,23 @@ describe("findVisibleVideoByHandle", () => {
 });
 
 describe("createVideoMessageListener", () => {
+  it("does not expose viewer page playback as selectable videos", async () => {
+    document.documentElement.dataset.screenmateApp = "viewer";
+    document.body.innerHTML = `<video id="viewer-video" src="https://example.com/viewer.mp4"></video>`;
+    setVideoRect(document.getElementById("viewer-video"), 400, 225);
+
+    const listener = createVideoMessageListener();
+    const sendResponse = vi.fn();
+
+    const shouldKeepOpen = listener({ type: "screenmate:list-videos" }, {} as never, sendResponse);
+
+    expect(shouldKeepOpen).toBe(true);
+
+    await Promise.resolve();
+
+    expect(sendResponse).toHaveBeenCalledWith([]);
+  });
+
   it("responds through sendResponse and keeps the channel open", async () => {
     document.body.innerHTML = `<video id="message-video" src="https://example.com/message.mp4"></video>`;
     const video = document.getElementById("message-video") as HTMLVideoElement;
@@ -432,6 +454,43 @@ describe("createVideoMessageListener", () => {
 
     expect(sourceAttachmentRuntime.destroy).toHaveBeenCalledWith("manual-detach");
     expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+  });
+});
+
+describe("getScreenMatePageKind", () => {
+  it("detects the viewer page from the shared DOM marker", () => {
+    document.documentElement.dataset.screenmateApp = "viewer";
+
+    expect(getScreenMatePageKind()).toBe("viewer");
+  });
+
+  it("detects the viewer page from the meta marker", () => {
+    document.documentElement.removeAttribute("data-screenmate-app");
+    document.head.innerHTML = `<meta name="screenmate-app" content="viewer" />`;
+
+    expect(getScreenMatePageKind()).toBe("viewer");
+  });
+});
+
+describe("createContentReadyNotifier", () => {
+  it("only sends the initial notification on ScreenMate viewer pages", () => {
+    const notify = vi.fn();
+    const createNotifier = vi.fn(() => ({
+      start: vi.fn(),
+      stop: vi.fn(),
+    }));
+
+    const notifier = createContentReadyNotifier({
+      createNotifier,
+      getPageKind: () => "viewer",
+      notify,
+    });
+
+    expect(notify).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenCalledWith("initial");
+    expect(createNotifier).not.toHaveBeenCalled();
+
+    notifier.stop();
   });
 });
 

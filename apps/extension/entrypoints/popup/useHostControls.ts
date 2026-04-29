@@ -57,6 +57,13 @@ export function buildSnapshotRequest(): Extract<
   return { type: "screenmate:get-room-session" };
 }
 
+export function buildCreateRoomSessionRequest(): Extract<
+  HostMessage,
+  { type: "screenmate:create-room-session" }
+> {
+  return { type: "screenmate:create-room-session" };
+}
+
 export function buildStartSharingRequest(
   _snapshot: HostRoomSnapshot,
   selectedVideo: Pick<TabVideoSource, "tabId" | "frameId" | "id"> | null,
@@ -80,6 +87,11 @@ export function buildStartSharingRequest(
       source: {
         kind: "prepared-offscreen",
         sourceType: options.sourceType,
+        ...(preparedSourceState.kind === "upload" && {
+          label: preparedSourceState.label,
+          fileId: preparedSourceState.fileId,
+          metadata: preparedSourceState.metadata,
+        }),
       },
     };
   }
@@ -445,25 +457,41 @@ export function useHostControls({
 
   const startSharing = async (
     sourceType: "auto" | "sniff" | "screen" | "upload",
-    options: { autoAttach?: boolean } = {},
+    options: {
+      autoAttach?: boolean;
+      preparedSourceState?: PreparedSourceState;
+      selectedVideoId?: string | null;
+    } = {},
   ) => {
+    const effectiveSelectedVideoKey =
+      typeof options.selectedVideoId === "undefined"
+        ? selectedVideoKey
+        : options.selectedVideoId;
     const selectedVideo =
-      videos.find((video) => getVideoSelectionKey(video) === selectedVideoKey) ??
-      parseVideoSelectionKey(selectedVideoKey);
+      videos.find((video) => getVideoSelectionKey(video) === effectiveSelectedVideoKey) ??
+      parseVideoSelectionKey(effectiveSelectedVideoKey);
     const autoAttach = options.autoAttach ?? followActiveTabVideo;
+    const effectivePreparedSourceState =
+      options.preparedSourceState ?? preparedSourceState;
     const request = buildStartSharingRequest(snapshot, selectedVideo ?? null, {
       autoAttach,
-      preparedSourceState,
+      preparedSourceState: effectivePreparedSourceState,
       sourceType,
     });
 
     popupLogger.info("Room action requested.", {
       autoAttach,
+      preparedKind: effectivePreparedSourceState.kind,
+      preparedReady: effectivePreparedSourceState.ready,
       requestType: request?.type ?? null,
       sourceKind: request?.source.kind ?? null,
+      sourceType:
+        request?.source.kind === "prepared-offscreen"
+          ? request.source.sourceType
+          : null,
       selectedFrameId: selectedVideo?.frameId ?? null,
       selectedTabId: selectedVideo?.tabId ?? null,
-      selectedVideoKey,
+      selectedVideoKey: effectiveSelectedVideoKey,
       selectedVideoResolved: Boolean(selectedVideo),
     });
 
@@ -484,10 +512,6 @@ export function useHostControls({
     setSnapshot((current) =>
       createHostRoomSnapshot({
         ...current,
-        roomLifecycle:
-          current.roomId !== null && current.roomLifecycle !== "closed"
-            ? current.roomLifecycle
-            : "opening",
         sourceState:
           request &&
           current.roomId !== null &&
@@ -518,6 +542,105 @@ export function useHostControls({
               : "Could not update the room in the active tab.",
         }),
       );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const createRoomSession = async () => {
+    setBusyAction("primary");
+    setSnapshot((current) =>
+      createHostRoomSnapshot({
+        ...current,
+        roomLifecycle:
+          current.roomId !== null && current.roomLifecycle !== "closed"
+            ? current.roomLifecycle
+            : "opening",
+        message: null,
+      }),
+    );
+
+    try {
+      const response = await browser.runtime.sendMessage(
+        buildCreateRoomSessionRequest(),
+      );
+      const nextSnapshot = normalizeSnapshot(response);
+      reportRoomActionResult(popupLogger, nextSnapshot, response);
+      setSnapshot(nextSnapshot);
+      return nextSnapshot;
+    } catch (error) {
+      popupLogger.error("Room creation runtime request failed.", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Could not create the sync room.";
+      const nextSnapshot = createHostRoomSnapshot({
+        ...snapshot,
+        message,
+      });
+      setSnapshot(nextSnapshot);
+      return nextSnapshot;
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const startPlayerLocalVideo = async (sourceLabel: string) => {
+    const request = {
+      type: "screenmate:start-sharing",
+      source: {
+        kind: "player-local-video",
+        label: sourceLabel,
+      },
+    } satisfies Extract<HostMessage, { type: "screenmate:start-sharing" }>;
+
+    popupLogger.info("Room action requested.", {
+      autoAttach: false,
+      preparedKind: preparedSourceState.kind,
+      preparedReady: preparedSourceState.ready,
+      requestType: request.type,
+      sourceKind: request.source.kind,
+      sourceType: "upload",
+      selectedFrameId: null,
+      selectedTabId: null,
+      selectedVideoKey: null,
+      selectedVideoResolved: false,
+    });
+
+    setBusyAction("primary");
+    setSnapshot((current) =>
+      createHostRoomSnapshot({
+        ...current,
+        sourceState:
+          current.roomId !== null && current.roomLifecycle !== "closed"
+            ? "attaching"
+            : current.sourceState,
+        message: null,
+      }),
+    );
+
+    try {
+      const response = await browser.runtime.sendMessage(request);
+      const nextSnapshot = normalizeSnapshot(response);
+
+      reportRoomActionResult(popupLogger, nextSnapshot, response);
+      setSnapshot(nextSnapshot);
+      return nextSnapshot;
+    } catch (error) {
+      popupLogger.error("Player local room action runtime request failed.", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const nextSnapshot = createHostRoomSnapshot({
+        ...snapshot,
+        message:
+          error instanceof Error && error.message
+            ? error.message
+            : "Could not share the local player video.",
+      });
+      setSnapshot(nextSnapshot);
+      return nextSnapshot;
     } finally {
       setBusyAction(null);
     }
@@ -753,7 +876,9 @@ export function useHostControls({
       }),
     previewVideo,
     clearVideoPreview,
+    createRoomSession,
     startSharing,
+    startPlayerLocalVideo,
     prepareScreenSource,
     prepareLocalFileSource,
     clearPreparedSourceState,

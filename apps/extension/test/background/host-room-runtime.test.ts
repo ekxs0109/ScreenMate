@@ -896,6 +896,86 @@ describe("createHostRoomRuntime", () => {
     expect(onSnapshotUpdated).toHaveBeenCalledTimes(3);
   });
 
+  it("forwards roster-only viewer presence changes to the active attachment pipeline", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const sockets: MockHostSocket[] = [];
+    const runtime = createHostRoomRuntime({
+      storage,
+      now: () => 1_000,
+      WebSocketImpl: class {
+        constructor(_url: string) {
+          const socket = new MockHostSocket();
+          sockets.push(socket);
+          return socket as never;
+        }
+      } as never,
+    });
+    const onInboundSignal = vi.fn();
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: -2,
+      activeFrameId: -1,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+
+    const connectPromise = runtime.connectSignaling(onInboundSignal);
+    sockets[0]!.readyState = 1;
+    sockets[0]?.emit("open");
+    await connectPromise;
+
+    emitSocketMessage(sockets[0]!, {
+      roomId: "room_123",
+      sessionId: "host_1",
+      role: "host",
+      messageType: "viewer-roster",
+      timestamp: 10,
+      payload: {
+        viewers: [
+          {
+            viewerSessionId: "viewer_1",
+            displayName: "Mina",
+            online: true,
+            connectionType: "unknown",
+            pingMs: null,
+            joinedAt: 1,
+            profileUpdatedAt: null,
+            metricsUpdatedAt: null,
+          },
+        ],
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runtime.getSnapshot().viewerCount).toBe(1);
+    expect(onInboundSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        roomId: "room_123",
+        sessionId: "viewer_1",
+        role: "viewer",
+        messageType: "viewer-joined",
+        payload: {
+          viewerSessionId: "viewer_1",
+        },
+      }),
+    );
+  });
+
   it("keeps viewer count when chat history arrives before a canonical roster", async () => {
     const storage = {
       get: vi.fn().mockResolvedValue({}),

@@ -16,6 +16,8 @@ export type SniffTabSummary = {
 export type SniffVideoCard = {
   id: string;
   tabId: number;
+  frameId: number;
+  videoId: string;
   tabInfo: string;
   tabBadge: string;
   tabBadgeClassName: string;
@@ -26,6 +28,7 @@ export type SniffVideoCard = {
   format: string;
   rate: string;
   selected: boolean;
+  active: boolean;
   label: string;
 };
 
@@ -45,16 +48,18 @@ export type ViewerConnectionRow = {
   isGood: boolean;
 };
 
-export type PopupFooterModel =
-  | { variant: "hidden" }
-  | { variant: "start-room"; disabled: boolean; busy: boolean }
-  | { variant: "end-share"; disabled: boolean; busy: boolean }
-  | { variant: "change-source"; confirmDisabled: boolean; busy: boolean };
-
 export type ExtensionSceneModel = {
   header: {
     title: string;
     statusText: string;
+    room: {
+      state: "idle" | "open" | "closed";
+      label: string;
+    };
+    source: {
+      type: SourceType | null;
+      label: string;
+    };
     playback: {
       label: string;
       mode: "auto" | "manual";
@@ -97,7 +102,6 @@ export type ExtensionSceneModel = {
   chatTab: {
     messages: ExtensionChatMessage[];
   };
-  footer: PopupFooterModel;
   meta: {
     hasSelectedSource: boolean;
     isBusy: boolean;

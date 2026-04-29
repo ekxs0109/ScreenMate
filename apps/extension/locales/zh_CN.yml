@@ -26,7 +26,7 @@ captureTitle: 捕获屏幕或窗口
 captureDescription: 支持共享单个网页标签、应用软件或整个桌面
 captureButton: 选择共享内容
 screenReady: 屏幕已就绪
-screenReadyDescription: 内容捕获成功，请点击底部按钮开启共享房间。
+screenReadyDescription: 屏幕共享已开始。如需更换来源，请重新选择。
 reselect: 重选
 captureEntireScreen: 整个屏幕
 captureEntireScreenDesc: 分享显示器上的所有内容
@@ -58,3 +58,11 @@ themeLabel: 主题
 themeLight: 浅色
 themeDark: 深色
 themeSystem: 跟随系统
+sourceGateTitle: 先创建房间
+sourceGateDescription: 请先创建同步房间，然后再选择自动、嗅探、屏幕或本地资源。
+switchSource: 切换
+activeSource: 推流中
+roomStatusIdle: 未创建房间
+roomStatusOpen: 房间已创建
+roomStatusStreaming: 播放中
+roomStatusWaiting: 等待资源

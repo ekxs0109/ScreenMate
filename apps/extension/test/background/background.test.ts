@@ -148,6 +148,102 @@ describe("createHostMessageHandler", () => {
     });
   });
 
+  it("attaches a prepared screen source immediately when a room is already open", async () => {
+    const ensureOffscreenDocument = vi.fn().mockResolvedValue(undefined);
+    const sendOffscreenMessage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        sourceLabel: "Shared screen",
+        fingerprint: {
+          primaryUrl: "screenmate://display-media",
+          pageUrl: "chrome-extension://demo/offscreen.html",
+          elementId: "screenmate-offscreen-display",
+          label: "Shared screen",
+          visibleIndex: 0,
+        },
+      })
+      .mockResolvedValueOnce({
+        sourceLabel: "Shared screen",
+        fingerprint: {
+          primaryUrl: "screenmate://display-media",
+          pageUrl: "chrome-extension://demo/offscreen.html",
+          elementId: "screenmate-offscreen-display",
+          label: "Shared screen",
+          visibleIndex: 0,
+        },
+      });
+    const followActiveTabVideoStateStorage = {
+      getValue: vi.fn().mockResolvedValue({ enabled: true }),
+      setValue: vi.fn().mockResolvedValue(undefined),
+    };
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "unattached",
+        roomId: "room_123",
+      })),
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [],
+      }),
+      setAttachedSource: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "Shared screen",
+        activeTabId: -1,
+        activeFrameId: -1,
+      })),
+    };
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      ensureOffscreenDocument,
+      followActiveTabVideoStateStorage,
+      runtime: runtime as never,
+      sendOffscreenMessage,
+    }));
+
+    const result = await handler({
+      type: "screenmate:prepare-screen-source",
+      captureType: "screen",
+    });
+
+    expect(sendOffscreenMessage).toHaveBeenNthCalledWith(1, {
+      type: "screenmate:offscreen-prepare-display-media",
+      captureType: "screen",
+    });
+    expect(sendOffscreenMessage).toHaveBeenNthCalledWith(2, {
+      type: "screenmate:offscreen-attach-display-media",
+      roomSession: {
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [],
+      },
+      sourceLabel: "Shared screen",
+    });
+    expect(followActiveTabVideoStateStorage.setValue).toHaveBeenCalledWith({
+      enabled: false,
+    });
+    expect(runtime.setAttachedSource).toHaveBeenCalledWith("Shared screen", {
+      primaryUrl: "screenmate://display-media",
+      pageUrl: "chrome-extension://demo/offscreen.html",
+      elementId: "screenmate-offscreen-display",
+      label: "Shared screen",
+      visibleIndex: 0,
+      frameId: -1,
+      tabId: -1,
+    });
+    expect(result).toMatchObject({
+      status: "prepared-source",
+      kind: "screen",
+      ready: true,
+      label: "Shared screen",
+    });
+  });
+
   it("recognizes ScreenMate viewer room URLs across localhost aliases", () => {
     expect(
       isScreenMateViewerUrl(
@@ -161,6 +257,58 @@ describe("createHostMessageHandler", () => {
         "http://localhost:4173",
       ),
     ).toBe(false);
+  });
+
+  it("does not treat unrelated local dev room URLs as viewer pages when the configured viewer origin differs", () => {
+    expect(
+      isScreenMateViewerUrl(
+        "http://127.0.0.1:4173/rooms/room_ROybTx25",
+        "https://viewer.screenmate.example",
+      ),
+    ).toBe(false);
+  });
+
+  it("ignores content-ready videos from pages that self-identify as the ScreenMate viewer", async () => {
+    const videoCache = new VideoSourceCache();
+    await videoCache.setForTab(84, [
+      {
+        id: "screenmate-video-old",
+        label: "stale viewer playback",
+        tabId: 84,
+        frameId: 0,
+        isVisible: true,
+        visibleArea: 640_000,
+      },
+    ]);
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      queryCurrentWindowTabs: vi.fn().mockResolvedValue([
+        { id: 84, url: "https://example.test/rooms/room_123" },
+      ]),
+      videoCache,
+    }));
+
+    const result = await handler({
+      type: "screenmate:content-ready",
+      frameId: 0,
+      tabId: 84,
+      screenmatePageKind: "viewer",
+      videos: [
+        {
+          id: "screenmate-video-1",
+          label: "viewer playback",
+          tabId: 84,
+          frameId: 0,
+          isVisible: true,
+          visibleArea: 640_000,
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      roomLifecycle: "idle",
+      sourceState: "unattached",
+    });
+    expect(videoCache.getForTab(84)).toEqual([]);
   });
 
   it("aggregates video lists from the current window and all reachable frames", async () => {
@@ -245,6 +393,11 @@ describe("createHostMessageHandler", () => {
   });
 
   it("excludes ScreenMate viewer tabs from video sniff scans", async () => {
+    const setValue = vi.fn().mockResolvedValue(undefined);
+    const videoCache = new VideoSourceCache({
+      getValue: vi.fn().mockResolvedValue(null),
+      setValue,
+    });
     const queryCurrentWindowTabs = vi.fn().mockResolvedValue([
       { id: 42, url: "https://www.bilibili.com/video/BV123" },
       { id: 84, url: "http://127.0.0.1:4173/rooms/room_123" },
@@ -258,6 +411,7 @@ describe("createHostMessageHandler", () => {
     const handler = createHostMessageHandler(createHandlerDependencies({
       queryCurrentWindowTabs,
       sendTabMessage,
+      videoCache,
       viewerBaseUrl: "http://localhost:4173",
     }));
 
@@ -273,6 +427,21 @@ describe("createHostMessageHandler", () => {
       { type: "screenmate:list-videos" },
       { frameId: 0 },
     );
+    expect(setValue).toHaveBeenCalledTimes(2);
+    expect(setValue.mock.calls[0]?.[0]).toMatchObject({
+      status: "refreshing",
+      tabs: [{ tabId: 42, url: "https://www.bilibili.com/video/BV123" }],
+      videos: [],
+    });
+    expect(setValue.mock.calls[0]?.[0].tabs).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ tabId: 84 }),
+      ]),
+    );
+    expect(setValue.mock.calls[1]?.[0]).toMatchObject({
+      status: "success",
+      tabs: [{ tabId: 42, url: "https://www.bilibili.com/video/BV123" }],
+    });
   });
 
   it("routes popup chat messages through the host runtime", async () => {
@@ -588,6 +757,63 @@ describe("createHostMessageHandler", () => {
       status: "success",
     });
     expect(sendTabMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not refresh a fresh sniff cache just because a ScreenMate viewer tab is open", async () => {
+    const persistedVideos = [
+      {
+        id: "persisted-video",
+        label: "Persisted Video",
+        tabId: 42,
+        frameId: 0,
+      },
+    ];
+    const sendTabMessage = vi.fn();
+    const setValue = vi.fn();
+    const videoCache = new VideoSourceCache({
+      getValue: vi.fn().mockResolvedValue({
+        tabs: [
+          {
+            tabId: 42,
+            title: "Cached tab",
+            url: "https://example.com/watch",
+          },
+        ],
+        videos: persistedVideos,
+        status: "success",
+        isScanning: false,
+        updatedAt: Date.now(),
+        startedAt: null,
+        refreshId: null,
+        error: null,
+      }),
+      setValue,
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      queryCurrentWindowTabs: vi.fn().mockResolvedValue([
+        { id: 42, title: "Cached tab", url: "https://example.com/watch" },
+        { id: 84, title: "Viewer", url: "http://127.0.0.1:4173/rooms/room_123" },
+      ]),
+      sendTabMessage,
+      videoCache,
+      viewerBaseUrl: "http://localhost:4173",
+    }));
+
+    const result = await handler({ type: "screenmate:ensure-video-sniff-state" });
+
+    expect(result).toMatchObject({
+      tabs: [
+        {
+          tabId: 42,
+          title: "Cached tab",
+          url: "https://example.com/watch",
+        },
+      ],
+      videos: persistedVideos,
+      status: "success",
+    });
+    expect(sendTabMessage).not.toHaveBeenCalled();
+    expect(setValue).not.toHaveBeenCalled();
   });
 
   it("refreshes when ensuring a stale video sniff state", async () => {
@@ -1541,9 +1767,10 @@ describe("createHostMessageHandler", () => {
     expect(markMissing).not.toHaveBeenCalled();
   });
 
-  it("returns an explicit room message when there is no active tab to start from", async () => {
+  it("returns an explicit room message before looking for an active tab when no room is open", async () => {
+    const queryActiveTabId = vi.fn().mockResolvedValue(null);
     const handler = createHostMessageHandler(createHandlerDependencies({
-      queryActiveTabId: vi.fn().mockResolvedValue(null),
+      queryActiveTabId,
     }));
 
     const result = await handler({
@@ -1563,8 +1790,9 @@ describe("createHostMessageHandler", () => {
     }
 
     expect(result.roomLifecycle).toBe("idle");
-    expect(result.message).toContain("active tab");
+    expect(result.message).toBe("Create a sync room first.");
     expect(result.roomId).toBeNull();
+    expect(queryActiveTabId).not.toHaveBeenCalled();
   });
 
   it("ignores unrelated runtime messages", async () => {
@@ -1686,6 +1914,562 @@ describe("createHostMessageHandler", () => {
     });
   });
 
+  it("starts a local offscreen source from inline file metadata without relying on volatile prepared state", async () => {
+    const ensureOffscreenDocument = vi.fn().mockResolvedValue(undefined);
+    const sendOffscreenMessage = vi.fn().mockResolvedValue({
+      sourceLabel: "demo.mp4",
+      fingerprint: {
+        primaryUrl: "screenmate://local-file/local-demo",
+        pageUrl: "chrome-extension://demo/offscreen.html",
+        elementId: "screenmate-offscreen-local-video",
+        label: "demo.mp4",
+        visibleIndex: 0,
+      },
+    });
+    const setAttachedSource = vi.fn().mockResolvedValue(createHostRoomSnapshot({
+      roomLifecycle: "open",
+      sourceState: "attached",
+      roomId: "room_123",
+      sourceLabel: "demo.mp4",
+      activeTabId: -1,
+      activeFrameId: -1,
+    }));
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "https://example.com/old-page-video.mp4",
+        activeTabId: 42,
+        activeFrameId: 0,
+      })),
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [],
+      }),
+      setAttachedSource,
+    } as never;
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      ensureOffscreenDocument,
+      runtime,
+      sendOffscreenMessage,
+      sendTabMessage: vi.fn().mockResolvedValue({ ok: true }),
+    }));
+
+    const result = await handler({
+      type: "screenmate:start-sharing",
+      source: {
+        kind: "prepared-offscreen",
+        sourceType: "upload",
+        label: "demo.mp4",
+        fileId: "local-demo",
+        metadata: {
+          id: "local-demo",
+          name: "demo.mp4",
+          size: 4,
+          type: "video/mp4",
+          updatedAt: 123,
+        },
+      },
+    });
+
+    expect(sendOffscreenMessage).toHaveBeenCalledWith({
+      type: "screenmate:offscreen-attach-local-file",
+      roomSession: {
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [],
+      },
+      fileId: "local-demo",
+      metadata: {
+        id: "local-demo",
+        name: "demo.mp4",
+        size: 4,
+        type: "video/mp4",
+        updatedAt: 123,
+      },
+    });
+    expect(result).toMatchObject({
+      roomLifecycle: "open",
+      sourceState: "attached",
+      activeTabId: -1,
+      activeFrameId: -1,
+    });
+  });
+
+  it("surfaces local offscreen attach failures from the offscreen document", async () => {
+    const attachError =
+      "Local video file could not be loaded. The browser may not support this file format or codec.";
+    const ensureOffscreenDocument = vi.fn().mockResolvedValue(undefined);
+    const sendOffscreenMessage = vi.fn().mockResolvedValue({
+      ok: false,
+      error: attachError,
+    });
+    const setAttachedSource = vi.fn();
+    const markMissing = vi.fn().mockReturnValue(createHostRoomSnapshot({
+      roomLifecycle: "open",
+      sourceState: "missing",
+      roomId: "room_123",
+      sourceLabel: "Shared browser tab",
+      activeTabId: -1,
+      activeFrameId: -1,
+      message: attachError,
+    }));
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "Shared browser tab",
+        activeTabId: -1,
+        activeFrameId: -1,
+      })),
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [],
+      }),
+      markMissing,
+      setAttachedSource,
+    } as never;
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      ensureOffscreenDocument,
+      runtime,
+      sendOffscreenMessage,
+    }));
+
+    const result = await handler({
+      type: "screenmate:start-sharing",
+      source: {
+        kind: "prepared-offscreen",
+        sourceType: "upload",
+        label: "demo.mkv",
+        fileId: "local-demo",
+        metadata: {
+          id: "local-demo",
+          name: "demo.mkv",
+          size: 4,
+          type: "video/x-matroska",
+          updatedAt: 123,
+        },
+      },
+    });
+
+    expect(sendOffscreenMessage).toHaveBeenCalledWith({
+      type: "screenmate:offscreen-attach-local-file",
+      roomSession: {
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [],
+      },
+      fileId: "local-demo",
+      metadata: {
+        id: "local-demo",
+        name: "demo.mkv",
+        size: 4,
+        type: "video/x-matroska",
+        updatedAt: 123,
+      },
+    });
+    expect(markMissing).toHaveBeenCalledWith(attachError);
+    expect(setAttachedSource).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      sourceState: "missing",
+      message: attachError,
+    });
+  });
+
+  it("times out when the local offscreen attach request does not answer", async () => {
+    vi.useFakeTimers();
+    try {
+      const ensureOffscreenDocument = vi.fn().mockResolvedValue(undefined);
+      const sendOffscreenMessage = vi.fn(
+        () => new Promise<never>(() => {}),
+      );
+      const setAttachedSource = vi.fn();
+      const markMissing = vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "missing",
+        roomId: "room_123",
+        sourceLabel: null,
+        activeTabId: -1,
+        activeFrameId: -1,
+        message: "Offscreen local source did not respond before the timeout.",
+      }));
+      const runtime = {
+        ...createHandlerDependencies().runtime,
+        getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+          roomLifecycle: "open",
+          sourceState: "unattached",
+          roomId: "room_123",
+        })),
+        getAttachSession: vi.fn().mockReturnValue({
+          roomId: "room_123",
+          sessionId: "host_1",
+          viewerSessionIds: ["viewer_1"],
+          iceServers: [],
+        }),
+        markMissing,
+        setAttachedSource,
+      } as never;
+      const handler = createHostMessageHandler(createHandlerDependencies({
+        ensureOffscreenDocument,
+        runtime,
+        sendOffscreenMessage,
+      }));
+
+      const resultPromise = handler({
+        type: "screenmate:start-sharing",
+        source: {
+          kind: "prepared-offscreen",
+          sourceType: "upload",
+          label: "demo.mp4",
+          fileId: "local-demo",
+          metadata: {
+            id: "local-demo",
+            name: "demo.mp4",
+            size: 4,
+            type: "video/mp4",
+            updatedAt: 123,
+          },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(markMissing).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(65_000);
+      const result = await resultPromise;
+
+      expect(sendOffscreenMessage).toHaveBeenCalledWith({
+        type: "screenmate:offscreen-attach-local-file",
+        roomSession: {
+          roomId: "room_123",
+          sessionId: "host_1",
+          viewerSessionIds: ["viewer_1"],
+          iceServers: [],
+        },
+        fileId: "local-demo",
+        metadata: {
+          id: "local-demo",
+          name: "demo.mp4",
+          size: 4,
+          type: "video/mp4",
+          updatedAt: 123,
+        },
+      });
+      expect(markMissing).toHaveBeenCalledWith(
+        "Offscreen local source did not respond before the timeout.",
+      );
+      expect(setAttachedSource).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        sourceState: "missing",
+        message: "Offscreen local source did not respond before the timeout.",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts a player local source from the current player video", async () => {
+    const sendPlayerMessage = vi.fn().mockResolvedValue({
+      sourceLabel: "demo.mp4",
+      fingerprint: {
+        primaryUrl: "screenmate://player-local-video",
+        pageUrl: "chrome-extension://demo/player.html",
+        elementId: "screenmate-player-local-video",
+        label: "demo.mp4",
+        visibleIndex: 0,
+      },
+    });
+    const setAttachedSource = vi.fn().mockResolvedValue(createHostRoomSnapshot({
+      roomLifecycle: "open",
+      sourceState: "attached",
+      roomId: "room_123",
+      sourceLabel: "demo.mp4",
+      activeTabId: -2,
+      activeFrameId: -1,
+    }));
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "unattached",
+        roomId: "room_123",
+      })),
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [{ urls: ["stun:stun.screenmate.dev"] }],
+      }),
+      setAttachedSource,
+    } as never;
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      runtime,
+      sendPlayerMessage,
+    }));
+
+    const result = await handler({
+      type: "screenmate:start-sharing",
+      source: {
+        kind: "player-local-video",
+        label: "demo.mp4",
+      },
+    });
+
+    expect(sendPlayerMessage).toHaveBeenCalledWith({
+      type: "screenmate:player-attach-local-video",
+      roomSession: {
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [{ urls: ["stun:stun.screenmate.dev"] }],
+      },
+      sourceLabel: "demo.mp4",
+    });
+    expect(setAttachedSource).toHaveBeenCalledWith("demo.mp4", {
+      primaryUrl: "screenmate://player-local-video",
+      pageUrl: "chrome-extension://demo/player.html",
+      elementId: "screenmate-player-local-video",
+      label: "demo.mp4",
+      visibleIndex: 0,
+      tabId: -2,
+      frameId: -1,
+    });
+    expect(result).toMatchObject({
+      sourceState: "attached",
+      sourceLabel: "demo.mp4",
+      activeTabId: -2,
+      activeFrameId: -1,
+    });
+  });
+
+  it("waits for slower player local source attach responses", async () => {
+    vi.useFakeTimers();
+    try {
+      const playerAttachResponse = {
+        sourceLabel: "mounted-demo.mp4",
+        fingerprint: {
+          primaryUrl: "screenmate://player-local-video",
+          pageUrl: "chrome-extension://demo/player.html",
+          elementId: "screenmate-player-local-video",
+          label: "mounted-demo.mp4",
+          visibleIndex: 0,
+        },
+      };
+      const sendPlayerMessage = vi.fn(
+        () =>
+          new Promise<typeof playerAttachResponse>((resolve) => {
+            setTimeout(() => resolve(playerAttachResponse), 15_000);
+          }),
+      );
+      const markMissing = vi.fn();
+      const setAttachedSource = vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "mounted-demo.mp4",
+        activeTabId: -2,
+        activeFrameId: -1,
+      }));
+      const runtime = {
+        ...createHandlerDependencies().runtime,
+        getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+          roomLifecycle: "open",
+          sourceState: "unattached",
+          roomId: "room_123",
+        })),
+        getAttachSession: vi.fn().mockReturnValue({
+          roomId: "room_123",
+          sessionId: "host_1",
+          viewerSessionIds: ["viewer_1"],
+          iceServers: [],
+        }),
+        markMissing,
+        setAttachedSource,
+      } as never;
+      const handler = createHostMessageHandler(createHandlerDependencies({
+        runtime,
+        sendPlayerMessage,
+      }));
+
+      const resultPromise = handler({
+        type: "screenmate:start-sharing",
+        source: {
+          kind: "player-local-video",
+          label: "mounted-demo.mp4",
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(15_001);
+      const result = await resultPromise;
+
+      expect(markMissing).not.toHaveBeenCalled();
+      expect(setAttachedSource).toHaveBeenCalledWith("mounted-demo.mp4", {
+        primaryUrl: "screenmate://player-local-video",
+        pageUrl: "chrome-extension://demo/player.html",
+        elementId: "screenmate-player-local-video",
+        label: "mounted-demo.mp4",
+        visibleIndex: 0,
+        tabId: -2,
+        frameId: -1,
+      });
+      expect(result).toMatchObject({
+        sourceState: "attached",
+        sourceLabel: "mounted-demo.mp4",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("renegotiates player local sources for viewers learned while attaching", async () => {
+    const sendPlayerMessage = vi.fn().mockResolvedValue({
+      sourceLabel: "mounted-demo.mp4",
+      fingerprint: {
+        primaryUrl: "screenmate://player-local-video",
+        pageUrl: "chrome-extension://demo/player.html",
+        elementId: "screenmate-player-local-video",
+        label: "mounted-demo.mp4",
+        visibleIndex: 0,
+      },
+    });
+    const getAttachSession = vi
+      .fn()
+      .mockReturnValueOnce({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: [],
+        iceServers: [],
+      })
+      .mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [],
+      });
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "unattached",
+        roomId: "room_123",
+      })),
+      getAttachSession,
+      setAttachedSource: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "mounted-demo.mp4",
+        activeTabId: -2,
+        activeFrameId: -1,
+        viewerCount: 1,
+      })),
+    } as never;
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      runtime,
+      sendPlayerMessage,
+    }));
+
+    await handler({
+      type: "screenmate:start-sharing",
+      source: {
+        kind: "player-local-video",
+        label: "mounted-demo.mp4",
+      },
+    });
+
+    expect(sendPlayerMessage).toHaveBeenNthCalledWith(1, {
+      type: "screenmate:player-attach-local-video",
+      roomSession: {
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: [],
+        iceServers: [],
+      },
+      sourceLabel: "mounted-demo.mp4",
+    });
+    expect(sendPlayerMessage).toHaveBeenNthCalledWith(2, {
+      type: "screenmate:player-signal-inbound",
+      envelope: expect.objectContaining({
+        roomId: "room_123",
+        sessionId: "viewer_1",
+        role: "viewer",
+        messageType: "viewer-joined",
+        payload: {
+          viewerSessionId: "viewer_1",
+        },
+      }),
+    });
+  });
+
+  it("detaches the previous offscreen source before attaching the player local source", async () => {
+    const sendOffscreenMessage = vi.fn().mockResolvedValue({ ok: true });
+    const sendPlayerMessage = vi.fn().mockResolvedValue({
+      sourceLabel: "demo.mp4",
+      fingerprint: {
+        primaryUrl: "screenmate://player-local-video",
+        pageUrl: "chrome-extension://demo/player.html",
+        elementId: "screenmate-player-local-video",
+        label: "demo.mp4",
+        visibleIndex: 0,
+      },
+    });
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "Shared browser tab",
+        activeTabId: -1,
+        activeFrameId: -1,
+      })),
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: [],
+        iceServers: [],
+      }),
+      setAttachedSource: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "demo.mp4",
+        activeTabId: -2,
+        activeFrameId: -1,
+      })),
+    } as never;
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      runtime,
+      sendOffscreenMessage,
+      sendPlayerMessage,
+    }));
+
+    await handler({
+      type: "screenmate:start-sharing",
+      source: {
+        kind: "player-local-video",
+        label: "demo.mp4",
+      },
+    });
+
+    expect(sendOffscreenMessage).toHaveBeenCalledWith({
+      type: "screenmate:offscreen-detach-source",
+    });
+    expect(
+      sendOffscreenMessage.mock.invocationCallOrder[0],
+    ).toBeLessThan(sendPlayerMessage.mock.invocationCallOrder[0] ?? 0);
+  });
+
   it("starts a prepared screen source without passing a legacy desktop stream id", async () => {
     const ensureOffscreenDocument = vi.fn().mockResolvedValue(undefined);
     const sendOffscreenMessage = vi
@@ -1756,10 +2540,6 @@ describe("createHostMessageHandler", () => {
       type: "screenmate:prepare-screen-source",
       captureType: "screen",
     });
-    const result = await handler({
-      type: "screenmate:start-sharing",
-      source: { kind: "prepared-offscreen", sourceType: "screen" },
-    });
 
     expect(prepared).toMatchObject({
       status: "prepared-source",
@@ -1791,12 +2571,6 @@ describe("createHostMessageHandler", () => {
       visibleIndex: 0,
       tabId: -1,
       frameId: -1,
-    });
-    expect(result).toMatchObject({
-      roomLifecycle: "open",
-      sourceState: "attached",
-      activeTabId: -1,
-      activeFrameId: -1,
     });
   });
 
@@ -1891,6 +2665,259 @@ describe("createHostMessageHandler", () => {
       activeTabId: -1,
       activeFrameId: -1,
     });
+  });
+
+  it("proxies local playback state requests to the offscreen source owner", async () => {
+    const ensureOffscreenDocument = vi.fn().mockResolvedValue(undefined);
+    const sendOffscreenMessage = vi.fn().mockResolvedValue({
+      status: "local-playback-state",
+      active: true,
+      currentTime: 42,
+      duration: 120,
+      paused: false,
+      sourceLabel: "demo.mp4",
+    });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      ensureOffscreenDocument,
+      sendOffscreenMessage,
+    }));
+
+    const result = await handler({
+      type: "screenmate:get-local-playback-state",
+    });
+
+    expect(ensureOffscreenDocument).toHaveBeenCalledTimes(1);
+    expect(sendOffscreenMessage).toHaveBeenCalledWith({
+      type: "screenmate:offscreen-get-local-playback-state",
+    });
+    expect(result).toEqual({
+      status: "local-playback-state",
+      active: true,
+      currentTime: 42,
+      duration: 120,
+      paused: false,
+      sourceLabel: "demo.mp4",
+    });
+  });
+
+  it("disables automatic follow before attaching a prepared screen source", async () => {
+    const ensureOffscreenDocument = vi.fn().mockResolvedValue(undefined);
+    const sendOffscreenMessage = vi.fn().mockResolvedValue({
+      sourceLabel: "Shared screen",
+      fingerprint: {
+        primaryUrl: "screenmate://display-media",
+        pageUrl: "chrome-extension://demo/offscreen.html",
+        elementId: "screenmate-offscreen-display",
+        label: "Shared screen",
+        visibleIndex: 0,
+      },
+    });
+    const followActiveTabVideoStateStorage = {
+      getValue: vi.fn().mockResolvedValue({ enabled: true }),
+      setValue: vi.fn().mockResolvedValue(undefined),
+    };
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "https://example.com/old-page-video.mp4",
+        activeTabId: 42,
+        activeFrameId: 0,
+      })),
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: [],
+        iceServers: [],
+      }),
+      setAttachedSource: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "Shared screen",
+        activeTabId: -1,
+        activeFrameId: -1,
+      })),
+    } as never;
+    const sendTabMessage = vi.fn().mockResolvedValue({ ok: true });
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      ensureOffscreenDocument,
+      followActiveTabVideoStateStorage,
+      preparedSourceState: {
+        status: "prepared-source",
+        kind: "screen",
+        ready: true,
+        label: "Shared screen",
+        metadata: null,
+        captureType: "screen",
+        error: null,
+      },
+      runtime,
+      sendOffscreenMessage,
+      sendTabMessage,
+    }));
+
+    await handler({
+      type: "screenmate:start-sharing",
+      source: { kind: "prepared-offscreen", sourceType: "screen" },
+    });
+
+    expect(followActiveTabVideoStateStorage.setValue).toHaveBeenCalledWith({
+      enabled: false,
+    });
+    expect(
+      followActiveTabVideoStateStorage.setValue.mock.invocationCallOrder[0],
+    ).toBeLessThan(sendOffscreenMessage.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("does not let an in-flight automatic follow overwrite a manual screen attachment", async () => {
+    let releaseListVideos!: () => void;
+    let markListVideosStarted!: () => void;
+    const listVideosStarted = new Promise<void>((resolve) => {
+      markListVideosStarted = resolve;
+    });
+    const listVideosGate = new Promise<void>((resolve) => {
+      releaseListVideos = resolve;
+    });
+    let currentSnapshot = createHostRoomSnapshot({
+      roomLifecycle: "open",
+      sourceState: "attached",
+      roomId: "room_123",
+      sourceLabel: "https://example.com/old-page-video.mp4",
+      activeTabId: 42,
+      activeFrameId: 0,
+    });
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn(() => currentSnapshot),
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: [],
+        iceServers: [],
+      }),
+      getSourceFingerprint: vi.fn().mockReturnValue(null),
+      setAttachedSource: vi.fn().mockImplementation(
+        async (
+          sourceLabel: string,
+          fingerprint: { tabId: number; frameId: number },
+        ) => {
+          currentSnapshot = createHostRoomSnapshot({
+            roomLifecycle: "open",
+            sourceState: "attached",
+            roomId: "room_123",
+            sourceLabel,
+            activeTabId: fingerprint.tabId,
+            activeFrameId: fingerprint.frameId,
+          });
+          return currentSnapshot;
+        },
+      ),
+    };
+    const followActiveTabVideoStateStorage = {
+      getValue: vi.fn().mockResolvedValue({ enabled: true }),
+      setValue: vi.fn().mockResolvedValue(undefined),
+    };
+    const ensureOffscreenDocument = vi.fn().mockResolvedValue(undefined);
+    const sendOffscreenMessage = vi.fn().mockResolvedValue({
+      sourceLabel: "Shared screen",
+      fingerprint: {
+        primaryUrl: "screenmate://display-media",
+        pageUrl: "chrome-extension://demo/offscreen.html",
+        elementId: "screenmate-offscreen-display",
+        label: "Shared screen",
+        visibleIndex: 0,
+      },
+    });
+    const sendTabMessage = vi.fn().mockImplementation(
+      async (
+        _tabId: number,
+        message: TestTabMessage,
+      ) => {
+        if (message.type === "screenmate:list-videos") {
+          markListVideosStarted();
+          await listVideosGate;
+          return [
+            {
+              id: "screenmate-video-1",
+              label: "playing",
+              isPlaying: true,
+              isVisible: true,
+              visibleArea: 640_000,
+              fingerprint: {
+                primaryUrl: "https://example.com/playing.mp4",
+                pageUrl: "https://example.com/watch",
+                elementId: "playing",
+                label: "playing",
+                visibleIndex: 0,
+              },
+            },
+          ];
+        }
+
+        if (message.type === "screenmate:attach-source") {
+          return {
+            sourceLabel: "playing",
+            fingerprint: {
+              primaryUrl: "https://example.com/playing.mp4",
+              pageUrl: "https://example.com/watch",
+              elementId: "playing",
+              label: "playing",
+              visibleIndex: 0,
+            },
+          };
+        }
+
+        return { ok: true };
+      },
+    );
+    const dependencies = createHandlerDependencies({
+      ensureOffscreenDocument,
+      followActiveTabVideoStateStorage,
+      preparedSourceState: {
+        status: "prepared-source",
+        kind: "screen",
+        ready: true,
+        label: "Shared screen",
+        metadata: null,
+        captureType: "screen",
+        error: null,
+      },
+      runtime,
+      sendOffscreenMessage,
+      sendTabMessage,
+    });
+    const handler = createHostMessageHandler(dependencies);
+
+    const followPromise = followActiveTabVideoOnce(dependencies, 42);
+    await listVideosStarted;
+    const screenResult = await handler({
+      type: "screenmate:start-sharing",
+      source: { kind: "prepared-offscreen", sourceType: "screen" },
+    });
+    releaseListVideos();
+    await followPromise;
+
+    expect(screenResult).toMatchObject({
+      sourceState: "attached",
+      activeTabId: -1,
+      activeFrameId: -1,
+    });
+    expect(
+      sendTabMessage.mock.calls.filter(
+        ([, message]) => message.type === "screenmate:attach-source",
+      ),
+    ).toHaveLength(0);
+    expect(runtime.setAttachedSource).toHaveBeenCalledTimes(1);
+    expect(runtime.setAttachedSource).toHaveBeenCalledWith(
+      "Shared screen",
+      expect.objectContaining({
+        tabId: -1,
+        frameId: -1,
+      }),
+    );
   });
 
   it("clears the prepared screen state after it becomes the active offscreen source", async () => {
@@ -2053,7 +3080,7 @@ describe("createHostMessageHandler", () => {
     expect(sendTabMessage).not.toHaveBeenCalled();
   });
 
-  it("starts the room in the background and attaches the requested source", async () => {
+  it("creates a room session without attaching a source", async () => {
     const createRoom = vi.fn().mockResolvedValue({
       roomId: "room_123",
       hostSessionId: "host_1",
@@ -2064,22 +3091,100 @@ describe("createHostMessageHandler", () => {
     const runtime = {
       connectSignaling: vi.fn().mockResolvedValue(true),
       getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot()),
+      startRoom: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "unattached",
+        roomId: "room_123",
+        activeTabId: null,
+        activeFrameId: null,
+      })),
+    };
+    const followActiveTabVideoStateStorage = {
+      getValue: vi.fn().mockResolvedValue({ enabled: true }),
+      setValue: vi.fn().mockResolvedValue(undefined),
+    };
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      createRoom,
+      followActiveTabVideoStateStorage,
+      runtime: runtime as never,
+    }));
+
+    const result = await handler({
+      type: "screenmate:create-room-session",
+    });
+
+    expect(createRoom).toHaveBeenCalledWith("http://localhost:8787");
+    expect(followActiveTabVideoStateStorage.setValue).toHaveBeenCalledWith({
+      enabled: false,
+    });
+    expect(
+      followActiveTabVideoStateStorage.setValue.mock.invocationCallOrder[0],
+    ).toBeLessThan(runtime.startRoom.mock.invocationCallOrder[0] ?? 0);
+    expect(runtime.startRoom).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeFrameId: null,
+        activeTabId: null,
+        roomId: "room_123",
+        sourceFingerprint: null,
+      }),
+    );
+    expect(runtime.connectSignaling).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      roomLifecycle: "open",
+      roomId: "room_123",
+      sourceState: "unattached",
+    });
+  });
+
+  it("does not create a room implicitly when starting a selected source", async () => {
+    const createRoom = vi.fn();
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot()),
+    };
+    const sendTabMessage = vi.fn();
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      createRoom,
+      runtime: runtime as never,
+      sendTabMessage,
+    }));
+
+    const result = await handler({
+      type: "screenmate:start-sharing",
+      source: {
+        kind: "tab-video",
+        tabId: 42,
+        frameId: 7,
+        videoId: "screenmate-video-1",
+      },
+    });
+
+    expect(createRoom).not.toHaveBeenCalled();
+    expect(sendTabMessage).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      roomLifecycle: "idle",
+      roomId: null,
+      sourceState: "unattached",
+      message: "Create a sync room first.",
+    });
+  });
+
+  it("attaches the requested source in an existing room", async () => {
+    const createRoom = vi.fn();
+    const runtime = {
+      connectSignaling: vi.fn().mockResolvedValue(true),
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "unattached",
+        roomId: "room_123",
+        activeTabId: null,
+        activeFrameId: null,
+      })),
       getAttachSession: vi.fn().mockReturnValue({
         roomId: "room_123",
         sessionId: "host_1",
         viewerSessionIds: [],
         iceServers: [{ urls: ["stun:stun.screenmate.dev"] }],
-      }),
-      startRoom: vi.fn().mockResolvedValue({
-        roomLifecycle: "open",
-        sourceState: "unattached",
-        roomId: "room_123",
-        viewerCount: 0,
-        sourceLabel: null,
-        activeTabId: 42,
-        activeFrameId: 7,
-        recoverByTimestamp: null,
-        message: null,
       }),
       setAttachedSource: vi.fn().mockResolvedValue({
         roomLifecycle: "open",
@@ -2118,15 +3223,8 @@ describe("createHostMessageHandler", () => {
       },
     });
 
-    expect(createRoom).toHaveBeenCalledWith("http://localhost:8787");
-    expect(runtime.startRoom).toHaveBeenCalledWith(
-      expect.objectContaining({
-        activeFrameId: 7,
-        activeTabId: 42,
-        roomId: "room_123",
-      }),
-    );
-    expect(runtime.connectSignaling).toHaveBeenCalled();
+    expect(createRoom).not.toHaveBeenCalled();
+    expect(runtime.connectSignaling).not.toHaveBeenCalled();
     expect(sendTabMessage).toHaveBeenCalledWith(
       42,
       expect.objectContaining({
@@ -2142,7 +3240,7 @@ describe("createHostMessageHandler", () => {
     });
   });
 
-  it("starts a room without a selected source and immediately follows the active tab", async () => {
+  it("attaches the active tab video in an existing room", async () => {
     const runtime = {
       ...createHandlerDependencies().runtime,
       getAttachSession: vi.fn().mockReturnValue({
@@ -2153,22 +3251,15 @@ describe("createHostMessageHandler", () => {
       }),
       getSnapshot: vi
         .fn()
-        .mockReturnValueOnce(createHostRoomSnapshot())
         .mockReturnValue(createHostRoomSnapshot({
           roomLifecycle: "open",
           sourceState: "unattached",
           roomId: "room_123",
-          activeTabId: 42,
-          activeFrameId: 0,
+          activeTabId: null,
+          activeFrameId: null,
         })),
       getSourceFingerprint: vi.fn().mockReturnValue(null),
-      startRoom: vi.fn().mockResolvedValue(createHostRoomSnapshot({
-        roomLifecycle: "open",
-        sourceState: "unattached",
-        roomId: "room_123",
-        activeTabId: 42,
-        activeFrameId: 0,
-      })),
+      startRoom: vi.fn(),
       connectSignaling: vi.fn().mockResolvedValue(true),
     };
     const sendTabMessage = vi.fn().mockImplementation(
@@ -2221,12 +3312,7 @@ describe("createHostMessageHandler", () => {
       source: { kind: "active-tab-video" },
     });
 
-    expect(runtime.startRoom).toHaveBeenCalledWith(
-      expect.objectContaining({
-        activeFrameId: 0,
-        activeTabId: 42,
-      }),
-    );
+    expect(runtime.startRoom).not.toHaveBeenCalled();
     expect(sendTabMessage).toHaveBeenCalledWith(
       42,
       expect.objectContaining({
@@ -3128,6 +4214,48 @@ describe("createHostMessageHandler", () => {
       },
       { frameId: 7 },
     );
+  });
+
+  it("forwards viewer-joined signals to the player local attachment owner", async () => {
+    const sendTabMessage = vi.fn();
+    const sendPlayerMessage = vi.fn().mockResolvedValue({ ok: true });
+    const forwardInboundSignal = createForwardInboundSignalHandler({
+      runtime: {
+        getSnapshot: vi.fn().mockReturnValue({
+          roomLifecycle: "open",
+          sourceState: "attached",
+          roomId: "room_123",
+          viewerCount: 1,
+          sourceLabel: "demo.mp4",
+          activeTabId: -2,
+          activeFrameId: -1,
+          recoverByTimestamp: null,
+          message: null,
+        }),
+        shouldRefreshHostIce: vi.fn().mockReturnValue(false),
+        refreshHostIce: vi.fn(),
+      } as never,
+      sendTabMessage,
+      sendPlayerMessage,
+    });
+    const envelope = {
+      roomId: "room_123",
+      sessionId: "viewer_1",
+      role: "viewer" as const,
+      messageType: "viewer-joined" as const,
+      timestamp: 10,
+      payload: {
+        viewerSessionId: "viewer_1",
+      },
+    };
+
+    await forwardInboundSignal(envelope);
+
+    expect(sendTabMessage).not.toHaveBeenCalled();
+    expect(sendPlayerMessage).toHaveBeenCalledWith({
+      type: "screenmate:player-signal-inbound",
+      envelope,
+    });
   });
 
   it("re-reads the active attachment owner after ICE refresh before forwarding", async () => {

@@ -7,7 +7,6 @@ import type { ExtensionMockState } from "./mock-state";
 import type {
   ExtensionChatMessage,
   ExtensionSceneModel,
-  PopupFooterModel,
   SourceType,
   SniffTabSummary,
   ViewerConnectionRow,
@@ -15,6 +14,8 @@ import type {
 
 const OFFSCREEN_ATTACHMENT_TAB_ID = -1;
 const OFFSCREEN_ATTACHMENT_FRAME_ID = -1;
+const PLAYER_ATTACHMENT_TAB_ID = -2;
+const PLAYER_ATTACHMENT_FRAME_ID = -1;
 
 type BusyAction = "primary" | "stop" | null;
 
@@ -39,8 +40,18 @@ export function buildExtensionSceneModel(input: {
     input.snapshot.roomId !== null &&
     input.snapshot.roomLifecycle !== "idle" &&
     input.snapshot.roomLifecycle !== "closed";
+  const activeSourceIndicator = getActiveSourceIndicator({
+    followActiveTabVideo: input.followActiveTabVideo === true,
+    preparedSourceState: input.preparedSourceState,
+    selectedVideoId: input.selectedVideoId,
+    snapshot: input.snapshot,
+  });
   const sniffCards = input.videos.map((video, index) =>
-    buildSniffCard(video, index, input.selectedVideoId),
+    buildSniffCard(video, index, {
+      activeSourceIndicator,
+      selectedVideoId: input.selectedVideoId,
+      snapshot: input.snapshot,
+    }),
   );
   const screenReady = input.preparedSourceState?.kind === "screen" &&
     input.preparedSourceState.ready;
@@ -49,12 +60,6 @@ export function buildExtensionSceneModel(input: {
   const localFile = input.preparedSourceState?.kind === "upload"
     ? input.preparedSourceState.metadata
     : null;
-  const activeSourceIndicator = getActiveSourceIndicator({
-    followActiveTabVideo: input.followActiveTabVideo === true,
-    preparedSourceState: input.preparedSourceState,
-    selectedVideoId: input.selectedVideoId,
-    snapshot: input.snapshot,
-  });
   const chatVisible = hasOpenRoomSession;
   const activeTab = chatVisible || input.mock.activeTab !== "chat"
     ? input.mock.activeTab
@@ -64,6 +69,18 @@ export function buildExtensionSceneModel(input: {
     header: {
       title: "ScreenMate",
       statusText: viewModel.statusText,
+      room: {
+        state: input.snapshot.roomLifecycle === "closed"
+          ? "closed"
+          : hasOpenRoomSession
+            ? "open"
+            : "idle",
+        label: getRoomLabel(input.snapshot),
+      },
+      source: {
+        type: activeSourceIndicator,
+        label: getPlaybackLabel(input.snapshot.sourceLabel),
+      },
       playback: {
         label: getPlaybackLabel(input.snapshot.sourceLabel),
         mode: input.followActiveTabVideo === true ? "auto" : "manual",
@@ -106,72 +123,12 @@ export function buildExtensionSceneModel(input: {
         ? input.snapshot.chatMessages.map(toExtensionChatMessage)
         : input.mock.messages,
     },
-    footer: deriveFooter({
-      activePopupTab: activeTab,
-      activeSourceType: input.mock.activeSourceType,
-      busyAction: input.busyAction,
-      canStopRoom,
-      followActiveTabVideo: input.followActiveTabVideo === true,
-      hasOpenRoomSession,
-      hasSelectedVideo: input.selectedVideoId !== null,
-      isBusy: input.isBusy,
-      screenReady,
-      uploadReady,
-    }),
     meta: {
       hasSelectedSource: input.selectedVideoId !== null,
       isBusy: input.isBusy,
       busyAction: input.busyAction,
       message: input.snapshot.message,
     },
-  };
-}
-
-function deriveFooter(input: {
-  activePopupTab: "source" | "room" | "chat";
-  activeSourceType: SourceType;
-  busyAction: BusyAction;
-  canStopRoom: boolean;
-  followActiveTabVideo: boolean;
-  hasOpenRoomSession: boolean;
-  hasSelectedVideo: boolean;
-  isBusy: boolean;
-  screenReady: boolean;
-  uploadReady: boolean;
-}): PopupFooterModel {
-  const canUseSelectedSource =
-    input.activeSourceType === "auto"
-      ? input.followActiveTabVideo
-      : input.activeSourceType === "sniff"
-        ? input.hasSelectedVideo || input.followActiveTabVideo
-        : input.activeSourceType === "screen"
-          ? input.screenReady
-          : input.uploadReady;
-
-  if (!input.hasOpenRoomSession) {
-    if (input.activeSourceType === "auto" && !input.followActiveTabVideo) {
-      return { variant: "hidden" };
-    }
-
-    return {
-      variant: "start-room",
-      disabled: input.isBusy || !canUseSelectedSource,
-      busy: input.isBusy && input.busyAction === "primary",
-    };
-  }
-
-  if (input.activePopupTab === "room" || input.followActiveTabVideo) {
-    return {
-      variant: "end-share",
-      disabled: input.isBusy || !input.canStopRoom,
-      busy: input.isBusy && input.busyAction === "stop",
-    };
-  }
-
-  return {
-    variant: "change-source",
-    confirmDisabled: input.isBusy || !canUseSelectedSource,
-    busy: input.isBusy && input.busyAction === "primary",
   };
 }
 
@@ -197,6 +154,13 @@ function getActiveSourceIndicator(input: {
       input.snapshot.sourceLabel,
       input.preparedSourceState,
     );
+  }
+
+  if (
+    input.snapshot.activeTabId === PLAYER_ATTACHMENT_TAB_ID &&
+    input.snapshot.activeFrameId === PLAYER_ATTACHMENT_FRAME_ID
+  ) {
+    return "upload";
   }
 
   if (input.followActiveTabVideo) {
@@ -286,6 +250,22 @@ function getPlaybackLabel(sourceLabel: string | null) {
   }
 }
 
+function getRoomLabel(snapshot: HostRoomSnapshot) {
+  if (snapshot.roomId === null || snapshot.roomLifecycle === "idle") {
+    return "No room";
+  }
+
+  if (snapshot.roomLifecycle === "closed") {
+    return "Room closed";
+  }
+
+  if (snapshot.sourceState === "attached") {
+    return "Room streaming";
+  }
+
+  return "Room ready";
+}
+
 function toViewerConnectionRow(viewer: ViewerRosterEntry): ViewerConnectionRow {
   return {
     id: viewer.viewerSessionId,
@@ -320,7 +300,11 @@ function toExtensionChatMessage(message: RoomChatMessage): ExtensionChatMessage 
 function buildSniffCard(
   video: TabVideoSource,
   index: number,
-  selectedVideoId: string | null,
+  input: {
+    activeSourceIndicator: SourceType | null;
+    selectedVideoId: string | null;
+    snapshot: HostRoomSnapshot;
+  },
 ) {
   const sourceId = `${video.tabId}:${video.frameId}:${video.id}`;
   const tabInfo = getTabInfo(video, index);
@@ -329,6 +313,8 @@ function buildSniffCard(
   return {
     id: sourceId,
     tabId: video.tabId,
+    frameId: video.frameId,
+    videoId: video.id,
     tabInfo,
     tabBadge: isBilibili ? "B" : "YT",
     tabBadgeClassName: isBilibili ? "bg-[#fb7299]" : "bg-[#ff0000]",
@@ -338,7 +324,13 @@ function buildSniffCard(
     thumb: getCardThumb(video),
     format: getCardFormat(video),
     rate: getCardMeta(video),
-    selected: selectedVideoId === sourceId,
+    selected: input.selectedVideoId === sourceId,
+    active:
+      input.activeSourceIndicator === "sniff" &&
+      input.selectedVideoId === sourceId &&
+      input.snapshot.sourceState === "attached" &&
+      input.snapshot.activeTabId === video.tabId &&
+      input.snapshot.activeFrameId === video.frameId,
     label: video.label,
   };
 }

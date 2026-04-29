@@ -23,7 +23,6 @@ import {
   Send,
   Sun,
   Target,
-  Trash2,
   UploadCloud,
   Users,
   X,
@@ -48,6 +47,7 @@ export function ExtensionPopupPresenter({
   resolvedThemeMode,
   sniffScrollTop,
   onThemeToggle,
+  onCreateRoom = () => {},
   onOpenPopout,
   onSelectTab,
   onSelectSourceType,
@@ -60,8 +60,6 @@ export function ExtensionPopupPresenter({
   onCaptureScreen,
   onOpenPlayer,
   onToggleScreenReady,
-  onSelectLocalFile,
-  onClearLocalFile,
   onStartOrAttach,
   onStopRoom,
   onSavePassword,
@@ -80,6 +78,7 @@ export function ExtensionPopupPresenter({
   resolvedThemeMode: "light" | "dark";
   sniffScrollTop: number;
   onThemeToggle: () => void;
+  onCreateRoom?: () => void;
   onOpenPopout: () => void;
   onSelectTab: (tab: PopupTab) => void;
   onSelectSourceType: (kind: SourceType) => void;
@@ -92,9 +91,10 @@ export function ExtensionPopupPresenter({
   onCaptureScreen: (type: "screen" | "window" | "tab") => void;
   onOpenPlayer: () => void;
   onToggleScreenReady: () => void;
-  onSelectLocalFile: (file: { name: string; size: number; type: string }) => void;
-  onClearLocalFile: () => void;
-  onStartOrAttach: () => void;
+  onStartOrAttach: (
+    sourceType?: SourceType,
+    options?: { selectedVideoId?: string },
+  ) => void;
   onStopRoom: () => void;
   onSavePassword: () => void;
   onPasswordChange: (value: string) => void;
@@ -103,8 +103,6 @@ export function ExtensionPopupPresenter({
   onJumpToRoom: () => void;
   onSendChat: (text: string) => boolean | Promise<boolean>;
 }) {
-  const shouldShowMetaMessage =
-    scene.meta.message !== null && scene.meta.message !== "Room closed.";
   const isAutoFollow = scene.sourceTab.followActiveTabVideo;
   const effectiveSourceType = scene.sourceTab.activeSourceType;
   const playbackLabel =
@@ -114,6 +112,8 @@ export function ExtensionPopupPresenter({
       : copy.waitingPlayback);
   const playbackModeLabel =
     scene.header.playback.mode === "auto" ? copy.autoMode : copy.manualMode;
+  const roomLabel = formatRoomLabel(scene, copy);
+  const sourceTypeLabel = formatSourceTypeLabel(scene.header.source.type, copy);
   const [collapsedSniffGroupIds, setCollapsedSniffGroupIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -167,6 +167,10 @@ export function ExtensionPopupPresenter({
               {copy.appName}
             </span>
             <span className="shrink-0 text-[11px] text-muted-foreground/30 dark:text-muted-foreground/50">/</span>
+            <span className="shrink-0 text-[11px] font-semibold text-foreground">
+              {roomLabel}
+            </span>
+            <span className="shrink-0 text-[11px] text-muted-foreground/30 dark:text-muted-foreground/50">·</span>
             <span
               className={cn(
                 "shrink-0 text-[11px] font-semibold",
@@ -176,8 +180,8 @@ export function ExtensionPopupPresenter({
               {playbackModeLabel}
             </span>
             <span className="shrink-0 text-[11px] text-muted-foreground/30 dark:text-muted-foreground/50">·</span>
-            <span className="truncate text-[11px] font-medium text-muted-foreground" title={playbackLabel}>
-              {playbackLabel}
+            <span className="truncate text-[11px] font-medium text-muted-foreground" title={`${sourceTypeLabel ? `${sourceTypeLabel} · ` : ""}${playbackLabel}`}>
+              {sourceTypeLabel ? `${sourceTypeLabel} · ${playbackLabel}` : playbackLabel}
             </span>
           </div>
           <span data-testid="popup-room-status" className="sr-only">
@@ -209,6 +213,14 @@ export function ExtensionPopupPresenter({
           </button>
         </div>
       </header>
+
+      {!scene.tabs.hasOpenRoomSession ? (
+        <PopupCreateRoomGate
+          busy={scene.meta.isBusy}
+          copy={copy}
+          onCreateRoom={onCreateRoom}
+        />
+      ) : (
 
       <Tabs
         className="flex min-h-0 flex-1 flex-col"
@@ -296,17 +308,20 @@ export function ExtensionPopupPresenter({
                                 </button>
                                 {!isCollapsed && (
                                   group.cards.length > 0 ? group.cards.map((card) => (
-                                    <button
+                                    <div
                                       key={card.id}
                                       data-testid={`popup-sniff-card-${card.id}`}
                                       data-selected={card.selected ? "true" : "false"}
-                                      type="button"
-                                      onClick={() => onSelectSource(card.id)}
+                                      data-active={card.active ? "true" : "false"}
                                       onPointerEnter={() => onPreviewSource(card.id)}
                                       onPointerLeave={onClearSourcePreview}
                                       className={cn(
-                                        "relative overflow-hidden rounded-xl border transition-[border-color,background-color,box-shadow,ring] duration-200 cursor-pointer group flex bg-zinc-50 dark:bg-zinc-900/40 text-left w-full hover:shadow-md",
-                                        card.selected ? "border-blue-600 dark:border-blue-500 shadow-sm ring-2 ring-blue-500/20 bg-blue-50/10 dark:bg-blue-900/10" : "border-border/60 hover:border-blue-500/50 hover:bg-white dark:hover:bg-zinc-800/60",
+                                        "relative overflow-hidden rounded-xl border transition-[border-color,background-color,box-shadow,ring] duration-200 group flex bg-zinc-50 dark:bg-zinc-900/40 text-left w-full hover:shadow-md",
+                                        card.active
+                                          ? "border-emerald-500 dark:border-emerald-400 shadow-sm ring-2 ring-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-900/10"
+                                          : card.selected
+                                            ? "border-blue-600 dark:border-blue-500 shadow-sm ring-2 ring-blue-500/20 bg-blue-50/10 dark:bg-blue-900/10"
+                                            : "border-border/60 hover:border-blue-500/50 hover:bg-white dark:hover:bg-zinc-800/60",
                                       )}
                                     >
                                       <div className="h-16 w-24 shrink-0 overflow-hidden relative bg-black transition-transform duration-300 group-hover:scale-[1.05]">
@@ -328,7 +343,7 @@ export function ExtensionPopupPresenter({
                                           </div>
                                         )}
                                       </div>
-                                      <div className="flex min-w-0 flex-1 flex-col justify-center gap-1.5 px-3 py-2 pr-9">
+                                      <div className="flex min-w-0 flex-1 flex-col justify-center gap-1.5 px-3 py-2 pr-20">
                                         <p className="truncate text-xs font-bold leading-tight text-foreground transition-colors group-hover:text-blue-600 dark:group-hover:text-blue-400" title={card.label}>{card.title}</p>
                                         <div className="flex min-w-0 items-center gap-2">
                                           <span className="truncate text-[9px] text-blue-700 dark:text-blue-300 bg-blue-100/60 dark:bg-blue-900/40 px-1.5 py-[1px] rounded font-bold border border-blue-200/50 dark:border-blue-800/40 tracking-tight uppercase">
@@ -337,12 +352,23 @@ export function ExtensionPopupPresenter({
                                           <span className="shrink-0 text-[10px] text-muted-foreground font-mono font-medium">{card.rate}</span>
                                         </div>
                                       </div>
-                                      {card.selected && (
-                                        <div className="absolute right-2.5 top-1/2 -translate-y-1/2 size-5 rounded-full bg-blue-600 dark:bg-blue-500 flex items-center justify-center shadow-md animate-in zoom-in duration-200">
-                                          <Check className="w-3 h-3 text-white stroke-[3]" />
+                                      {card.active && (
+                                        <div className="absolute right-[68px] top-1/2 -translate-y-1/2 flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                                          <span className="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]" />
+                                          {copy.activeSource}
                                         </div>
                                       )}
-                                    </button>
+                                      <button
+                                        aria-label={`${copy.switchSource} ${card.title}`}
+                                        data-testid={`popup-sniff-switch-${card.id}`}
+                                        type="button"
+                                        onClick={() => onStartOrAttach("sniff", { selectedVideoId: card.id })}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg border border-blue-200 bg-blue-600 px-2.5 py-1.5 text-[10px] font-bold text-white shadow-sm transition-[background-color,transform] hover:bg-blue-700 active:scale-95 disabled:opacity-50 dark:border-blue-800"
+                                        disabled={scene.meta.isBusy}
+                                      >
+                                        {copy.switchSource}
+                                      </button>
+                                    </div>
                                   )) : (
                                     <div className="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground bg-zinc-50/50 dark:bg-zinc-900/20">
                                       {copy.noVideo}
@@ -431,22 +457,6 @@ export function ExtensionPopupPresenter({
                   )}
                 </PopupScrollArea>
               )}
-              {shouldShowMetaMessage && (
-                <div className="shrink-0 px-4 pb-3">
-                  <div className="rounded-xl bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400 border border-red-100 dark:border-red-500/20 p-3 text-xs shadow-sm flex items-start gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                    <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                    <span className="leading-relaxed">{scene.meta.message}</span>
-                  </div>
-                </div>
-              )}
-              <PopupFooterActions
-                copy={copy}
-                scene={scene}
-                context="source"
-                onCancel={() => onSelectTab("room")}
-                onStartOrAttach={onStartOrAttach}
-                onStopRoom={onStopRoom}
-              />
             </div>
           </TabsContent>
 
@@ -476,6 +486,15 @@ export function ExtensionPopupPresenter({
                           </button>
                           <button className="text-xs text-blue-600 dark:text-blue-400 font-bold flex items-center gap-1.5 hover:underline decoration-2 underline-offset-4 transition-[color,text-decoration-color]" onClick={onJumpToRoom} type="button">
                             {copy.openRoom} <ExternalLink className="w-3 h-3 stroke-[3]" />
+                          </button>
+                          <button
+                            data-testid="popup-stop-room"
+                            className="rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-[10px] font-black uppercase tracking-wide text-red-600 transition-colors hover:bg-red-100 disabled:opacity-50 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-900/40"
+                            disabled={scene.meta.isBusy || !scene.tabs.canStopRoom}
+                            onClick={onStopRoom}
+                            type="button"
+                          >
+                            {copy.endShare}
                           </button>
                         </div>
                       </div>
@@ -557,16 +576,6 @@ export function ExtensionPopupPresenter({
                   </>
                 )}
               </PopupScrollArea>
-              {scene.tabs.hasOpenRoomSession && (
-                <PopupFooterActions
-                  copy={copy}
-                  scene={scene}
-                  context="room"
-                  onCancel={() => onSelectTab("room")}
-                  onStartOrAttach={onStartOrAttach}
-                  onStopRoom={onStopRoom}
-                />
-              )}
             </div>
           </TabsContent>
 
@@ -579,75 +588,76 @@ export function ExtensionPopupPresenter({
           )}
         </div>
       </Tabs>
+      )}
     </main>
   );
 }
 
-function PopupFooterActions({
-  context,
+function PopupCreateRoomGate({
+  busy,
   copy,
-  onCancel,
-  onStartOrAttach,
-  onStopRoom,
-  scene,
+  onCreateRoom,
 }: {
-  context: "source" | "room";
+  busy: boolean;
   copy: ExtensionDictionary;
-  onCancel: () => void;
-  onStartOrAttach: () => void;
-  onStopRoom: () => void;
-  scene: ExtensionSceneModel;
+  onCreateRoom: () => void;
 }) {
-  if (scene.footer.variant === "hidden") {
-    return null;
+  return (
+    <section className="flex min-h-0 flex-1 flex-col items-center justify-center px-8 py-10 text-center">
+      <div className="mb-5 flex size-14 items-center justify-center rounded-2xl border border-blue-100 bg-blue-50 text-blue-600 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300">
+        <LinkIcon className="size-7" />
+      </div>
+      <h2 className="text-base font-black tracking-tight text-foreground">
+        {copy.sourceGateTitle}
+      </h2>
+      <p className="mt-2 max-w-[260px] text-xs font-medium leading-relaxed text-muted-foreground">
+        {copy.sourceGateDescription}
+      </p>
+      <button
+        data-testid="popup-create-room"
+        disabled={busy}
+        onClick={onCreateRoom}
+        type="button"
+        className="mt-6 flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition-[background-color,transform,box-shadow] hover:bg-blue-700 hover:shadow-md active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+      >
+        <Play className="size-4 fill-current" />
+        {copy.generateShare}
+      </button>
+    </section>
+  );
+}
+
+function formatRoomLabel(scene: ExtensionSceneModel, copy: ExtensionDictionary) {
+  if (scene.header.room.state === "closed" || scene.header.room.state === "idle") {
+    return copy.roomStatusIdle;
   }
 
-  return (
-    <div className="shrink-0 border-t border-border bg-card/95 backdrop-blur-md p-4">
-      {scene.footer.variant === "end-share" ? (
-        <button
-          data-testid="popup-stop-room"
-          onClick={onStopRoom}
-          disabled={scene.footer.disabled}
-          type="button"
-          className="w-full py-3.5 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-900/50 rounded-xl font-bold transition-[background-color,transform,box-shadow] text-sm flex items-center justify-center gap-2 shadow-sm active:scale-[0.98] disabled:opacity-50"
-        >
-          <X className="w-4 h-4 stroke-[3]" />
-          {copy.endShare}
-        </button>
-      ) : scene.footer.variant === "start-room" ? (
-        <button
-          data-testid="popup-start-or-attach"
-          onClick={onStartOrAttach}
-          className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
-          disabled={scene.footer.disabled}
-          type="button"
-        >
-          <Play className="w-4 h-4 fill-current" />
-          {copy.generateShare}
-        </button>
-      ) : (
-        <div className="flex items-center gap-3 w-full">
-          <button
-            onClick={onCancel}
-            className="flex-1 py-3.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900/80 dark:hover:bg-zinc-800 text-sm font-bold rounded-xl transition-colors border border-transparent flex items-center justify-center text-foreground"
-            type="button"
-          >
-            {copy.cancel}
-          </button>
-          <button
-            onClick={onStartOrAttach}
-            className="flex-1 py-3.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
-            disabled={scene.footer.confirmDisabled}
-            type="button"
-          >
-            <RefreshCw className="w-4 h-4" />
-            {copy.changeSource}
-          </button>
-        </div>
-      )}
-    </div>
-  );
+  return scene.header.playback.state === "active"
+    ? copy.roomStatusStreaming
+    : copy.roomStatusOpen;
+}
+
+function formatSourceTypeLabel(
+  sourceType: SourceType | null,
+  copy: ExtensionDictionary,
+) {
+  if (sourceType === "auto") {
+    return copy.sourceAuto;
+  }
+
+  if (sourceType === "sniff") {
+    return copy.sourceSniff;
+  }
+
+  if (sourceType === "screen") {
+    return copy.sourceScreen;
+  }
+
+  if (sourceType === "upload") {
+    return copy.sourceUpload;
+  }
+
+  return "";
 }
 
 function SourceTypeButton({ active, icon, label, onClick, sourceActive }: { active: boolean; icon: ReactNode; label: string; onClick: () => void; sourceActive?: boolean }) {
@@ -767,67 +777,6 @@ function CaptureOptionCard({ title, description, icon, onClick }: { title: strin
       <ChevronRight className="size-4 text-zinc-300 dark:text-zinc-600 group-hover:text-blue-400 transition-colors shrink-0" />
     </button>
   );
-}
-
-function Dropzone({ onSelectFile, placeholder }: { onSelectFile: (file: { name: string; size: number; type: string }) => void; placeholder: string }) {
-  const [isDragging, setIsDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const handleFiles = (files: FileList | null) => {
-    const file = files?.[0];
-    if (file && file.type.startsWith("video/")) {
-      onSelectFile({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-      });
-    }
-  };
-
-  return (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setIsDragging(true);
-      }}
-      onDragLeave={() => setIsDragging(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setIsDragging(false);
-        handleFiles(e.dataTransfer.files);
-      }}
-      onClick={() => inputRef.current?.click()}
-      className={cn(
-        "border-2 border-dashed rounded-xl aspect-[4/3] flex flex-col items-center justify-center p-8 gap-5 text-center transition-all cursor-pointer group",
-        isDragging
-          ? "border-blue-500 bg-blue-50/50 dark:bg-blue-900/20 scale-[1.02] shadow-lg"
-          : "border-border bg-zinc-50/30 dark:bg-zinc-900/10 hover:bg-zinc-50/50 dark:hover:bg-zinc-900/20",
-      )}
-    >
-      <input
-        type="file"
-        ref={inputRef}
-        className="hidden"
-        accept="video/mp4,video/webm,video/x-matroska"
-        onChange={(e) => handleFiles(e.target.files)}
-      />
-      <div className={cn("size-16 rounded-full flex items-center justify-center transition-all duration-300 shadow-sm", isDragging ? "bg-blue-100 dark:bg-blue-900/40 scale-110" : "bg-blue-50 dark:bg-blue-500/10 group-hover:scale-110")}>
-        <UploadCloud className={cn("size-8 transition-colors", isDragging ? "text-blue-600 dark:text-blue-400" : "text-blue-500")} />
-      </div>
-      <div>
-        <p className={cn("text-[15px] font-bold transition-colors", isDragging ? "text-blue-600 dark:text-blue-400" : "text-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400")}>{placeholder}</p>
-        <p className="text-xs text-muted-foreground mt-2 font-medium">MP4, WebM, MKV • Max 2GB</p>
-      </div>
-    </div>
-  );
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
 function ChatPane({ messages, onSend, placeholder }: { messages: ExtensionSceneModel["chatTab"]["messages"]; onSend: (text: string) => boolean | Promise<boolean>; placeholder: string }) {

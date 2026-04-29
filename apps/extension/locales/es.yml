@@ -26,7 +26,7 @@ captureTitle: Capturar pantalla o ventana
 captureDescription: Comparte una pestaña, una ventana de app o todo el escritorio.
 captureButton: Seleccionar contenido
 screenReady: Pantalla lista
-screenReadyDescription: Fuente capturada. Haz clic abajo para iniciar la sala.
+screenReadyDescription: La pantalla ya se está compartiendo. Vuelve a seleccionar para cambiar la fuente.
 reselect: Volver a elegir
 uploadDropzone: Haz clic o arrastra archivos de video
 roomId: ID Sala
@@ -50,3 +50,11 @@ themeLabel: Tema
 themeLight: Claro
 themeDark: Oscuro
 themeSystem: Sistema
+sourceGateTitle: Crea una sala primero
+sourceGateDescription: Crea una sala de sincronización antes de elegir Auto, Sniffer, Pantalla o Reproductor local.
+switchSource: Cambiar
+activeSource: Activo
+roomStatusIdle: Sin sala
+roomStatusOpen: Sala creada
+roomStatusStreaming: Reproduciendo
+roomStatusWaiting: Esperando

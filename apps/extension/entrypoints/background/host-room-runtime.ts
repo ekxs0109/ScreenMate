@@ -551,7 +551,46 @@ export function createHostRoomRuntime(options: {
           }
 
           if (envelope.messageType === "viewer-roster") {
+            const previousViewerSessionIds = new Set(session.viewerSessionIds);
+            const nextViewerSessionIds = envelope.payload.viewers
+              .filter((viewer) => viewer.online)
+              .map((viewer) => viewer.viewerSessionId);
+            const nextViewerSessionIdSet = new Set(nextViewerSessionIds);
             await applyViewerRoster(envelope.payload.viewers);
+            for (const viewerSessionId of nextViewerSessionIds) {
+              if (previousViewerSessionIds.has(viewerSessionId)) {
+                continue;
+              }
+
+              const joinedEnvelope: SignalEnvelope = {
+                roomId: activeSession.roomId,
+                sessionId: viewerSessionId,
+                role: "viewer",
+                messageType: "viewer-joined",
+                timestamp: envelope.timestamp,
+                payload: {
+                  viewerSessionId,
+                },
+              };
+              onInboundSignal(joinedEnvelope);
+            }
+            for (const viewerSessionId of previousViewerSessionIds) {
+              if (nextViewerSessionIdSet.has(viewerSessionId)) {
+                continue;
+              }
+
+              const leftEnvelope: SignalEnvelope = {
+                roomId: activeSession.roomId,
+                sessionId: viewerSessionId,
+                role: "viewer",
+                messageType: "viewer-left",
+                timestamp: envelope.timestamp,
+                payload: {
+                  viewerSessionId,
+                },
+              };
+              onInboundSignal(leftEnvelope);
+            }
             return;
           }
 

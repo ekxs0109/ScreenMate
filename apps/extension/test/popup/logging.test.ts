@@ -12,6 +12,7 @@ import {
   waitForMinimumRefreshDuration,
   type PopupLogger,
 } from "../../entrypoints/popup/useHostControls";
+import { shouldShowSnapshotToast } from "../../entrypoints/popup/popup-toast";
 import { createHostRoomSnapshot } from "../../entrypoints/background/host-room-snapshot";
 
 function createLoggerDouble(): PopupLogger {
@@ -93,6 +94,32 @@ describe("normalizeSnapshot", () => {
       recoverByTimestamp: null,
       message: null,
     });
+  });
+});
+
+describe("popup snapshot toasts", () => {
+  it("does not toast the automatic no-video state", () => {
+    expect(
+      shouldShowSnapshotToast(
+        { message: "No video attached." },
+        { activeSourceType: "auto", followActiveTabVideo: true },
+      ),
+    ).toBe(false);
+  });
+
+  it("still toasts actionable errors and manual missing-source states", () => {
+    expect(
+      shouldShowSnapshotToast(
+        { message: "Failed to fetch" },
+        { activeSourceType: "auto", followActiveTabVideo: true },
+      ),
+    ).toBe(true);
+    expect(
+      shouldShowSnapshotToast(
+        { message: "No video attached." },
+        { activeSourceType: "sniff", followActiveTabVideo: false },
+      ),
+    ).toBe(true);
   });
 });
 
@@ -218,6 +245,37 @@ describe("popup room action messages", () => {
       source: {
         kind: "prepared-offscreen",
         sourceType: "screen",
+      },
+    });
+
+    const uploadMetadata = {
+      id: "local-demo",
+      name: "demo.mp4",
+      size: 4,
+      type: "video/mp4",
+      updatedAt: 123,
+    };
+    expect(
+      buildStartSharingRequest(createHostRoomSnapshot(), null, {
+        sourceType: "upload",
+        preparedSourceState: {
+          status: "prepared-source",
+          kind: "upload",
+          ready: true,
+          label: "demo.mp4",
+          fileId: "local-demo",
+          metadata: uploadMetadata,
+          error: null,
+        },
+      }),
+    ).toEqual({
+      type: "screenmate:start-sharing",
+      source: {
+        kind: "prepared-offscreen",
+        sourceType: "upload",
+        label: "demo.mp4",
+        fileId: "local-demo",
+        metadata: uploadMetadata,
       },
     });
   });

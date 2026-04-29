@@ -1,5 +1,5 @@
 import "./popup.css";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { browser } from "wxt/browser";
 import { buildScreenMateViewerRoomUrl } from "../../lib/config";
@@ -7,8 +7,10 @@ import { cn } from "../../lib/utils";
 import { getExtensionDictionary } from "./i18n";
 import { ExtensionPopupPresenter } from "./presenter";
 import { usePopupUiStore } from "./popup-ui-store";
+import { shouldShowSnapshotToast } from "./popup-toast";
 import { buildExtensionSceneModel } from "./scene-adapter";
 import { useHostControls } from "./useHostControls";
+import { ToastViewport, useToastQueue } from "../../components/toast";
 
 function App() {
   const { resolvedTheme, setTheme, theme } = useTheme();
@@ -28,16 +30,15 @@ function App() {
   );
   const setPasswordDraft = usePopupUiStore((state) => state.setPasswordDraft);
   const markPasswordSaved = usePopupUiStore((state) => state.markPasswordSaved);
-  const setActiveRoomTab = usePopupUiStore((state) => state.setActiveRoomTab);
   const setSourceTab = usePopupUiStore((state) => state.setSourceTab);
   const appendLocalMessage = usePopupUiStore((state) => state.appendLocalMessage);
   const persistSelectedVideoId = usePopupUiStore(
     (state) => state.setSelectedVideoId,
   );
   const setSniffScrollTop = usePopupUiStore((state) => state.setSniffScrollTop);
-  const setLocalFile = usePopupUiStore((state) => state.setLocalFile);
-  const clearLocalFile = usePopupUiStore((state) => state.clearLocalFile);
   const localFile = usePopupUiStore((state) => state.localFile);
+  const { dismissToast, pushToast, toasts } = useToastQueue();
+  const lastToastMessageRef = useRef<string | null>(null);
 
   const [language, setLanguage] = useState("en");
 
@@ -50,6 +51,7 @@ function App() {
     refreshVideos,
     previewVideo,
     clearVideoPreview,
+    createRoomSession,
     startSharing,
     stopRoom,
     sendChatMessage,
@@ -126,6 +128,25 @@ function App() {
     ],
   );
 
+  useEffect(() => {
+    const message = snapshot.message;
+    if (!message || message === lastToastMessageRef.current) {
+      return;
+    }
+
+    lastToastMessageRef.current = message;
+    if (
+      !shouldShowSnapshotToast(
+        { message },
+        { activeSourceType, followActiveTabVideo },
+      )
+    ) {
+      return;
+    }
+
+    pushToast(message, "error");
+  }, [activeSourceType, followActiveTabVideo, pushToast, snapshot.message]);
+
   return (
     <div
       className={cn(
@@ -151,6 +172,9 @@ function App() {
                 ? "dark"
                 : "system";
           setTheme(nextTheme);
+        }}
+        onCreateRoom={() => {
+          void createRoomSession();
         }}
         onOpenPopout={() => {
           const popoutUrl = new URL(window.location.href);
@@ -179,7 +203,6 @@ function App() {
             await setFollowActiveTabVideo(enabled);
             if (enabled) {
               await startSharing("auto", { autoAttach: true });
-              setActiveRoomTab();
             }
           })();
         }}
@@ -188,24 +211,19 @@ function App() {
           browser.tabs.create({ url: browser.runtime.getURL("/player.html") });
         }}
         onCaptureScreen={async (type) => {
-          const prepared = await prepareScreenSource(type);
-          if (prepared.kind === "screen" && prepared.ready) {
+          await prepareScreenSource(type);
+        }}
+        onToggleScreenReady={clearPreparedSourceState}
+        onStartOrAttach={async (sourceType = activeSourceType, options = {}) => {
+          if (options.selectedVideoId) {
+            setSelectedVideoId(options.selectedVideoId);
             if (followActiveTabVideo) {
               void setFollowActiveTabVideo(false);
             }
           }
-        }}
-        onToggleScreenReady={clearPreparedSourceState}
-        onSelectLocalFile={(file) => {
-          setLocalFile(file);
-          if (followActiveTabVideo) {
-            void setFollowActiveTabVideo(false);
-          }
-        }}
-        onClearLocalFile={clearLocalFile}
-        onStartOrAttach={async () => {
-          await startSharing(activeSourceType);
-          setActiveRoomTab();
+          await startSharing(sourceType, {
+            selectedVideoId: options.selectedVideoId,
+          });
         }}
         onStopRoom={async () => {
           if (followActiveTabVideo) {
@@ -244,6 +262,7 @@ function App() {
           return true;
         }}
       />
+      <ToastViewport onDismiss={dismissToast} toasts={toasts} />
     </div>
   );
 }
