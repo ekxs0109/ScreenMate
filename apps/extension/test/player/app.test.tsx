@@ -253,6 +253,7 @@ describe("PlayerApp", () => {
             currentTime: 42,
             duration: 120,
             paused: false,
+            playbackRate: 1,
             sourceLabel: "demo.mp4",
           };
         }

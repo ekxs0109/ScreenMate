@@ -42,8 +42,9 @@ type OffscreenMessage =
     }
   | {
       type: "screenmate:offscreen-local-playback-control";
-      action: "play" | "pause" | "seek";
+      action: "play" | "pause" | "seek" | "ratechange";
       currentTime?: number;
+      playbackRate?: number;
     }
   | { type: "screenmate:offscreen-detach-source" };
 
@@ -63,6 +64,7 @@ type LocalPlaybackState = {
   currentTime: number | null;
   duration: number | null;
   paused: boolean | null;
+  playbackRate: number | null;
   sourceLabel: string | null;
 };
 
@@ -525,6 +527,10 @@ function applyLocalPlaybackControl(
     activeVideo.currentTime = message.currentTime;
   }
 
+  if (typeof message.playbackRate === "number") {
+    activeVideo.playbackRate = message.playbackRate;
+  }
+
   if (message.action === "play") {
     void activeVideo.play();
   } else if (message.action === "pause") {
@@ -540,6 +546,7 @@ function getLocalPlaybackState(): LocalPlaybackState {
       currentTime: null,
       duration: null,
       paused: null,
+      playbackRate: null,
       sourceLabel: null,
     };
   }
@@ -554,6 +561,7 @@ function getLocalPlaybackState(): LocalPlaybackState {
       ? activeVideo.duration
       : null,
     paused: activeVideo.paused,
+    playbackRate: activeVideo.playbackRate,
     sourceLabel: activeLocalSourceMetadata?.name ?? null,
   };
 }

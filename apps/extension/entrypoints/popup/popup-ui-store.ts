@@ -6,13 +6,10 @@ import {
   type StateStorage,
 } from "zustand/middleware";
 import { createExtensionMockState, type ExtensionMockState } from "./mock-state";
-import type { PopupTab, SourceType } from "./scene-model";
 
-type PopupUiStore = ExtensionMockState & {
+type PopupUiStore = Omit<ExtensionMockState, "activeTab" | "activeSourceType"> & {
   selectedVideoId?: string | null;
   sniffScrollTop: number;
-  setActiveTab: (tab: PopupTab) => void;
-  setActiveSourceType: (sourceType: SourceType) => void;
   setSelectedVideoId: (selectedVideoId: string | null) => void;
   setIsRefreshing: (isRefreshing: boolean) => void;
   toggleScreenReady: () => void;
@@ -20,8 +17,6 @@ type PopupUiStore = ExtensionMockState & {
   clearLocalFile: () => void;
   setPasswordDraft: (passwordDraft: string) => void;
   markPasswordSaved: () => void;
-  setActiveRoomTab: () => void;
-  setSourceTab: () => void;
   appendLocalMessage: (text: string) => void;
   setSniffScrollTop: (scrollTop: number) => void;
 };
@@ -34,8 +29,6 @@ export const usePopupUiStore = create<PopupUiStore>()(
       ...defaultState,
       selectedVideoId: undefined,
       sniffScrollTop: 0,
-      setActiveTab: (activeTab) => set({ activeTab }),
-      setActiveSourceType: (activeSourceType) => set({ activeSourceType }),
       setSelectedVideoId: (selectedVideoId) => set({ selectedVideoId }),
       setIsRefreshing: (isRefreshing) => set({ isRefreshing }),
       toggleScreenReady: () =>
@@ -45,8 +38,6 @@ export const usePopupUiStore = create<PopupUiStore>()(
       setPasswordDraft: (passwordDraft) =>
         set({ passwordDraft, passwordSaved: false }),
       markPasswordSaved: () => set({ passwordSaved: true }),
-      setActiveRoomTab: () => set({ activeTab: "room" }),
-      setSourceTab: () => set({ activeTab: "source" }),
       appendLocalMessage: (text) =>
         set((state) => ({
           messages: [
@@ -58,21 +49,21 @@ export const usePopupUiStore = create<PopupUiStore>()(
     }),
     {
       name: "screenmate-popup-ui",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(createPopupStateStorage),
       migrate: (persistedState) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState;
         }
 
+        const { activeTab: _tab, activeSourceType: _st, ...rest } =
+          persistedState as Record<string, unknown>;
         return {
-          ...persistedState,
+          ...rest,
           screenReady: false,
         };
       },
       partialize: (state) => ({
-        activeTab: state.activeTab,
-        activeSourceType: state.activeSourceType,
         uploadReady: state.uploadReady,
         localFile: state.localFile,
         passwordDraft: state.passwordDraft,

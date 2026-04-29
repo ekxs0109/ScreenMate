@@ -7,6 +7,7 @@ import { cn } from "../../lib/utils";
 import { getExtensionDictionary } from "./i18n";
 import { ExtensionPopupPresenter } from "./presenter";
 import { usePopupUiStore } from "./popup-ui-store";
+import { usePopupSessionStore } from "./popup-session-store";
 import { shouldShowSnapshotToast } from "./popup-toast";
 import { buildExtensionSceneModel } from "./scene-adapter";
 import { useHostControls } from "./useHostControls";
@@ -14,8 +15,13 @@ import { ToastViewport, useToastQueue } from "../../components/toast";
 
 function App() {
   const { resolvedTheme, setTheme, theme } = useTheme();
-  const activeTab = usePopupUiStore((state) => state.activeTab);
-  const activeSourceType = usePopupUiStore((state) => state.activeSourceType);
+  const activeTab = usePopupSessionStore((state) => state.activeTab);
+  const activeSourceType = usePopupSessionStore((state) => state.activeSourceType);
+  const setActiveTab = usePopupSessionStore((state) => state.setActiveTab);
+  const setActiveSourceType = usePopupSessionStore(
+    (state) => state.setActiveSourceType,
+  );
+  const setSourceTab = usePopupSessionStore((state) => state.setSourceTab);
   const screenReady = usePopupUiStore((state) => state.screenReady);
   const uploadReady = usePopupUiStore((state) => state.uploadReady);
   const passwordDraft = usePopupUiStore((state) => state.passwordDraft);
@@ -24,13 +30,8 @@ function App() {
   const viewerDetails = usePopupUiStore((state) => state.viewerDetails);
   const persistedSelectedVideoId = usePopupUiStore((state) => state.selectedVideoId);
   const sniffScrollTop = usePopupUiStore((state) => state.sniffScrollTop);
-  const setActiveTab = usePopupUiStore((state) => state.setActiveTab);
-  const setActiveSourceType = usePopupUiStore(
-    (state) => state.setActiveSourceType,
-  );
   const setPasswordDraft = usePopupUiStore((state) => state.setPasswordDraft);
   const markPasswordSaved = usePopupUiStore((state) => state.markPasswordSaved);
-  const setSourceTab = usePopupUiStore((state) => state.setSourceTab);
   const appendLocalMessage = usePopupUiStore((state) => state.appendLocalMessage);
   const persistSelectedVideoId = usePopupUiStore(
     (state) => state.setSelectedVideoId,

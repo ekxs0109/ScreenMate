@@ -38,6 +38,7 @@ import { readLocalMediaFile, saveLocalMediaFile } from "../../lib/local-media-st
 import type { LocalPlaybackState } from "../background";
 import { getExtensionDictionary } from "../popup/i18n";
 import { usePopupUiStore } from "../popup/popup-ui-store";
+import { usePopupSessionStore } from "../popup/popup-session-store";
 import { buildExtensionSceneModel } from "../popup/scene-adapter";
 import { useHostControls } from "../popup/useHostControls";
 
@@ -103,7 +104,7 @@ export default function PlayerApp() {
   const localFile = usePopupUiStore((state) => state.localFile);
   const clearLocalFile = usePopupUiStore((state) => state.clearLocalFile);
   const setLocalFile = usePopupUiStore((state) => state.setLocalFile);
-  const setActiveSourceType = usePopupUiStore((state) => state.setActiveSourceType);
+  const setActiveSourceType = usePopupSessionStore((state) => state.setActiveSourceType);
   const messages = usePopupUiStore((state) => state.messages);
   const appendLocalMessage = usePopupUiStore((state) => state.appendLocalMessage);
 
@@ -128,6 +129,7 @@ export default function PlayerApp() {
       viewerRoomUrl: snapshot.roomId ? `${window.location.origin}/viewer?roomId=${snapshot.roomId}` : null,
       mock: {
         ...usePopupUiStore.getState(),
+        ...usePopupSessionStore.getState(),
         isRefreshing: false,
       }
     }), [snapshot, isBusy, busyAction, messages]
@@ -390,12 +392,25 @@ export default function PlayerApp() {
         currentTime: video?.currentTime ?? 0,
       });
     };
+    const syncPlaybackRate = () => {
+      if (playbackSyncSuppressedRef.current) {
+        return;
+      }
+
+      void browser.runtime.sendMessage({
+        type: "screenmate:sync-local-playback",
+        action: "ratechange",
+        currentTime: video?.currentTime ?? 0,
+        playbackRate: video?.playbackRate ?? 1,
+      });
+    };
     const handlePlay = () => syncPlayback("play");
     const handlePause = () => syncPlayback("pause");
     const handleSeeked = () => syncPlayback("seek");
     video?.addEventListener("play", handlePlay);
     video?.addEventListener("pause", handlePause);
     video?.addEventListener("seeked", handleSeeked);
+    video?.addEventListener("ratechange", syncPlaybackRate);
 
     const restoredPlaybackState = pendingPlaybackRestoreRef.current;
     pendingPlaybackRestoreRef.current = null;
@@ -408,6 +423,10 @@ export default function PlayerApp() {
           } catch {
             // Some media elements reject seeks until metadata is available.
           }
+        }
+
+        if (typeof restoredPlaybackState.playbackRate === "number") {
+          video.playbackRate = restoredPlaybackState.playbackRate;
         }
 
         if (didApplyPlaybackIntent) {
@@ -433,6 +452,7 @@ export default function PlayerApp() {
       video?.removeEventListener("play", handlePlay);
       video?.removeEventListener("pause", handlePause);
       video?.removeEventListener("seeked", handleSeeked);
+      video?.removeEventListener("ratechange", syncPlaybackRate);
       if (playerRef.current === nextPlayer) {
         clearPlayerSurface();
       }

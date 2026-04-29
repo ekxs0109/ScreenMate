@@ -2001,6 +2001,44 @@ describe("createHostMessageHandler", () => {
     });
   });
 
+  it("forwards playbackRate in sync-local-playback to offscreen", async () => {
+    const sendOffscreenMessage = vi.fn().mockResolvedValue({ ok: true });
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "demo.mp4",
+        activeTabId: -1,
+        activeFrameId: -1,
+      })),
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: ["viewer_1"],
+        iceServers: [],
+      }),
+    } as never;
+    const handler = createHostMessageHandler(
+      createHandlerDependencies({ runtime, sendOffscreenMessage }),
+    );
+
+    await handler({
+      type: "screenmate:sync-local-playback",
+      action: "ratechange",
+      currentTime: 10,
+      playbackRate: 2,
+    });
+
+    expect(sendOffscreenMessage).toHaveBeenCalledWith({
+      type: "screenmate:offscreen-local-playback-control",
+      action: "ratechange",
+      currentTime: 10,
+      playbackRate: 2,
+    });
+  });
+
   it("surfaces local offscreen attach failures from the offscreen document", async () => {
     const attachError =
       "Local video file could not be loaded. The browser may not support this file format or codec.";
@@ -2675,6 +2713,7 @@ describe("createHostMessageHandler", () => {
       currentTime: 42,
       duration: 120,
       paused: false,
+      playbackRate: 1,
       sourceLabel: "demo.mp4",
     });
     const handler = createHostMessageHandler(createHandlerDependencies({
@@ -2696,6 +2735,7 @@ describe("createHostMessageHandler", () => {
       currentTime: 42,
       duration: 120,
       paused: false,
+      playbackRate: 1,
       sourceLabel: "demo.mp4",
     });
   });

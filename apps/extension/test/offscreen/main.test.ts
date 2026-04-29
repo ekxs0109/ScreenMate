@@ -347,7 +347,58 @@ describe("offscreen local source switching", () => {
       currentTime: 42,
       duration: 120,
       paused: false,
+      playbackRate: 1,
       sourceLabel: "demo.mp4",
     });
+  });
+
+  it("applies playbackRate from offscreen-local-playback-control message", async () => {
+    Object.defineProperty(HTMLMediaElement.prototype, "paused", {
+      configurable: true,
+      get: () => false,
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "duration", {
+      configurable: true,
+      get: () => 120,
+    });
+    const localStream = createMockStream(createMockTrack());
+    Object.defineProperty(HTMLVideoElement.prototype, "captureStream", {
+      configurable: true,
+      value: vi.fn(() => localStream),
+    });
+    const { handleOffscreenMessage } = await import(
+      "../../entrypoints/offscreen/main"
+    );
+    const roomSession = {
+      roomId: "room_123",
+      sessionId: "host_1",
+      viewerSessionIds: [],
+      iceServers: [],
+    };
+
+    await handleOffscreenMessage({
+      type: "screenmate:offscreen-attach-local-file",
+      roomSession,
+      fileId: "local-demo",
+      metadata: {
+        id: "local-demo",
+        name: "demo.mp4",
+        size: 4,
+        type: "video/mp4",
+        updatedAt: 123,
+      },
+    });
+    const video = document.getElementById(
+      "screenmate-offscreen-local-video",
+    ) as HTMLVideoElement;
+
+    await handleOffscreenMessage({
+      type: "screenmate:offscreen-local-playback-control",
+      action: "ratechange",
+      currentTime: 0,
+      playbackRate: 2,
+    });
+
+    expect(video.playbackRate).toBe(2);
   });
 });

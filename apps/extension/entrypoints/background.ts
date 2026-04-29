@@ -81,8 +81,9 @@ export type HostMessage =
     }
   | {
       type: "screenmate:sync-local-playback";
-      action: "play" | "pause" | "seek";
+      action: "play" | "pause" | "seek" | "ratechange";
       currentTime?: number;
+      playbackRate?: number;
     }
   | {
       type: "screenmate:player-signal-outbound";
@@ -250,6 +251,7 @@ export type LocalPlaybackState = {
   currentTime: number | null;
   duration: number | null;
   paused: boolean | null;
+  playbackRate: number | null;
   sourceLabel: string | null;
 };
 
@@ -352,8 +354,9 @@ type OffscreenControlMessage =
     }
   | {
       type: "screenmate:offscreen-local-playback-control";
-      action: "play" | "pause" | "seek";
+      action: "play" | "pause" | "seek" | "ratechange";
       currentTime?: number;
+      playbackRate?: number;
     }
   | { type: "screenmate:offscreen-detach-source" };
 
@@ -595,6 +598,7 @@ export function createHostMessageHandler(
           type: "screenmate:offscreen-local-playback-control",
           action: message.action,
           currentTime: message.currentTime,
+          playbackRate: message.playbackRate,
         });
       }
       return { ok: true };
@@ -2927,9 +2931,12 @@ function isHostMessage(message: unknown): message is HostMessage {
       return (
         (message.action === "play" ||
           message.action === "pause" ||
-          message.action === "seek") &&
+          message.action === "seek" ||
+          message.action === "ratechange") &&
         (typeof message.currentTime === "undefined" ||
-          typeof message.currentTime === "number")
+          typeof message.currentTime === "number") &&
+        (typeof message.playbackRate === "undefined" ||
+          typeof message.playbackRate === "number")
       );
     case "screenmate:offscreen-signal-outbound":
     case "screenmate:player-signal-outbound":
