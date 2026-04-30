@@ -15,6 +15,9 @@ import {
   Target,
   UploadCloud,
   Zap,
+  Radio,
+  Activity,
+  Layers,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { ExtensionDictionary } from "./i18n";
@@ -39,24 +42,82 @@ export function SourceTypeButton({
       onClick={onClick}
       type="button"
       className={cn(
-        "relative flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold rounded-md transition-[background-color,color,box-shadow,border-color] border",
+        "relative flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg transition-all duration-300",
         active
-          ? "bg-white dark:bg-zinc-800 shadow-sm border-zinc-200 dark:border-zinc-700 text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground",
+          ? "bg-white dark:bg-zinc-800 shadow-sm ring-1 ring-black/5 dark:ring-white/10"
+          : "hover:bg-zinc-200/30 dark:hover:bg-zinc-800/30"
       )}
     >
-      {icon}
-      <span className="truncate">{label}</span>
-      {sourceActive && (
-        <span
-          aria-hidden="true"
-          className="absolute top-1 right-1 size-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]"
-        />
-      )}
+      <div className={cn(
+        "relative flex items-center justify-center size-6 rounded-md transition-all duration-300",
+        sourceActive
+          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20"
+          : active
+            ? "text-blue-600 dark:text-blue-400"
+            : "text-muted-foreground"
+      )}>
+        {icon}
+      </div>
+      <span className={cn(
+        "text-[11px] font-bold truncate tracking-tight transition-colors duration-300",
+        sourceActive
+          ? "text-emerald-600 dark:text-emerald-400"
+          : active
+            ? "text-foreground"
+            : "text-muted-foreground"
+      )}>
+        {label}
+      </span>
     </button>
   );
 }
 
+export function SourceTypeSwitcher({
+  activeType,
+  activeIndicator,
+  copy,
+  onSelect,
+}: {
+  activeType: SourceType;
+  activeIndicator: SourceType | null;
+  copy: ExtensionDictionary;
+  onSelect: (type: SourceType) => void;
+}) {
+  return (
+    <div className="shrink-0 px-4 pt-3 pb-0">
+      <div className="p-1 bg-zinc-100 dark:bg-zinc-900/50 rounded-lg flex items-center border border-border/40">
+        <SourceTypeButton
+          active={activeType === "auto"}
+          sourceActive={activeIndicator === "auto"}
+          icon={<Zap className="w-3.5 h-3.5" />}
+          label={copy.sourceAuto}
+          onClick={() => onSelect("auto")}
+        />
+        <SourceTypeButton
+          active={activeType === "sniff"}
+          sourceActive={activeIndicator === "sniff"}
+          icon={<Search className="w-3.5 h-3.5" />}
+          label={copy.sourceSniff}
+          onClick={() => onSelect("sniff")}
+        />
+        <SourceTypeButton
+          active={activeType === "screen"}
+          sourceActive={activeIndicator === "screen"}
+          icon={<MonitorUp className="w-3.5 h-3.5" />}
+          label={copy.sourceScreen}
+          onClick={() => onSelect("screen")}
+        />
+        <SourceTypeButton
+          active={activeType === "upload"}
+          sourceActive={activeIndicator === "upload"}
+          icon={<UploadCloud className="w-3.5 h-3.5" />}
+          label={copy.sourceUpload}
+          onClick={() => onSelect("upload")}
+        />
+      </div>
+    </div>
+  );
+}
 export function formatPlaybackLabel(label: string, copy: ExtensionDictionary) {
   const trimmed = label.trim();
   return trimmed.startsWith("blob:") ? copy.webVideoStream : trimmed;
@@ -77,73 +138,94 @@ export function AutoTabPanel({
   onEnable: () => void;
   onDisable: () => void;
 }) {
-  if (!enabled) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center p-8 mt-2 text-center rounded-2xl border border-dashed border-border bg-zinc-50/50 dark:bg-zinc-900/20">
-        <div className="mb-5 flex size-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 ring-8 ring-emerald-50 dark:ring-emerald-900/10 shadow-sm">
-          <Zap className="size-7" />
-        </div>
-        <h3 className="mb-2 text-sm font-bold text-foreground tracking-tight">
-          {copy.sourceAuto}
-        </h3>
-        <p className="text-[11px] text-muted-foreground max-w-[240px] leading-relaxed mb-6">
-          {copy.sourceAutoDescription}
-        </p>
-        <button
-          data-testid="popup-auto-enable"
-          onClick={onEnable}
-          type="button"
-          className="py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition-[background-color,transform,box-shadow] shadow-sm hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-1.5"
-        >
-          <Zap className="w-3.5 h-3.5 fill-current" />
-          {copy.autoEnable}
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-1 flex-col items-center justify-center p-8 mt-2 text-center rounded-2xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-900/10">
-      <div className="relative mb-5 flex size-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 ring-8 ring-emerald-50 dark:ring-emerald-900/10 shadow-sm">
-        <Target className="size-7" />
-        <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background shadow-sm">
-          <span
-            className={cn(
-              "h-2.5 w-2.5 rounded-full",
-              playbackState === "active"
-                ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-[pulse_2s_ease-in-out_infinite]"
-                : "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]",
+    <div className="flex flex-1 flex-col animate-in fade-in zoom-in-95 duration-500">
+      {/* 
+        Container with fixed layout to prevent jumping.
+        The border remains the same, only internal content changes.
+      */}
+      <div className={cn(
+        "relative overflow-hidden rounded-[2rem] border transition-all duration-500  flex flex-col items-center text-center shadow-xl shadow-black/5  justify-center flex-1",
+        enabled
+          ? "border-emerald-500/20 bg-gradient-to-b from-emerald-50/30 to-white dark:from-emerald-900/10 dark:to-zinc-950"
+          : "border-border/50 bg-gradient-to-b from-zinc-50/50 to-white dark:from-zinc-900/50 dark:to-zinc-950"
+      )}>
+        {/* State Indicator Beam */}
+        <div className={cn(
+          "absolute top-0 inset-x-0 h-px transition-colors duration-500",
+          enabled ? "bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" : "bg-gradient-to-r from-transparent via-border to-transparent"
+        )} />
+
+        {/* Dynamic Icon Section */}
+        <div className="relative mb-8 group perspective-1000">
+          <div className={cn(
+            "absolute -inset-10 rounded-full blur-3xl transition-all duration-700",
+            enabled ? "bg-emerald-500/15 animate-pulse" : "bg-zinc-500/5 opacity-0 group-hover:opacity-100"
+          )} />
+
+          <div className={cn(
+            "relative size-20 rounded-[2.5rem] shadow-2xl flex items-center justify-center transition-all duration-700",
+            enabled
+              ? "bg-emerald-500 text-white border-emerald-400/50 scale-100 rotate-0"
+              : "bg-white dark:bg-zinc-900 text-emerald-500 border-border scale-95 -rotate-6 group-hover:scale-105 group-hover:rotate-0"
+          )}>
+            {enabled ? (
+              <Radio className="size-10 animate-pulse" />
+            ) : (
+              <Zap className="size-10 fill-emerald-500/10" />
             )}
-          />
-        </span>
-      </div>
-      <h3 className="mb-2 text-sm font-bold text-foreground tracking-tight">
-        {copy.autoFollowEmptyTitle}
-      </h3>
-      <p className="text-[11px] text-muted-foreground max-w-[240px] leading-relaxed mb-5">
-        {copy.autoFollowEmptyDescription}
-      </p>
 
-      <div className="mb-5 flex items-center gap-2 rounded-full border border-border bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs shadow-sm">
-        <span className="px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 border text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
-          {copy.currentPlayback}
-        </span>
-        <span
-          className="font-semibold text-foreground truncate max-w-[150px]"
-          title={playbackLabel}
-        >
-          {playbackLabel}
-        </span>
-      </div>
+            <div className="absolute -right-2 -top-2 size-8 rounded-2xl bg-white dark:bg-zinc-900 border border-border flex items-center justify-center shadow-lg transition-transform duration-500">
+              {enabled ? (
+                <Activity className="size-4 text-emerald-500 animate-bounce" />
+              ) : (
+                <Layers className="size-4 text-emerald-600 dark:text-emerald-400" />
+              )}
+            </div>
+          </div>
+        </div>
 
-      <button
-        data-testid="popup-auto-disable"
-        onClick={onDisable}
-        type="button"
-        className="py-2 px-4 bg-white hover:bg-zinc-50 dark:bg-zinc-950 dark:hover:bg-zinc-900 text-foreground font-semibold rounded-lg border border-border shadow-sm transition-colors text-xs active:scale-95"
-      >
-        {copy.autoDisable}
-      </button>
+        {/* Text Section - Fade/Slide Transition */}
+        <div className="mb-10 space-y-2 relative h-[80px] w-full flex flex-col justify-center">
+          <div key={enabled ? "on" : "off"} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <h3 className="text-lg font-black text-foreground tracking-tight flex items-center justify-center gap-2">
+              {enabled ? copy.autoFollowEmptyTitle : copy.sourceAuto}
+            </h3>
+            <p className="text-xs text-muted-foreground max-w-[240px] mx-auto leading-relaxed font-medium mt-1">
+              {enabled ? copy.autoFollowEmptyDescription : copy.sourceAutoDescription}
+            </p>
+          </div>
+        </div>
+
+        {/* Action Button Section */}
+        <div className="w-full max-w-[200px] flex flex-col items-center gap-4">
+          <button
+            data-testid={enabled ? "popup-auto-disable" : "popup-auto-enable"}
+            onClick={enabled ? onDisable : onEnable}
+            type="button"
+            className={cn(
+              "group relative h-12 w-full rounded-2xl font-bold text-sm shadow-2xl transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] overflow-hidden",
+              enabled
+                ? "bg-white dark:bg-zinc-800 text-foreground border border-border"
+                : "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-black"
+            )}
+          >
+            {!enabled && (
+              <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/0 via-emerald-500/10 to-emerald-500/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+            )}
+            <span className="relative flex items-center justify-center gap-2">
+              {enabled ? (
+                <>关闭自动接管</>
+              ) : (
+                <>
+                  <Zap className="size-4 fill-current" />
+                  {copy.autoEnable}
+                </>
+              )}
+            </span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -175,17 +257,17 @@ export function SniffPanel({
   onToggleSniffGroup: (groupId: string) => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 px-4 pb-2 pt-4">
+    <div className="flex min-h-0 flex-1 flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="shrink-0 px-4 pb-3 pt-5">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-1">
-            <Search className="w-3 h-3" />
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground uppercase tracking-wider px-1">
+            <Search className="w-3.5 h-3.5 text-blue-500" />
             {copy.detected}
           </div>
           <button
             onClick={onRefreshSniff}
             aria-label={copy.refreshSniff}
-            className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 hover:text-blue-700 transition-colors bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded disabled:opacity-70"
+            className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors px-2 py-1 rounded-lg border border-transparent hover:border-blue-100 dark:hover:border-blue-800/50 disabled:opacity-50"
             type="button"
             disabled={scene.sourceTab.isRefreshing}
           >
@@ -195,64 +277,68 @@ export function SniffPanel({
                 scene.sourceTab.isRefreshing && "animate-spin",
               )}
             />
-            <span className="text-[10px] font-bold">{copy.refreshSniff}</span>
+            <span className="text-[11px] font-bold">{copy.refreshSniff}</span>
           </button>
         </div>
       </div>
       <PopupScrollArea
         className="min-h-0 flex-1"
-        contentClassName="px-4 pb-4 flex flex-col gap-4 min-h-full"
+        contentClassName="px-4 pb-6 flex flex-col gap-5 min-h-full"
         initialScrollTop={sniffScrollTop}
         onScrollTopChange={onSniffScrollChange}
       >
         <div
-          className="flex flex-col gap-4"
+          className="flex flex-col gap-5"
           data-testid="popup-sniff-groups"
         >
           {scene.sourceTab.sniffGroups.length > 0 ? (
             scene.sourceTab.sniffGroups.map((group) => (
-              <section key={group.id} className="flex flex-col gap-2">
+              <section key={group.id} className="flex flex-col gap-2.5">
                 {(() => {
                   const isCollapsed = collapsedSniffGroupIds.has(group.id);
                   return (
                     <>
                       <button
                         aria-expanded={!isCollapsed}
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] font-bold text-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group/header"
+                        className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[12px] font-bold text-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all group/header border border-transparent hover:border-border/50"
                         onClick={() => onToggleSniffGroup(group.id)}
                         type="button"
                       >
-                        {isCollapsed ? (
-                          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/header:translate-x-0.5" />
-                        ) : (
-                          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/header:translate-y-0.5" />
-                        )}
-                        <span className="size-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]" />
+                        <div className="size-5 flex items-center justify-center shrink-0">
+                          {isCollapsed ? (
+                            <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover/header:translate-x-0.5" />
+                          ) : (
+                            <ChevronDown className="size-4 text-muted-foreground transition-transform group-hover/header:translate-y-0.5" />
+                          )}
+                        </div>
+                        <div className="size-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)] shrink-0" />
                         <span
                           className="min-w-0 flex-1 truncate"
                           title={group.title}
                         >
                           {group.title}
                         </span>
-                        <span className="shrink-0 text-[10px] font-bold text-muted-foreground bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md border border-border/50 tabular-nums">
+                        <span className="shrink-0 text-[10px] font-bold text-muted-foreground bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full border border-border/50 tabular-nums">
                           {group.cards.length}
                         </span>
                       </button>
                       {!isCollapsed &&
                         (group.cards.length > 0 ? (
-                          group.cards.map((card) => (
-                            <SniffCard
-                              key={card.id}
-                              card={card}
-                              copy={copy}
-                              isBusy={scene.meta.isBusy}
-                              onPreview={onPreviewSource}
-                              onClearPreview={onClearSourcePreview}
-                              onStartOrAttach={onStartOrAttach}
-                            />
-                          ))
+                          <div className="flex flex-col gap-2.5 pl-2">
+                            {group.cards.map((card) => (
+                              <SniffCard
+                                key={card.id}
+                                card={card}
+                                copy={copy}
+                                isBusy={scene.meta.isBusy}
+                                onPreview={onPreviewSource}
+                                onClearPreview={onClearSourcePreview}
+                                onStartOrAttach={onStartOrAttach}
+                              />
+                            ))}
+                          </div>
                         ) : (
-                          <div className="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground bg-zinc-50/50 dark:bg-zinc-900/20">
+                          <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground bg-zinc-50/30 dark:bg-zinc-900/10 italic">
                             {copy.noVideo}
                           </div>
                         ))}
@@ -262,8 +348,11 @@ export function SniffPanel({
               </section>
             ))
           ) : (
-            <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground bg-zinc-50/50 dark:bg-zinc-900/20">
-              {copy.noVideo}
+            <div className="flex flex-col items-center justify-center py-12 px-6 rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/10 text-center gap-3">
+              <Search className="size-10 text-muted-foreground/30" />
+              <p className="text-sm font-medium text-muted-foreground italic">
+                {copy.noVideo}
+              </p>
             </div>
           )}
         </div>
@@ -298,67 +387,77 @@ function SniffCard({
       onPointerEnter={() => onPreview(card.id)}
       onPointerLeave={onClearPreview}
       className={cn(
-        "relative overflow-hidden rounded-xl border transition-[border-color,background-color,box-shadow,ring] duration-200 group flex bg-zinc-50 dark:bg-zinc-900/40 text-left w-full hover:shadow-md",
+        "relative overflow-hidden rounded-xl border transition-all duration-300 group flex items-stretch bg-white dark:bg-zinc-900 text-left w-full hover:shadow-lg hover:-translate-y-0.5",
         card.active
-          ? "border-emerald-500 dark:border-emerald-400 shadow-sm ring-2 ring-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-900/10"
+          ? "border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/20"
           : card.selected
-            ? "border-blue-600 dark:border-blue-500 shadow-sm ring-2 ring-blue-500/20 bg-blue-50/10 dark:bg-blue-900/10"
-            : "border-border/60 hover:border-blue-500/50 hover:bg-white dark:hover:bg-zinc-800/60",
+            ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.15)] ring-1 ring-blue-500/20"
+            : "border-border/60 hover:border-blue-500/40",
       )}
     >
-      <div className="h-16 w-24 shrink-0 overflow-hidden relative bg-black transition-transform duration-300 group-hover:scale-[1.05]">
+      {/* Thumbnail Area */}
+      <div className="h-16 w-28 shrink-0 overflow-hidden relative bg-zinc-950">
         {card.thumb ? (
           <img
             alt={card.title}
-            className="h-full w-full object-cover opacity-90 transition-opacity group-hover:opacity-100"
+            className="h-full w-full object-cover opacity-80 transition-all duration-500 group-hover:opacity-100 group-hover:scale-110"
             src={card.thumb}
             onError={(event) => {
               event.currentTarget.style.display = "none";
             }}
           />
         ) : (
-          <div className="absolute inset-0 bg-zinc-900" />
-        )}
-        {card.thumb && (
-          <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            <Play className="w-5 h-5 text-white drop-shadow-lg fill-white/20 ml-0.5" />
+          <div className="absolute inset-0 flex items-center justify-center text-zinc-700">
+            <FileVideo className="size-6 opacity-20" />
           </div>
         )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-1.5">
+          <Play className="size-3.5 text-white fill-white/20" />
+        </div>
       </div>
-      <div className="flex min-w-0 flex-1 flex-col justify-center gap-1.5 px-3 py-2 pr-20">
-        <p
-          className="truncate text-xs font-bold leading-tight text-foreground transition-colors group-hover:text-blue-600 dark:group-hover:text-blue-400"
-          title={card.label}
-        >
-          {card.title}
-        </p>
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[9px] text-blue-700 dark:text-blue-300 bg-blue-100/60 dark:bg-blue-900/40 px-1.5 py-[1px] rounded font-bold border border-blue-200/50 dark:border-blue-800/40 tracking-tight uppercase">
+
+      {/* Content Area */}
+      <div className="flex min-w-0 flex-1 flex-col justify-center px-3.5 py-2.5 gap-1.5 pr-2">
+        <div className="flex items-start justify-between gap-2">
+          <p
+            className="truncate text-xs font-bold leading-tight text-foreground flex-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors"
+            title={card.label}
+          >
+            {card.title}
+          </p>
+          {card.active && (
+            <div className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-[9px] font-black uppercase tracking-tight text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+              <span className="size-1 rounded-full bg-emerald-500 animate-pulse" />
+              LIVE
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-[9px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded font-bold border border-blue-200/30 dark:border-blue-800/30 uppercase tracking-tight">
             {card.format}
           </span>
-          <span className="shrink-0 text-[10px] text-muted-foreground font-mono font-medium">
+          <span className="shrink-0 text-[10px] text-muted-foreground font-mono font-bold opacity-60">
             {card.rate}
           </span>
         </div>
       </div>
-      {card.active && (
-        <div className="absolute right-[68px] top-1/2 -translate-y-1/2 flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-          <span className="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]" />
-          {copy.activeSource}
-        </div>
-      )}
-      <button
-        aria-label={`${copy.switchSource} ${card.title}`}
-        data-testid={`popup-sniff-switch-${card.id}`}
-        type="button"
-        onClick={() =>
-          onStartOrAttach("sniff", { selectedVideoId: card.id })
-        }
-        className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg border border-blue-200 bg-blue-600 px-2.5 py-1.5 text-[10px] font-bold text-white shadow-sm transition-[background-color,transform] hover:bg-blue-700 active:scale-95 disabled:opacity-50 dark:border-blue-800"
-        disabled={isBusy}
-      >
-        {copy.switchSource}
-      </button>
+
+      {/* Action Button - Slide in on hover or always show if small text */}
+      <div className="shrink-0 flex items-center px-3 bg-zinc-50 dark:bg-zinc-950/50 border-l border-border/40 transition-colors group-hover:bg-blue-50/50 dark:group-hover:bg-blue-900/10">
+        <button
+          aria-label={`${copy.switchSource} ${card.title}`}
+          data-testid={`popup-sniff-switch-${card.id}`}
+          type="button"
+          onClick={() =>
+            onStartOrAttach("sniff", { selectedVideoId: card.id })
+          }
+          className="rounded-lg bg-blue-600 hover:bg-blue-700 text-white p-2 shadow-sm transition-all active:scale-90 disabled:opacity-50"
+          disabled={isBusy}
+          title={copy.switchSource}
+        >
+          <Play className="size-4 fill-current" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -374,50 +473,83 @@ export function ScreenPanel({
   onCaptureScreen: (type: "screen" | "window" | "tab") => void;
   onToggleScreenReady: () => void;
 }) {
-  return (
-    <div className="flex flex-col gap-4 flex-1">
-      <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
-        <MonitorUp className="w-3.5 h-3.5" />
-        {copy.sourceScreen}
-      </div>
+  const playbackLabel = formatPlaybackLabel(scene.header.playback.label, copy);
 
+  return (
+    <div className="flex flex-col gap-5 flex-1 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {!scene.sourceTab.screenReady ? (
-        <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <CaptureOptionCard
-            title={copy.captureEntireScreen}
-            description={copy.captureEntireScreenDesc}
-            icon={<Monitor className="w-5 h-5" />}
-            onClick={() => onCaptureScreen("screen")}
-          />
-          <CaptureOptionCard
-            title={copy.captureWindow}
-            description={copy.captureWindowDesc}
-            icon={<Maximize className="w-5 h-5" />}
-            onClick={() => onCaptureScreen("window")}
-          />
-          <CaptureOptionCard
-            title={copy.captureTab}
-            description={copy.captureTabDesc}
-            icon={<Globe className="w-5 h-5" />}
-            onClick={() => onCaptureScreen("tab")}
-          />
-        </div>
-      ) : (
-        <div className="border-2 border-dashed border-green-500/50 bg-green-50/30 dark:bg-green-900/10 rounded-xl aspect-[4/3] flex flex-col items-center justify-center p-6 gap-4 text-center transition-[border-color,background-color,box-shadow] shadow-inner animate-in zoom-in-95 duration-300">
-          <div className="size-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center transition-all duration-300 shadow-sm scale-110">
-            <Check className="w-8 h-8 text-green-600 dark:text-green-500" />
+        <>
+          <div className="flex flex-col gap-3.5 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <CaptureOptionCard
+              title={copy.captureEntireScreen}
+              description={copy.captureEntireScreenDesc}
+              icon={<Monitor className="w-6 h-6" />}
+              onClick={() => onCaptureScreen("screen")}
+            />
+            <CaptureOptionCard
+              title={copy.captureWindow}
+              description={copy.captureWindowDesc}
+              icon={<Maximize className="w-6 h-6" />}
+              onClick={() => onCaptureScreen("window")}
+            />
+            <CaptureOptionCard
+              title={copy.captureTab}
+              description={copy.captureTabDesc}
+              icon={<Globe className="w-6 h-6" />}
+              onClick={() => onCaptureScreen("tab")}
+            />
           </div>
-          <div>
-            <p className="text-[15px] font-bold text-green-600 dark:text-green-400 mb-1">
-              {copy.screenReady}
-            </p>
-            <p className="text-xs text-muted-foreground mb-5 font-medium leading-relaxed max-w-[240px] mx-auto">
-              {copy.screenReadyDescription}
-            </p>
+        </>
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center p-6 animate-in fade-in zoom-in-95 duration-400">
+          {/* Transmission Sonar Visual */}
+          <div className="relative mb-12 flex size-32 items-center justify-center">
+            <div className="absolute inset-0 rounded-full border border-blue-500/20 animate-[ping_4s_linear_infinite]" />
+            <div className="absolute inset-4 rounded-full border border-blue-500/40 animate-[ping_4s_linear_infinite_1s]" />
+            <div className="absolute inset-8 rounded-full border border-blue-500/60 animate-[ping_4s_linear_infinite_2s]" />
+
+            <div className="relative size-16 rounded-2xl bg-zinc-900 dark:bg-black shadow-2xl flex items-center justify-center border-2 border-zinc-800 dark:border-zinc-700 z-10 overflow-hidden transition-transform duration-500 hover:scale-110">
+              <div className="absolute inset-0 bg-blue-500/5" />
+              <Monitor className="size-8 text-blue-500" />
+              {/* Scanning Line */}
+              <div className="absolute top-0 inset-x-0 h-0.5 bg-blue-500/50 blur-[2px] animate-[scan_2s_ease-in-out_infinite]" />
+            </div>
+
+            <div className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-white dark:bg-zinc-950 shadow-md border border-emerald-100 dark:border-emerald-800 z-20">
+              <span className="size-3 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+            </div>
+          </div>
+
+          <div className="text-center space-y-6 w-full max-w-[280px]">
+            <div className="space-y-1.5">
+              <h3 className="text-2xl font-black text-foreground tracking-tight flex items-center justify-center gap-2">
+                {copy.screenReady}
+              </h3>
+              <p className="text-[13px] text-muted-foreground font-medium leading-relaxed opacity-70">
+                {copy.screenReadyDescription}
+              </p>
+            </div>
+
+            {/* Transmission Info */}
+            <div className="flex flex-col gap-2 rounded-2xl bg-zinc-100/50 dark:bg-zinc-900/50 border border-border/40 p-4">
+              <div className="flex items-center justify-between text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest px-1">
+                <span>Transmission</span>
+                <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                  <Activity className="size-2.5 animate-pulse" />
+                  LIVE
+                </div>
+              </div>
+              <div className="bg-white dark:bg-zinc-950 rounded-xl p-3 border border-border/40 shadow-sm">
+                <p className="text-[13px] font-bold text-foreground truncate text-left" title={playbackLabel}>
+                  {playbackLabel || "Unknown Source"}
+                </p>
+              </div>
+            </div>
+
             <button
-              className="py-2 px-4 bg-white hover:bg-zinc-50 dark:bg-zinc-950 dark:hover:bg-zinc-900 text-foreground font-semibold rounded-lg border border-border shadow-sm transition-colors text-xs active:scale-95"
               onClick={onToggleScreenReady}
               type="button"
+              className="h-11 px-8 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-black rounded-2xl font-bold text-sm shadow-xl active:scale-95 transition-all"
             >
               {copy.reselect}
             </button>
@@ -436,36 +568,46 @@ export function UploadPanel({
   onOpenPlayer: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-4 flex-1 pb-6">
-      <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
-        <FileVideo className="w-3.5 h-3.5" />
-        {copy.sourceUpload}
-      </div>
-
+    <div className="flex flex-col flex-1 animate-in fade-in zoom-in-95 duration-500">
       <div
-        className="border-2 border-dashed border-border rounded-xl aspect-[4/3] flex flex-col items-center justify-center p-8 gap-5 text-center bg-zinc-50/30 dark:bg-zinc-900/10 transition-all hover:bg-zinc-50/50 dark:hover:bg-zinc-900/20 group cursor-pointer"
+        className="flex-1 group relative overflow-hidden rounded-[2rem] border border-border/50 bg-gradient-to-b from-zinc-50/50 to-white dark:from-zinc-900/50 dark:to-zinc-950 flex flex-col items-center text-center shadow-xl shadow-black/5  justify-center cursor-pointer"
         onClick={onOpenPlayer}
       >
-        <div className="size-16 rounded-full bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-300">
-          <ExternalLink className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+        <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-border/50 to-transparent" />
+
+        <div className="relative mb-8 group-hover:scale-110 transition-transform duration-500">
+          <div className="absolute -inset-8 rounded-full bg-blue-500/10 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+          <div className="relative size-20 rounded-full bg-white dark:bg-zinc-900 border border-border shadow-2xl flex items-center justify-center text-blue-500 transition-all duration-500 group-hover:rotate-6">
+            <FileVideo className="size-9 fill-blue-500/10" />
+            <div className="absolute -right-1 -top-1 size-7 rounded-full bg-blue-50 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800/50 flex items-center justify-center shadow-lg">
+              <Play className="size-3.5 text-blue-600 dark:text-blue-400 fill-current" />
+            </div>
+          </div>
         </div>
-        <div>
-          <p className="text-[15px] font-bold text-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+
+        <div className="mb-10 space-y-2 relative h-[70px] w-full flex flex-col justify-center">
+          <h3 className="text-lg font-black text-foreground tracking-tight">
             {copy.openPlayer}
-          </p>
-          <p className="text-xs text-muted-foreground mt-2 font-medium leading-relaxed max-w-[200px] mx-auto">
+          </h3>
+          <p className="text-xs text-muted-foreground max-w-[220px] mx-auto leading-relaxed font-medium opacity-80 line-clamp-2 min-h-[32px] flex items-center justify-center">
             {copy.playerDesc}
           </p>
         </div>
-        <div className="mt-2 py-1.5 px-4 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-black text-xs font-bold rounded-lg shadow-md active:scale-95 transition-transform flex items-center gap-2">
-          Launch Player <ChevronRight className="w-3 h-3" />
-        </div>
+
+        <button
+          type="button"
+          className="group/btn relative h-12 w-full max-w-[200px] bg-zinc-900 dark:bg-zinc-100 text-white dark:text-black rounded-2xl font-bold text-sm shadow-2xl transition-all hover:scale-[1.02] active:scale-[0.98] overflow-hidden"
+        >
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/20 to-blue-500/0 -translate-x-full group-hover/btn:translate-x-full transition-transform duration-1000" />
+          <span className="relative flex items-center justify-center gap-2">
+            {copy.openPlayer}
+            <ChevronRight className="size-4 transition-transform group-hover/btn:translate-x-0.5" />
+          </span>
+        </button>
       </div>
     </div>
   );
-}
-
-function CaptureOptionCard({
+} function CaptureOptionCard({
   title,
   description,
   icon,
@@ -480,20 +622,22 @@ function CaptureOptionCard({
     <button
       onClick={onClick}
       type="button"
-      className="flex items-center gap-3 p-3 rounded-xl border border-border bg-zinc-50/50 dark:bg-zinc-900/30 hover:border-blue-500/50 hover:bg-white dark:hover:bg-zinc-800/50 transition-all duration-200 group text-left w-full shadow-sm"
+      className="flex items-center gap-4 p-3.5 rounded-2xl border border-border bg-white dark:bg-zinc-900/50 hover:border-blue-500/50 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 group text-left w-full shadow-sm"
     >
-      <div className="size-10 shrink-0 rounded-lg bg-white dark:bg-zinc-800 border border-border shadow-sm flex items-center justify-center text-muted-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:scale-105 transition-all duration-200">
+      <div className="size-12 shrink-0 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-border/60 shadow-inner flex items-center justify-center text-muted-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:scale-110 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-all duration-300">
         {icon}
       </div>
-      <div className="flex-1 min-w-0 space-y-0.5">
-        <p className="text-[12px] font-bold text-foreground leading-none">
+      <div className="flex-1 min-w-0 space-y-1">
+        <p className="text-[13px] font-bold text-foreground leading-none group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
           {title}
         </p>
-        <p className="text-[10px] text-muted-foreground leading-tight truncate">
+        <p className="text-[11px] text-muted-foreground leading-tight line-clamp-2 opacity-80 group-hover:opacity-100">
           {description}
         </p>
       </div>
-      <ChevronRight className="size-4 text-zinc-300 dark:text-zinc-600 group-hover:text-blue-400 transition-colors shrink-0" />
+      <div className="size-8 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 transition-all duration-300">
+        <ChevronRight className="size-5 text-blue-500 shrink-0" />
+      </div>
     </button>
   );
 }
