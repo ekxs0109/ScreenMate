@@ -63,7 +63,7 @@ export function RoomTabPanel({
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="font-mono font-bold text-[13px] truncate" data-testid="popup-room-id-value">
+                      <span className="font-mono font-bold text-xs truncate" data-testid="popup-room-id-value">
                         {scene.roomTab.roomId}
                       </span>
                       <button

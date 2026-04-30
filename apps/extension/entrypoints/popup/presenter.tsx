@@ -320,7 +320,7 @@ function PopupCreateRoomGate({
         <h2 className="text-lg font-bold tracking-tight text-foreground">
           {copy.sourceGateTitle}
         </h2>
-        <p className="max-w-[260px] text-[13px] leading-relaxed text-muted-foreground">
+        <p className="max-w-[260px] text-xs leading-relaxed text-muted-foreground">
           {copy.sourceGateDescription}
         </p>
       </div>
