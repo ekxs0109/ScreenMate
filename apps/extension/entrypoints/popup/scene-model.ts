@@ -48,6 +48,17 @@ export type ViewerConnectionRow = {
   isGood: boolean;
 };
 
+export type HeaderSourceDetail = {
+  kind:
+    | "display-screen"
+    | "display-tab"
+    | "display-window"
+    | "local-file"
+    | "media"
+    | "page-tab";
+  label: string;
+};
+
 export type ExtensionSceneModel = {
   header: {
     title: string;
@@ -58,11 +69,12 @@ export type ExtensionSceneModel = {
     };
     source: {
       type: SourceType | null;
+      selectedType: SourceType;
+      detail: HeaderSourceDetail | null;
       label: string;
     };
     playback: {
       label: string;
-      mode: "auto" | "manual";
       state: "active" | "waiting";
     };
   };

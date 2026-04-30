@@ -57,7 +57,7 @@ describe("buildExtensionSceneModel", () => {
     });
 
     expect(scene.sourceTab.followActiveTabVideo).toBe(true);
-    expect(scene.header.playback.mode).toBe("auto");
+    expect(scene.header.source.selectedType).toBe("sniff");
     expect(scene.header.room.state).toBe("idle");
   });
 
@@ -112,6 +112,144 @@ describe("buildExtensionSceneModel", () => {
 
     expect(scene.sourceTab.activeSourceType).toBe("upload");
     expect(scene.sourceTab.activeSourceIndicator).toBe("screen");
+  });
+
+  it("keeps the header source mode tied to the selected source tab", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        activeTabId: -1,
+        activeFrameId: -1,
+        sourceLabel: "Shared browser tab",
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: { ...createExtensionMockState(), activeSourceType: "upload" },
+    });
+
+    expect(scene.header.source.selectedType).toBe("upload");
+    expect(scene.sourceTab.activeSourceIndicator).toBe("screen");
+    expect(scene.header.source.detail).toEqual({
+      kind: "display-tab",
+      label: "Shared browser tab",
+    });
+  });
+
+  it("uses the attached page tab title as the header source detail", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        activeTabId: 42,
+        activeFrameId: 0,
+        sourceLabel: "https://cdn.example.com/movie.mp4",
+      }),
+      sniffTabs: [{ tabId: 42, title: "Bilibili - 番剧" }],
+      videos: [
+        {
+          id: "screenmate-video-1",
+          tabId: 42,
+          frameId: 0,
+          label: "https://cdn.example.com/movie.mp4",
+          tabTitle: "Bilibili - 番剧",
+        },
+      ],
+      selectedVideoId: "42:0:screenmate-video-1",
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: { ...createExtensionMockState(), activeSourceType: "sniff" },
+    });
+
+    expect(scene.header.source.detail).toEqual({
+      kind: "page-tab",
+      label: "Bilibili - 番剧",
+    });
+  });
+
+  it("uses the local file name as the header source detail", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        activeTabId: -1,
+        activeFrameId: -1,
+        sourceLabel: "demo.mp4",
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: { ...createExtensionMockState(), activeSourceType: "upload" },
+    });
+
+    expect(scene.header.source.detail).toEqual({
+      kind: "local-file",
+      label: "demo.mp4",
+    });
+  });
+
+  it("keeps the attached local file detail when a screen source is only prepared", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        activeTabId: -1,
+        activeFrameId: -1,
+        sourceLabel: "demo.mp4",
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      preparedSourceState: {
+        status: "prepared-source",
+        kind: "screen",
+        ready: true,
+        label: "Shared screen",
+        metadata: null,
+        captureType: "screen",
+        error: null,
+      },
+      mock: { ...createExtensionMockState(), activeSourceType: "screen" },
+    });
+
+    expect(scene.header.source.detail).toEqual({
+      kind: "local-file",
+      label: "demo.mp4",
+    });
+  });
+
+  it("clears stale source detail after an attached screen tab is stopped", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "degraded",
+        sourceState: "recovering",
+        roomId: "room_demo",
+        activeTabId: -1,
+        activeFrameId: -1,
+        sourceLabel: "Shared browser tab",
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: { ...createExtensionMockState(), activeSourceType: "screen" },
+    });
+
+    expect(scene.header.playback.state).toBe("waiting");
+    expect(scene.header.source.detail).toBeNull();
   });
 
   it("keeps the offscreen indicator on the attached screen source when another source is only prepared", () => {

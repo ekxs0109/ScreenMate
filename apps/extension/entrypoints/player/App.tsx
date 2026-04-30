@@ -71,6 +71,11 @@ function normalizeLocalPlaybackState(value: unknown): LocalPlaybackState | null 
         ? candidate.duration
         : null,
     paused: typeof candidate.paused === "boolean" ? candidate.paused : null,
+    playbackRate:
+      typeof candidate.playbackRate === "number" &&
+      Number.isFinite(candidate.playbackRate)
+        ? candidate.playbackRate
+        : null,
     sourceLabel:
       typeof candidate.sourceLabel === "string" ? candidate.sourceLabel : null,
   };

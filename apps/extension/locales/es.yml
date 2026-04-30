@@ -39,6 +39,7 @@ viewerName: Nombre
 connType: Método
 connPing: Ping
 notSharedYet: No compartido
+noViewers: Sin espectadores todavía
 cancel: Cancelar
 changeSource: Cambiar Fuente
 generateShare: Crear Sala
@@ -58,3 +59,6 @@ roomStatusIdle: Sin sala
 roomStatusOpen: Sala creada
 roomStatusStreaming: Reproduciendo
 roomStatusWaiting: Esperando
+sourceShareBrowserTab: Pestaña compartida
+sourceShareScreen: Pantalla compartida
+sourceShareWindow: Ventana compartida

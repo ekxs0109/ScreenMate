@@ -47,6 +47,7 @@ viewerName: 名称
 connType: 连接方式
 connPing: 质量
 notSharedYet: 暂未分享视频
+noViewers: 暂无观众
 cancel: 取消
 changeSource: 更换当前资源
 generateShare: 创建同步房间
@@ -66,3 +67,6 @@ roomStatusIdle: 未创建房间
 roomStatusOpen: 房间已创建
 roomStatusStreaming: 播放中
 roomStatusWaiting: 等待资源
+sourceShareBrowserTab: 标签页共享
+sourceShareScreen: 屏幕共享
+sourceShareWindow: 窗口共享

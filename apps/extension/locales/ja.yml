@@ -39,6 +39,7 @@ viewerName: 名前
 connType: 接続タイプ
 connPing: Ping
 notSharedYet: まだ共有されていません
+noViewers: 視聴者はまだいません
 cancel: キャンセル
 changeSource: ソースを変更
 generateShare: ルームを作成
@@ -58,3 +59,6 @@ roomStatusIdle: ルーム未作成
 roomStatusOpen: ルーム作成済み
 roomStatusStreaming: 再生中
 roomStatusWaiting: 待機中
+sourceShareBrowserTab: タブ共有
+sourceShareScreen: 画面共有
+sourceShareWindow: ウィンドウ共有

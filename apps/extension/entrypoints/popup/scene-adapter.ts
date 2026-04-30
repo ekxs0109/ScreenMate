@@ -7,6 +7,7 @@ import type { ExtensionMockState } from "./mock-state";
 import type {
   ExtensionChatMessage,
   ExtensionSceneModel,
+  HeaderSourceDetail,
   SourceType,
   SniffTabSummary,
   ViewerConnectionRow,
@@ -53,6 +54,14 @@ export function buildExtensionSceneModel(input: {
       snapshot: input.snapshot,
     }),
   );
+  const headerSourceSelectedType = input.mock.activeSourceType;
+  const headerSourceDetail = getHeaderSourceDetail({
+    preparedSourceState: input.preparedSourceState,
+    selectedVideoId: input.selectedVideoId,
+    sniffTabs: input.sniffTabs ?? [],
+    snapshot: input.snapshot,
+    videos: input.videos,
+  });
   const screenReady = input.preparedSourceState?.kind === "screen" &&
     input.preparedSourceState.ready;
   const uploadReady = input.preparedSourceState?.kind === "upload" &&
@@ -79,11 +88,12 @@ export function buildExtensionSceneModel(input: {
       },
       source: {
         type: activeSourceIndicator,
+        selectedType: headerSourceSelectedType,
+        detail: headerSourceDetail,
         label: getPlaybackLabel(input.snapshot.sourceLabel),
       },
       playback: {
         label: getPlaybackLabel(input.snapshot.sourceLabel),
-        mode: input.followActiveTabVideo === true ? "auto" : "manual",
         state: input.snapshot.sourceState === "attached" ? "active" : "waiting",
       },
     },
@@ -215,6 +225,150 @@ function getActiveOffscreenSourceIndicator(
   }
 
   return null;
+}
+
+function getHeaderSourceDetail(input: {
+  preparedSourceState?: PreparedSourceState;
+  selectedVideoId: string | null;
+  sniffTabs: SniffTabSummary[];
+  snapshot: HostRoomSnapshot;
+  videos: TabVideoSource[];
+}): HeaderSourceDetail | null {
+  const { snapshot } = input;
+  if (snapshot.sourceState !== "attached") {
+    return null;
+  }
+
+  const playbackLabel = getPlaybackLabel(snapshot.sourceLabel);
+
+  if (
+    snapshot.activeTabId === OFFSCREEN_ATTACHMENT_TAB_ID &&
+    snapshot.activeFrameId === OFFSCREEN_ATTACHMENT_FRAME_ID
+  ) {
+    return getOffscreenSourceDetail(
+      snapshot.sourceLabel,
+      input.preparedSourceState,
+      playbackLabel,
+    );
+  }
+
+  if (
+    snapshot.activeTabId === PLAYER_ATTACHMENT_TAB_ID &&
+    snapshot.activeFrameId === PLAYER_ATTACHMENT_FRAME_ID
+  ) {
+    return playbackLabel
+      ? { kind: "local-file", label: playbackLabel }
+      : null;
+  }
+
+  if (
+    snapshot.activeTabId !== null &&
+    snapshot.activeFrameId !== null &&
+    playbackLabel
+  ) {
+    return {
+      kind: "page-tab",
+      label: getAttachedTabTitle(input) ?? playbackLabel,
+    };
+  }
+
+  return playbackLabel ? { kind: "media", label: playbackLabel } : null;
+}
+
+function getOffscreenSourceDetail(
+  sourceLabel: string | null,
+  preparedSourceState: PreparedSourceState | undefined,
+  playbackLabel: string,
+): HeaderSourceDetail | null {
+  const displaySourceKind = getDisplaySourceDetailKind(sourceLabel);
+  if (displaySourceKind) {
+    return { kind: displaySourceKind, label: sourceLabel ?? "" };
+  }
+
+  if (playbackLabel) {
+    return { kind: "local-file", label: playbackLabel };
+  }
+
+  if (preparedSourceState?.kind === "screen" && preparedSourceState.ready) {
+    return {
+      kind: getDisplaySourceDetailKindFromCaptureType(
+        preparedSourceState.captureType,
+      ),
+      label: preparedSourceState.label,
+    };
+  }
+
+  if (preparedSourceState?.kind === "upload" && preparedSourceState.ready) {
+    return {
+      kind: "local-file",
+      label: preparedSourceState.metadata.name || preparedSourceState.label,
+    };
+  }
+
+  return null;
+}
+
+function getDisplaySourceDetailKind(
+  sourceLabel: string | null,
+): Extract<HeaderSourceDetail["kind"], "display-screen" | "display-tab" | "display-window"> | null {
+  if (sourceLabel === "Shared browser tab") {
+    return "display-tab";
+  }
+
+  if (sourceLabel === "Shared window") {
+    return "display-window";
+  }
+
+  if (sourceLabel === "Shared screen") {
+    return "display-screen";
+  }
+
+  return null;
+}
+
+function getDisplaySourceDetailKindFromCaptureType(
+  captureType: Extract<PreparedSourceState, { kind: "screen" }>["captureType"],
+): Extract<HeaderSourceDetail["kind"], "display-screen" | "display-tab" | "display-window"> {
+  if (captureType === "tab") {
+    return "display-tab";
+  }
+
+  if (captureType === "window") {
+    return "display-window";
+  }
+
+  return "display-screen";
+}
+
+function getAttachedTabTitle(input: {
+  selectedVideoId: string | null;
+  sniffTabs: SniffTabSummary[];
+  snapshot: HostRoomSnapshot;
+  videos: TabVideoSource[];
+}) {
+  const activeTabId = input.snapshot.activeTabId;
+  const activeFrameId = input.snapshot.activeFrameId;
+  if (activeTabId === null || activeFrameId === null) {
+    return null;
+  }
+
+  const selectedVideo = input.videos.find(
+    (video) => getVideoSelectionKey(video) === input.selectedVideoId,
+  );
+  const activeVideos = input.videos.filter(
+    (video) => video.tabId === activeTabId && video.frameId === activeFrameId,
+  );
+  const candidateTitles = [
+    selectedVideo?.tabId === activeTabId && selectedVideo.frameId === activeFrameId
+      ? selectedVideo.tabTitle
+      : null,
+    activeVideos.find((video) => video.tabTitle?.trim())?.tabTitle,
+    input.sniffTabs.find((tab) => tab.tabId === activeTabId)?.title,
+  ];
+
+  return candidateTitles
+    .map((title) => title?.trim() ?? "")
+    .find((title) => title.length > 0) ?? null;
 }
 
 function isScreenShareSourceLabel(sourceLabel: string | null) {
@@ -365,6 +519,12 @@ function groupSniffCards(
       cards: groupCards,
     };
   });
+}
+
+function getVideoSelectionKey(
+  video: Pick<TabVideoSource, "id" | "tabId" | "frameId">,
+) {
+  return `${video.tabId}:${video.frameId}:${video.id}`;
 }
 
 function getTabInfo(

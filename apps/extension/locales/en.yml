@@ -47,6 +47,7 @@ viewerName: Name
 connType: Method
 connPing: Ping
 notSharedYet: No video shared yet
+noViewers: No viewers yet
 cancel: Cancel
 changeSource: Change Source
 generateShare: Start Sync Room
@@ -66,3 +67,6 @@ roomStatusIdle: No room
 roomStatusOpen: Room ready
 roomStatusStreaming: Playing
 roomStatusWaiting: Waiting
+sourceShareBrowserTab: Shared browser tab
+sourceShareScreen: Shared screen
+sourceShareWindow: Shared window

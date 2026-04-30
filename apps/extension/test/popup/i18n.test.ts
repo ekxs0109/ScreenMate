@@ -40,6 +40,7 @@ const messages = {
   connType: "接続タイプ",
   connPing: "Ping",
   notSharedYet: "まだ共有されていません",
+  noViewers: "視聴者はまだいません",
   cancel: "キャンセル",
   changeSource: "ソースを変更",
   generateShare: "ルームを作成",
@@ -51,6 +52,9 @@ const messages = {
   themeLight: "ライト",
   themeDark: "ダーク",
   themeSystem: "システム",
+  sourceShareBrowserTab: "タブ共有",
+  sourceShareScreen: "画面共有",
+  sourceShareWindow: "ウィンドウ共有",
 };
 
 vi.mock("#i18n", () => ({
@@ -73,6 +77,8 @@ describe("popup i18n", () => {
     expect(copy.appName).toBe("SyncPlay JP");
     expect(copy.tabSource).toBe("メディア元");
     expect(copy.themeSystem).toBe("システム");
+    expect(copy.noViewers).toBe("視聴者はまだいません");
+    expect(copy.sourceShareBrowserTab).toBe("タブ共有");
     expect("languageLabel" in copy).toBe(false);
     expect("systemLabel" in copy).toBe(false);
   });

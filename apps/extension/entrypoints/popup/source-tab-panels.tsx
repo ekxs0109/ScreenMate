@@ -39,6 +39,7 @@ export function SourceTypeButton({
 }) {
   return (
     <button
+      data-source-active={sourceActive ? "true" : "false"}
       onClick={onClick}
       type="button"
       className={cn(

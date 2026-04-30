@@ -279,6 +279,7 @@ function createInactiveLocalPlaybackState(): LocalPlaybackState {
     currentTime: null,
     duration: null,
     paused: null,
+    playbackRate: null,
     sourceLabel: null,
   };
 }
@@ -289,6 +290,7 @@ type AttachmentSignalTarget = {
 type AttachmentRoutingState = {
   pendingAttachmentTarget: AttachmentSignalTarget | null;
   followActiveTabVideoPromise: Promise<HostRoomSnapshot> | null;
+  followActiveTabVideoTargetTabId: number | null;
   followActiveTabVideoGeneration: number;
 };
 type FollowActiveTabVideoStateStorage = {
@@ -384,6 +386,7 @@ export function createAttachmentRoutingState(): AttachmentRoutingState {
   return {
     pendingAttachmentTarget: null,
     followActiveTabVideoPromise: null,
+    followActiveTabVideoTargetTabId: null,
     followActiveTabVideoGeneration: 0,
   };
 }
@@ -652,6 +655,14 @@ export function createHostMessageHandler(
     if (message.type === "screenmate:set-follow-active-tab-video") {
       const state = { enabled: message.enabled };
       await setFollowActiveTabVideoState(dependencies, state);
+      if (state.enabled) {
+        const activeTabId = await dependencies.queryActiveTabId();
+        await followActiveTabVideoOnce(dependencies, activeTabId, {
+          restart: true,
+        });
+      } else {
+        await detachActiveFollowSource(dependencies);
+      }
       return state;
     }
 
@@ -759,7 +770,7 @@ export function createHostMessageHandler(
         );
       }
       if (await shouldFollowContentReadyTab(dependencies, tabId)) {
-        return followActiveTabVideoOnce(dependencies, tabId);
+        return followActiveTabVideoOnce(dependencies, tabId, { restart: true });
       }
       return maybeReattachSource(dependencies, tabId, message);
     }
@@ -1454,6 +1465,7 @@ function invalidateFollowActiveTabVideo(
   dependencies.attachmentRoutingState ??= createAttachmentRoutingState();
   dependencies.attachmentRoutingState.followActiveTabVideoGeneration += 1;
   dependencies.attachmentRoutingState.followActiveTabVideoPromise = null;
+  dependencies.attachmentRoutingState.followActiveTabVideoTargetTabId = null;
 }
 
 async function disableFollowActiveTabVideo(
@@ -1466,6 +1478,18 @@ async function disableFollowActiveTabVideo(
       error: toErrorMessage(error),
     });
   }
+}
+
+async function detachActiveFollowSource(
+  dependencies: HostMessageHandlerDependencies,
+) {
+  const snapshot = dependencies.runtime.getSnapshot();
+  if (snapshot.sourceState !== "attached") {
+    return snapshot;
+  }
+
+  await detachCurrentAttachmentOwner(dependencies, snapshot);
+  return dependencies.runtime.markMissing("No video attached.");
 }
 
 async function shouldFollowContentReadyTab(
@@ -1514,7 +1538,9 @@ function createFollowActiveTabVideoScheduler({
             return undefined;
           }
 
-          return followActiveTabVideoOnce(dependencies, nextTabId);
+          return followActiveTabVideoOnce(dependencies, nextTabId, {
+            restart: true,
+          });
         })
         .catch((error) => {
           backgroundLogger.warn("Could not follow active tab video.", {
@@ -1529,32 +1555,41 @@ function createFollowActiveTabVideoScheduler({
 export async function followActiveTabVideoOnce(
   dependencies: HostMessageHandlerDependencies,
   activeTabId: number | null,
+  options: { restart?: boolean } = {},
 ): Promise<HostRoomSnapshot> {
   dependencies.attachmentRoutingState ??= createAttachmentRoutingState();
-  if (dependencies.attachmentRoutingState.followActiveTabVideoPromise) {
+  const routingState = dependencies.attachmentRoutingState;
+  if (
+    routingState.followActiveTabVideoPromise &&
+    options.restart !== true &&
+    routingState.followActiveTabVideoTargetTabId === activeTabId
+  ) {
     backgroundLogger.info("Joining in-flight active tab follow.", {
       activeTabId,
     });
-    return dependencies.attachmentRoutingState.followActiveTabVideoPromise;
+    return routingState.followActiveTabVideoPromise;
+  }
+
+  if (routingState.followActiveTabVideoPromise) {
+    invalidateFollowActiveTabVideo(dependencies);
   }
 
   const followActiveTabVideoGeneration =
-    dependencies.attachmentRoutingState.followActiveTabVideoGeneration;
+    routingState.followActiveTabVideoGeneration;
   const followPromise = followActiveTabVideoOnceUnserialized(
     dependencies,
     activeTabId,
     followActiveTabVideoGeneration,
   );
-  dependencies.attachmentRoutingState.followActiveTabVideoPromise = followPromise;
+  routingState.followActiveTabVideoPromise = followPromise;
+  routingState.followActiveTabVideoTargetTabId = activeTabId;
 
   try {
     return await followPromise;
   } finally {
-    if (
-      dependencies.attachmentRoutingState.followActiveTabVideoPromise ===
-      followPromise
-    ) {
-      dependencies.attachmentRoutingState.followActiveTabVideoPromise = null;
+    if (routingState.followActiveTabVideoPromise === followPromise) {
+      routingState.followActiveTabVideoPromise = null;
+      routingState.followActiveTabVideoTargetTabId = null;
     }
   }
 }
@@ -1651,6 +1686,7 @@ async function followActiveTabVideoOnceUnserialized(
 
   const currentFingerprint = dependencies.runtime.getSourceFingerprint();
   if (
+    snapshot.sourceState === "attached" &&
     currentFingerprint &&
     bestVideo.fingerprint &&
     isSameAttachedFollowSource(currentFingerprint, bestVideo)
@@ -2062,7 +2098,7 @@ async function startSharing(
       });
     }
 
-    return followActiveTabVideoOnce(dependencies, activeTabId);
+    return followActiveTabVideoOnce(dependencies, activeTabId, { restart: true });
   }
 
   await disableFollowActiveTabVideo(dependencies);
@@ -3198,6 +3234,7 @@ function isLocalPlaybackStateResponse(
     (typeof candidate.currentTime === "number" || candidate.currentTime === null) &&
     (typeof candidate.duration === "number" || candidate.duration === null) &&
     (typeof candidate.paused === "boolean" || candidate.paused === null) &&
+    (typeof candidate.playbackRate === "number" || candidate.playbackRate === null) &&
     (typeof candidate.sourceLabel === "string" || candidate.sourceLabel === null)
   );
 }

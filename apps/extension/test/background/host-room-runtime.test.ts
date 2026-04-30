@@ -279,6 +279,88 @@ describe("createHostRoomRuntime", () => {
     });
   });
 
+  it("notifies popup listeners when source state changes", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const onSnapshotUpdated = vi.fn();
+    const runtime = createHostRoomRuntime({
+      storage,
+      now: () => 1_000,
+      onSnapshotUpdated,
+    });
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+    onSnapshotUpdated.mockClear();
+
+    await runtime.setAttachedSource("Shared browser tab", {
+      tabId: -1,
+      frameId: -1,
+      primaryUrl: "screenmate://display-media",
+      pageUrl: "chrome-extension://demo/offscreen.html",
+      elementId: "screenmate-offscreen-display",
+      label: "Shared browser tab",
+      visibleIndex: 0,
+    });
+    await runtime.markRecovering("track-ended");
+    await runtime.markMissing("No video attached.");
+
+    expect(onSnapshotUpdated).toHaveBeenCalledTimes(3);
+  });
+
+  it("notifies popup listeners when room activity changes", async () => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      remove: vi.fn(),
+    };
+    const onSnapshotUpdated = vi.fn();
+    const runtime = createHostRoomRuntime({
+      storage,
+      now: () => 1_000,
+      onSnapshotUpdated,
+    });
+
+    await runtime.startRoom({
+      roomId: "room_123",
+      hostSessionId: "host_1",
+      hostToken: "host-token",
+      signalingUrl: "/rooms/room_123/ws",
+      iceServers: [],
+      activeTabId: 42,
+      activeFrameId: 0,
+      viewerSessionIds: [],
+      viewerCount: 0,
+      viewerRoster: [],
+      chatMessages: [],
+      sourceFingerprint: null,
+      recoverByTimestamp: null,
+    });
+    onSnapshotUpdated.mockClear();
+
+    await runtime.setViewerCount(2);
+    await runtime.setViewerSessions(["viewer_1", "viewer_2"]);
+    await runtime.close("Room closed.");
+
+    expect(onSnapshotUpdated).toHaveBeenCalledTimes(3);
+  });
+
   it("queues outbound signals until the signaling socket opens", async () => {
     const storage = {
       get: vi.fn().mockResolvedValue({}),

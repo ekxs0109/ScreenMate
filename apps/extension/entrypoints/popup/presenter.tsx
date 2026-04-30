@@ -17,6 +17,7 @@ import { cn } from "../../lib/utils";
 import type { ExtensionDictionary } from "./i18n";
 import type { ExtensionSceneModel, PopupTab, SourceType } from "./scene-model";
 import { ChatPane } from "./chat-pane";
+import { PopupHeaderStatusSummary } from "./header-status-summary";
 import { RoomTabPanel } from "./room-tab-panel";
 import {
   AutoTabPanel,
@@ -101,10 +102,6 @@ export function ExtensionPopupPresenter({
     (scene.header.playback.state === "active"
       ? copy.currentPlayback
       : copy.waitingPlayback);
-  const playbackModeLabel =
-    scene.header.playback.mode === "auto" ? copy.autoMode : copy.manualMode;
-  const roomLabel = formatRoomLabel(scene, copy);
-  const sourceTypeLabel = formatSourceTypeLabel(scene.header.source.type, copy);
   const [collapsedSniffGroupIds, setCollapsedSniffGroupIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -173,35 +170,7 @@ export function ExtensionPopupPresenter({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 px-1 min-w-0">
-          <span
-            className={cn(
-              "size-2 rounded-full shrink-0",
-              scene.header.playback.state === "active"
-                ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.45)]"
-                : "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.35)]",
-            )}
-          />
-          <span className="shrink-0 font-medium text-[12px] text-foreground">
-            {roomLabel}
-          </span>
-          <span className="shrink-0 text-[12px] text-muted-foreground/30">·</span>
-          <span
-            className={cn(
-              "shrink-0 font-medium text-[12px]",
-              scene.header.playback.mode === "auto" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-            )}
-          >
-            {playbackModeLabel}
-          </span>
-          <span className="shrink-0 text-[12px] text-muted-foreground/30">·</span>
-          <span className="truncate text-[12px] text-muted-foreground" title={`${sourceTypeLabel ? `${sourceTypeLabel} · ` : ""}${playbackLabel}`}>
-            {sourceTypeLabel ? `${sourceTypeLabel} · ${playbackLabel}` : playbackLabel}
-          </span>
-          <span data-testid="popup-room-status" className="sr-only">
-            {scene.header.statusText}
-          </span>
-        </div>
+        <PopupHeaderStatusSummary copy={copy} scene={scene} />
       </header>
 
       {!scene.tabs.hasOpenRoomSession ? (
@@ -363,39 +332,6 @@ function PopupCreateRoomGate({
       </button>
     </section>
   );
-}
-
-function formatRoomLabel(scene: ExtensionSceneModel, copy: ExtensionDictionary) {
-  if (scene.header.room.state === "closed" || scene.header.room.state === "idle") {
-    return copy.roomStatusIdle;
-  }
-
-  return scene.header.playback.state === "active"
-    ? copy.roomStatusStreaming
-    : copy.roomStatusOpen;
-}
-
-function formatSourceTypeLabel(
-  sourceType: SourceType | null,
-  copy: ExtensionDictionary,
-) {
-  if (sourceType === "auto") {
-    return copy.sourceAuto;
-  }
-
-  if (sourceType === "sniff") {
-    return copy.sourceSniff;
-  }
-
-  if (sourceType === "screen") {
-    return copy.sourceScreen;
-  }
-
-  if (sourceType === "upload") {
-    return copy.sourceUpload;
-  }
-
-  return "";
 }
 
 export function PopupScrollArea({

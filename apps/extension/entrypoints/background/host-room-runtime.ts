@@ -183,6 +183,7 @@ export function createHostRoomRuntime(options: {
     };
     store.setViewerCount(uniqueViewerSessionIds.length);
     await persist();
+    notifySnapshotUpdated();
     return store.getSnapshot();
   }
 
@@ -226,6 +227,7 @@ export function createHostRoomRuntime(options: {
     session = null;
     const next = store.close(message);
     await persist();
+    notifySnapshotUpdated();
     return next;
   }
 
@@ -420,6 +422,7 @@ export function createHostRoomRuntime(options: {
         session = { ...session, viewerCount };
         store.setViewerCount(viewerCount);
         await persist();
+        notifySnapshotUpdated();
       }
       return store.getSnapshot();
     },
@@ -445,6 +448,7 @@ export function createHostRoomRuntime(options: {
       await persist();
       const next = store.getSnapshot();
       publishRoomState(next);
+      notifySnapshotUpdated();
       return next;
     },
     async markRecovering(message: string) {
@@ -456,6 +460,7 @@ export function createHostRoomRuntime(options: {
       session = { ...session, recoverByTimestamp: next.recoverByTimestamp };
       await persist();
       publishRoomState(next);
+      notifySnapshotUpdated();
       return next;
     },
     async markMissing(message: string) {
@@ -467,6 +472,7 @@ export function createHostRoomRuntime(options: {
       const next = store.markMissing(message);
       await persist();
       publishRoomState(next);
+      notifySnapshotUpdated();
       return next;
     },
     async close(message: string) {

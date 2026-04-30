@@ -50,6 +50,7 @@ export type ExtensionDictionary = {
   connType: string;
   connPing: string;
   notSharedYet: string;
+  noViewers: string;
   cancel: string;
   changeSource: string;
   generateShare: string;
@@ -69,6 +70,9 @@ export type ExtensionDictionary = {
   roomStatusOpen: string;
   roomStatusStreaming: string;
   roomStatusWaiting: string;
+  sourceShareBrowserTab: string;
+  sourceShareScreen: string;
+  sourceShareWindow: string;
 };
 
 export function getExtensionDictionary(): ExtensionDictionary {
@@ -122,6 +126,7 @@ export function getExtensionDictionary(): ExtensionDictionary {
     connType: i18n.t("connType"),
     connPing: i18n.t("connPing"),
     notSharedYet: i18n.t("notSharedYet"),
+    noViewers: i18n.t("noViewers"),
     cancel: i18n.t("cancel"),
     changeSource: i18n.t("changeSource"),
     generateShare: i18n.t("generateShare"),
@@ -141,5 +146,8 @@ export function getExtensionDictionary(): ExtensionDictionary {
     roomStatusOpen: i18n.t("roomStatusOpen"),
     roomStatusStreaming: i18n.t("roomStatusStreaming"),
     roomStatusWaiting: i18n.t("roomStatusWaiting"),
+    sourceShareBrowserTab: i18n.t("sourceShareBrowserTab"),
+    sourceShareScreen: i18n.t("sourceShareScreen"),
+    sourceShareWindow: i18n.t("sourceShareWindow"),
   };
 }

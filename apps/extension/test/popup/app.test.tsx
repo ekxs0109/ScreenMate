@@ -64,6 +64,9 @@ const messages = {
   roomStatusOpen: "Sala creada",
   roomStatusStreaming: "Reproduciendo",
   roomStatusWaiting: "Esperando recurso",
+  sourceShareBrowserTab: "Pestaña compartida",
+  sourceShareScreen: "Pantalla compartida",
+  sourceShareWindow: "Ventana compartida",
 };
 
 vi.mock("#i18n", () => ({
@@ -144,6 +147,66 @@ describe("ExtensionPopupPresenter", () => {
         selector: ":not([data-testid='popup-room-status'])",
       }),
     ).toBeNull();
+  });
+
+  it("renders the compact header as room state, selected source tab, and source detail", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        activeTabId: -1,
+        activeFrameId: -1,
+        sourceLabel: "Shared browser tab",
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: {
+        ...createExtensionMockState(),
+        activeSourceType: "screen",
+      },
+    });
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={vi.fn()}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onStartOrAttach={vi.fn()}
+        onStopRoom={vi.fn()}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={vi.fn()}
+      />,
+    );
+
+    const summary = screen.getByTestId("popup-header-summary");
+    expect(summary.textContent).toBe(
+      "Reproduciendo·Compartir Pantalla·Pestaña compartida",
+    );
+    expect(summary.textContent).not.toContain("Selección manual");
+    expect(summary.textContent).not.toContain("Shared browser tab");
   });
 
   it("switches a sniff source from the item action in an active room", () => {
@@ -447,12 +510,8 @@ describe("ExtensionPopupPresenter", () => {
       name: "Subir Archivo",
     });
 
-    expect(
-      screenButton.querySelector("[aria-hidden='true'].bg-emerald-500"),
-    ).toBeTruthy();
-    expect(
-      uploadButton.querySelector("[aria-hidden='true'].bg-emerald-500"),
-    ).toBeFalsy();
+    expect(screenButton.dataset.sourceActive).toBe("true");
+    expect(uploadButton.dataset.sourceActive).toBe("false");
   });
 
   it("shows the Auto tab status card without a footer when follow is on", () => {

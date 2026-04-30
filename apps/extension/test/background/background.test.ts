@@ -3120,6 +3120,154 @@ describe("createHostMessageHandler", () => {
     expect(sendTabMessage).not.toHaveBeenCalled();
   });
 
+  it("starts following the current active tab when automatic follow is turned on", async () => {
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: [],
+        iceServers: [],
+      }),
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "missing",
+        roomId: "room_123",
+        activeTabId: null,
+        activeFrameId: null,
+      })),
+      getSourceFingerprint: vi.fn().mockReturnValue(null),
+      setAttachedSource: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "ready-video",
+        activeTabId: 42,
+        activeFrameId: 0,
+      })),
+    };
+    const queryActiveTabId = vi.fn().mockResolvedValue(42);
+    const sendTabMessage = vi.fn().mockImplementation(
+      async (
+        _tabId: number,
+        message: TestTabMessage,
+      ) => {
+        if (message.type === "screenmate:list-videos") {
+          return [
+            {
+              id: "screenmate-video-ready",
+              label: "ready-video",
+              isPlaying: true,
+              isVisible: true,
+              visibleArea: 640_000,
+              fingerprint: {
+                primaryUrl: "https://example.com/ready.mp4",
+                pageUrl: "https://example.com/watch",
+                elementId: "ready",
+                label: "ready-video",
+                visibleIndex: 0,
+              },
+            },
+          ];
+        }
+
+        if (message.type === "screenmate:attach-source") {
+          return {
+            sourceLabel: "ready-video",
+            fingerprint: {
+              primaryUrl: "https://example.com/ready.mp4",
+              pageUrl: "https://example.com/watch",
+              elementId: "ready",
+              label: "ready-video",
+              visibleIndex: 0,
+            },
+          };
+        }
+
+        return { ok: true };
+      },
+    );
+    const followActiveTabVideoStateStorage = {
+      getValue: vi.fn().mockResolvedValue({ enabled: false }),
+      setValue: vi.fn().mockResolvedValue(undefined),
+    };
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      followActiveTabVideoStateStorage,
+      queryActiveTabId,
+      runtime: runtime as never,
+      sendTabMessage,
+    }));
+
+    await expect(handler({
+      type: "screenmate:set-follow-active-tab-video",
+      enabled: true,
+    })).resolves.toEqual({ enabled: true });
+
+    expect(followActiveTabVideoStateStorage.setValue).toHaveBeenCalledWith({
+      enabled: true,
+    });
+    expect(queryActiveTabId).toHaveBeenCalled();
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        type: "screenmate:attach-source",
+        videoId: "screenmate-video-ready",
+      }),
+      { frameId: 0 },
+    );
+    expect(runtime.setAttachedSource).toHaveBeenCalledWith(
+      "ready-video",
+      expect.objectContaining({
+        frameId: 0,
+        tabId: 42,
+      }),
+    );
+  });
+
+  it("detaches the current source when automatic follow is turned off", async () => {
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        activeTabId: 42,
+        activeFrameId: 0,
+        sourceLabel: "playing",
+      })),
+      markMissing: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "missing",
+        roomId: "room_123",
+        activeTabId: 42,
+        activeFrameId: 0,
+        message: "No video attached.",
+      })),
+    };
+    const sendTabMessage = vi.fn().mockResolvedValue({ ok: true });
+    const followActiveTabVideoStateStorage = {
+      getValue: vi.fn().mockResolvedValue({ enabled: true }),
+      setValue: vi.fn().mockResolvedValue(undefined),
+    };
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      followActiveTabVideoStateStorage,
+      runtime: runtime as never,
+      sendTabMessage,
+    }));
+
+    await expect(handler({
+      type: "screenmate:set-follow-active-tab-video",
+      enabled: false,
+    })).resolves.toEqual({ enabled: false });
+
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      42,
+      { type: "screenmate:detach-source" },
+      { frameId: 0 },
+    );
+    expect(runtime.markMissing).toHaveBeenCalledWith("No video attached.");
+  });
+
   it("creates a room session without attaching a source", async () => {
     const createRoom = vi.fn().mockResolvedValue({
       roomId: "room_123",
@@ -3360,6 +3508,148 @@ describe("createHostMessageHandler", () => {
         videoId: "screenmate-video-1",
       }),
       { frameId: 0 },
+    );
+  });
+
+  it("retries automatic follow from content-ready when an earlier active-tab scan is still in flight", async () => {
+    let releaseFirstListVideos!: () => void;
+    let markFirstListVideosStarted!: () => void;
+    const firstListVideosStarted = new Promise<void>((resolve) => {
+      markFirstListVideosStarted = resolve;
+    });
+    const firstListVideosGate = new Promise<void>((resolve) => {
+      releaseFirstListVideos = resolve;
+    });
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: [],
+        iceServers: [],
+      }),
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "missing",
+        roomId: "room_123",
+        activeTabId: 42,
+        activeFrameId: 0,
+      })),
+      getSourceFingerprint: vi.fn().mockReturnValue(null),
+      markMissing: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "missing",
+        roomId: "room_123",
+        activeTabId: 42,
+        activeFrameId: 0,
+      })),
+      setAttachedSource: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "ready-video",
+        activeTabId: 42,
+        activeFrameId: 0,
+      })),
+    };
+    let listVideosCallCount = 0;
+    const sendTabMessage = vi.fn().mockImplementation(
+      async (
+        _tabId: number,
+        message: TestTabMessage,
+      ) => {
+        if (message.type === "screenmate:list-videos") {
+          listVideosCallCount += 1;
+          if (listVideosCallCount === 1) {
+            markFirstListVideosStarted();
+            await firstListVideosGate;
+            return [];
+          }
+
+          return [
+            {
+              id: "screenmate-video-ready",
+              label: "ready-video",
+              isPlaying: true,
+              isVisible: true,
+              visibleArea: 640_000,
+              fingerprint: {
+                primaryUrl: "https://example.com/ready.mp4",
+                pageUrl: "https://example.com/watch",
+                elementId: "ready",
+                label: "ready-video",
+                visibleIndex: 0,
+              },
+            },
+          ];
+        }
+
+        if (message.type === "screenmate:attach-source") {
+          return {
+            sourceLabel: "ready-video",
+            fingerprint: {
+              primaryUrl: "https://example.com/ready.mp4",
+              pageUrl: "https://example.com/watch",
+              elementId: "ready",
+              label: "ready-video",
+              visibleIndex: 0,
+            },
+          };
+        }
+
+        return { ok: true };
+      },
+    );
+    const dependencies = createHandlerDependencies({
+      followActiveTabVideoStateStorage: {
+        getValue: vi.fn().mockResolvedValue({ enabled: true }),
+        setValue: vi.fn().mockResolvedValue(undefined),
+      },
+      queryActiveTabId: vi.fn().mockResolvedValue(42),
+      runtime: runtime as never,
+      sendTabMessage,
+    });
+    const handler = createHostMessageHandler(dependencies);
+
+    const staleFollow = followActiveTabVideoOnce(dependencies, 42);
+    await firstListVideosStarted;
+    const readyFollow = handler({
+      type: "screenmate:content-ready",
+      frameId: 0,
+      tabId: 42,
+      videos: [
+        {
+          id: "screenmate-video-ready",
+          label: "ready-video",
+          frameId: 0,
+          fingerprint: {
+            primaryUrl: "https://example.com/ready.mp4",
+            pageUrl: "https://example.com/watch",
+            elementId: "ready",
+            label: "ready-video",
+            visibleIndex: 0,
+          },
+        },
+      ],
+    });
+
+    releaseFirstListVideos();
+    await Promise.all([readyFollow, staleFollow]);
+
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        type: "screenmate:attach-source",
+        videoId: "screenmate-video-ready",
+      }),
+      { frameId: 0 },
+    );
+    expect(runtime.setAttachedSource).toHaveBeenCalledWith(
+      "ready-video",
+      expect.objectContaining({
+        frameId: 0,
+        tabId: 42,
+      }),
     );
   });
 
@@ -4762,6 +5052,91 @@ describe("followActiveTabVideoOnce", () => {
     expect(runtime.setAttachedSource).not.toHaveBeenCalled();
   });
 
+  it("reattaches a matching active-tab video when the current source is missing", async () => {
+    const fingerprint = {
+      tabId: 42,
+      frameId: 0,
+      primaryUrl: "https://example.com/current.mp4",
+      pageUrl: "https://example.com/watch",
+      elementId: "current",
+      label: "current",
+      visibleIndex: 0,
+    };
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "missing",
+        roomId: "room_123",
+        activeTabId: 42,
+        activeFrameId: 0,
+      })),
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: [],
+        iceServers: [],
+      }),
+      getSourceFingerprint: vi.fn().mockReturnValue(fingerprint),
+      setAttachedSource: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "current",
+        activeTabId: 42,
+        activeFrameId: 0,
+      })),
+    };
+    const sendTabMessage = vi.fn().mockImplementation(
+      async (
+        _tabId: number,
+        message: TestTabMessage,
+      ) => {
+        if (message.type === "screenmate:list-videos") {
+          return [
+            {
+              id: "current",
+              label: "current",
+              isPlaying: true,
+              isVisible: true,
+              visibleArea: 640_000,
+              fingerprint,
+            },
+          ];
+        }
+
+        if (message.type === "screenmate:attach-source") {
+          return {
+            sourceLabel: "current",
+            fingerprint,
+          };
+        }
+
+        return { ok: true };
+      },
+    );
+    const dependencies = createHandlerDependencies({
+      runtime: runtime as never,
+      sendTabMessage,
+    });
+
+    await followActiveTabVideoOnce(dependencies, 42);
+
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        type: "screenmate:attach-source",
+        videoId: "current",
+      }),
+      { frameId: 0 },
+    );
+    expect(runtime.setAttachedSource).toHaveBeenCalledWith("current", {
+      ...fingerprint,
+      frameId: 0,
+      tabId: 42,
+    });
+  });
+
   it("joins an in-flight automatic follow instead of attaching twice", async () => {
     let releaseListVideos!: () => void;
     const listVideosGate = new Promise<void>((resolve) => {
@@ -4845,5 +5220,133 @@ describe("followActiveTabVideoOnce", () => {
         ([, message]) => message.type === "screenmate:attach-source",
       ),
     ).toHaveLength(1);
+  });
+
+  it("starts a new automatic follow when the requested active tab changes", async () => {
+    let releaseFirstListVideos!: () => void;
+    let markFirstListVideosStarted!: () => void;
+    const firstListVideosStarted = new Promise<void>((resolve) => {
+      markFirstListVideosStarted = resolve;
+    });
+    const firstListVideosGate = new Promise<void>((resolve) => {
+      releaseFirstListVideos = resolve;
+    });
+    const runtime = {
+      ...createHandlerDependencies().runtime,
+      getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        activeTabId: 42,
+        activeFrameId: 0,
+      })),
+      getAttachSession: vi.fn().mockReturnValue({
+        roomId: "room_123",
+        sessionId: "host_1",
+        viewerSessionIds: [],
+        iceServers: [],
+      }),
+      getSourceFingerprint: vi.fn().mockReturnValue(null),
+      markMissing: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "missing",
+        roomId: "room_123",
+      })),
+      setAttachedSource: vi.fn().mockResolvedValue(createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_123",
+        sourceLabel: "next",
+        activeTabId: 84,
+        activeFrameId: 0,
+      })),
+    };
+    const sendTabMessage = vi.fn().mockImplementation(
+      async (
+        tabId: number,
+        message: TestTabMessage,
+      ) => {
+        if (message.type === "screenmate:list-videos" && tabId === 42) {
+          markFirstListVideosStarted();
+          await firstListVideosGate;
+          return [
+            {
+              id: "old-video",
+              label: "old",
+              isPlaying: true,
+              isVisible: true,
+              visibleArea: 640_000,
+            },
+          ];
+        }
+
+        if (message.type === "screenmate:list-videos" && tabId === 84) {
+          return [
+            {
+              id: "next-video",
+              label: "next",
+              isPlaying: true,
+              isVisible: true,
+              visibleArea: 640_000,
+              fingerprint: {
+                primaryUrl: "https://example.com/next.mp4",
+                pageUrl: "https://example.com/watch",
+                elementId: "next",
+                label: "next",
+                visibleIndex: 0,
+              },
+            },
+          ];
+        }
+
+        if (message.type === "screenmate:attach-source") {
+          return {
+            sourceLabel: "next",
+            fingerprint: {
+              primaryUrl: "https://example.com/next.mp4",
+              pageUrl: "https://example.com/watch",
+              elementId: "next",
+              label: "next",
+              visibleIndex: 0,
+            },
+          };
+        }
+
+        return { ok: true };
+      },
+    );
+    const dependencies = createHandlerDependencies({
+      runtime: runtime as never,
+      sendTabMessage,
+    });
+
+    const staleFollow = followActiveTabVideoOnce(dependencies, 42);
+    await firstListVideosStarted;
+    const nextFollow = followActiveTabVideoOnce(dependencies, 84);
+    releaseFirstListVideos();
+    await Promise.all([staleFollow, nextFollow]);
+
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      84,
+      expect.objectContaining({
+        type: "screenmate:attach-source",
+        videoId: "next-video",
+      }),
+      { frameId: 0 },
+    );
+    expect(sendTabMessage).not.toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        type: "screenmate:attach-source",
+        videoId: "old-video",
+      }),
+      expect.anything(),
+    );
+    expect(runtime.setAttachedSource).toHaveBeenCalledWith(
+      "next",
+      expect.objectContaining({
+        tabId: 84,
+      }),
+    );
   });
 });
