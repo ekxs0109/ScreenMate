@@ -73,6 +73,11 @@ export type ExtensionDictionary = {
   sourceShareBrowserTab: string;
   sourceShareScreen: string;
   sourceShareWindow: string;
+  closeBrowserTabShare: string;
+  closeScreenShare: string;
+  closeWindowShare: string;
+  closeDisplayShare: string;
+  closeLocalPlayback: string;
 };
 
 export function getExtensionDictionary(): ExtensionDictionary {
@@ -149,5 +154,10 @@ export function getExtensionDictionary(): ExtensionDictionary {
     sourceShareBrowserTab: i18n.t("sourceShareBrowserTab"),
     sourceShareScreen: i18n.t("sourceShareScreen"),
     sourceShareWindow: i18n.t("sourceShareWindow"),
+    closeBrowserTabShare: i18n.t("closeBrowserTabShare"),
+    closeScreenShare: i18n.t("closeScreenShare"),
+    closeWindowShare: i18n.t("closeWindowShare"),
+    closeDisplayShare: i18n.t("closeDisplayShare"),
+    closeLocalPlayback: i18n.t("closeLocalPlayback"),
   };
 }

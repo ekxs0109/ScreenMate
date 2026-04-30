@@ -3841,6 +3841,48 @@ describe("createHostMessageHandler", () => {
     });
   });
 
+  it("best-effort detaches the current source without closing the room", async () => {
+    const sendOffscreenMessage = vi.fn().mockResolvedValue({ ok: true });
+    const markMissing = vi.fn().mockResolvedValue(createHostRoomSnapshot({
+      roomLifecycle: "open",
+      sourceState: "missing",
+      roomId: "room_123",
+      activeTabId: -1,
+      activeFrameId: -1,
+      message: "No video attached.",
+    }));
+    const close = vi.fn();
+    const handler = createHostMessageHandler(createHandlerDependencies({
+      runtime: {
+        ...createHandlerDependencies().runtime,
+        close,
+        getSnapshot: vi.fn().mockReturnValue(createHostRoomSnapshot({
+          roomLifecycle: "open",
+          sourceState: "attached",
+          roomId: "room_123",
+          sourceLabel: "Shared browser tab",
+          activeTabId: -1,
+          activeFrameId: -1,
+        })),
+        markMissing,
+      } as never,
+      sendOffscreenMessage,
+    }));
+
+    const result = await handler({ type: "screenmate:stop-source" });
+
+    expect(sendOffscreenMessage).toHaveBeenCalledWith({
+      type: "screenmate:offscreen-detach-source",
+    });
+    expect(markMissing).toHaveBeenCalledWith("No video attached.");
+    expect(close).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      roomLifecycle: "open",
+      sourceState: "missing",
+      roomId: "room_123",
+    });
+  });
+
   it("best-effort detaches the previous owner before attaching in a different frame", async () => {
     const sendTabMessage = vi.fn().mockImplementation(
       async (

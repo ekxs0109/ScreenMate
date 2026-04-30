@@ -52,6 +52,8 @@ export function ExtensionPopupPresenter({
   onCaptureScreen,
   onOpenPlayer,
   onToggleScreenReady,
+  onStopScreenShare,
+  onStopLocalPlayback = () => { },
   onStartOrAttach,
   onStopRoom,
   onSavePassword,
@@ -83,6 +85,8 @@ export function ExtensionPopupPresenter({
   onCaptureScreen: (type: "screen" | "window" | "tab") => void;
   onOpenPlayer: () => void;
   onToggleScreenReady: () => void;
+  onStopScreenShare?: () => void;
+  onStopLocalPlayback?: () => void;
   onStartOrAttach: (
     sourceType?: SourceType,
     options?: { selectedVideoId?: string },
@@ -241,11 +245,17 @@ export function ExtensionPopupPresenter({
                         copy={copy}
                         onCaptureScreen={onCaptureScreen}
                         onToggleScreenReady={onToggleScreenReady}
+                        onStopScreenShare={onStopScreenShare ?? onToggleScreenReady}
                       />
                     )}
 
                     {effectiveSourceType === "upload" && (
-                      <UploadPanel copy={copy} onOpenPlayer={onOpenPlayer} />
+                      <UploadPanel
+                        scene={scene}
+                        copy={copy}
+                        onOpenPlayer={onOpenPlayer}
+                        onStopLocalPlayback={onStopLocalPlayback}
+                      />
                     )}
                   </PopupScrollArea>
                 )}

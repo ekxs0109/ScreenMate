@@ -129,6 +129,13 @@ export function buildStopSharingRequest(): Extract<
   return { type: "screenmate:stop-room" };
 }
 
+export function buildStopSourceRequest(): Extract<
+  HostMessage,
+  { type: "screenmate:stop-source" }
+> {
+  return { type: "screenmate:stop-source" };
+}
+
 export function buildPreparedSourceStateRequest(): Extract<
   HostMessage,
   { type: "screenmate:get-prepared-source-state" }
@@ -790,6 +797,32 @@ export function useHostControls({
     }
   };
 
+  const stopSource = async () => {
+    setBusyAction("stop");
+
+    try {
+      const nextSnapshot = normalizeSnapshot(
+        await browser.runtime.sendMessage(buildStopSourceRequest()),
+      );
+      popupLogger.info("Stop source returned a snapshot.", {
+        message: nextSnapshot.message,
+        roomId: nextSnapshot.roomId,
+        roomLifecycle: nextSnapshot.roomLifecycle,
+        sourceState: nextSnapshot.sourceState,
+      });
+      setSnapshot(nextSnapshot);
+    } catch {
+      setSnapshot((current) =>
+        createHostRoomSnapshot({
+          ...current,
+          message: "Could not stop the current source.",
+        }),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const setFollowActiveTabVideo = async (enabled: boolean) => {
     setFollowActiveTabVideoState(enabled);
     try {
@@ -882,6 +915,7 @@ export function useHostControls({
     prepareScreenSource,
     prepareLocalFileSource,
     clearPreparedSourceState,
+    stopSource,
     stopRoom,
     sendChatMessage,
     saveRoomPassword,

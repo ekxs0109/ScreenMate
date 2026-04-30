@@ -12,6 +12,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  Square,
   Target,
   UploadCloud,
   Zap,
@@ -121,6 +122,18 @@ export function SourceTypeSwitcher({
 }
 export function formatPlaybackLabel(label: string, copy: ExtensionDictionary) {
   const trimmed = label.trim();
+  if (trimmed === "Shared browser tab") {
+    return copy.sourceShareBrowserTab;
+  }
+
+  if (trimmed === "Shared window") {
+    return copy.sourceShareWindow;
+  }
+
+  if (trimmed === "Shared screen") {
+    return copy.sourceShareScreen;
+  }
+
   return trimmed.startsWith("blob:") ? copy.webVideoStream : trimmed;
 }
 
@@ -468,13 +481,18 @@ export function ScreenPanel({
   copy,
   onCaptureScreen,
   onToggleScreenReady,
+  onStopScreenShare,
 }: {
   scene: ExtensionSceneModel;
   copy: ExtensionDictionary;
   onCaptureScreen: (type: "screen" | "window" | "tab") => void;
   onToggleScreenReady: () => void;
+  onStopScreenShare: () => void;
 }) {
-  const playbackLabel = formatPlaybackLabel(scene.header.playback.label, copy);
+  const canStopAttachedScreenShare =
+    scene.header.playback.state === "active" &&
+    scene.sourceTab.activeSourceIndicator === "screen";
+  const closeLabel = getCloseScreenShareLabel(scene, copy);
 
   return (
     <div className="flex flex-col gap-5 flex-1 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -503,7 +521,7 @@ export function ScreenPanel({
         </>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center p-6 animate-in fade-in zoom-in-95 duration-400">
-          {/* Transmission Sonar Visual */}
+          {/* Active share visual */}
           <div className="relative mb-12 flex size-32 items-center justify-center">
             <div className="absolute inset-0 rounded-full border border-blue-500/20 animate-[ping_4s_linear_infinite]" />
             <div className="absolute inset-4 rounded-full border border-blue-500/40 animate-[ping_4s_linear_infinite_1s]" />
@@ -523,36 +541,23 @@ export function ScreenPanel({
 
           <div className="text-center space-y-6 w-full max-w-[280px]">
             <div className="space-y-1.5">
-              <h3 className="text-2xl font-black text-foreground tracking-tight flex items-center justify-center gap-2">
+              <h3 className="text-lg font-black text-foreground tracking-tight flex items-center justify-center gap-2">
                 {copy.screenReady}
               </h3>
-              <p className="text-[13px] text-muted-foreground font-medium leading-relaxed opacity-70">
+              <p className="text-xs text-muted-foreground font-medium leading-relaxed opacity-70">
                 {copy.screenReadyDescription}
               </p>
             </div>
 
-            {/* Transmission Info */}
-            <div className="flex flex-col gap-2 rounded-2xl bg-zinc-100/50 dark:bg-zinc-900/50 border border-border/40 p-4">
-              <div className="flex items-center justify-between text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest px-1">
-                <span>Transmission</span>
-                <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                  <Activity className="size-2.5 animate-pulse" />
-                  LIVE
-                </div>
-              </div>
-              <div className="bg-white dark:bg-zinc-950 rounded-xl p-3 border border-border/40 shadow-sm">
-                <p className="text-[13px] font-bold text-foreground truncate text-left" title={playbackLabel}>
-                  {playbackLabel || "Unknown Source"}
-                </p>
-              </div>
-            </div>
-
             <button
-              onClick={onToggleScreenReady}
+              data-testid="popup-close-screen-share"
+              onClick={
+                canStopAttachedScreenShare ? onStopScreenShare : onToggleScreenReady
+              }
               type="button"
               className="h-11 px-8 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-black rounded-2xl font-bold text-sm shadow-xl active:scale-95 transition-all"
             >
-              {copy.reselect}
+              {closeLabel}
             </button>
           </div>
         </div>
@@ -561,54 +566,195 @@ export function ScreenPanel({
   );
 }
 
+function getCloseScreenShareLabel(
+  scene: ExtensionSceneModel,
+  copy: ExtensionDictionary,
+) {
+  const detailKind = scene.header.source.detail?.kind;
+  if (detailKind === "display-tab") {
+    return copy.closeBrowserTabShare;
+  }
+
+  if (detailKind === "display-window") {
+    return copy.closeWindowShare;
+  }
+
+  if (detailKind === "display-screen") {
+    return copy.closeScreenShare;
+  }
+
+  const label = scene.header.playback.label.trim();
+  if (label === "Shared browser tab") {
+    return copy.closeBrowserTabShare;
+  }
+
+  if (label === "Shared window") {
+    return copy.closeWindowShare;
+  }
+
+  if (label === "Shared screen") {
+    return copy.closeScreenShare;
+  }
+
+  return copy.closeDisplayShare;
+}
+
 export function UploadPanel({
+  scene,
   copy,
   onOpenPlayer,
+  onStopLocalPlayback,
 }: {
+  scene: ExtensionSceneModel;
   copy: ExtensionDictionary;
   onOpenPlayer: () => void;
+  onStopLocalPlayback: () => void;
 }) {
+  const isLocalPlaybackActive =
+    scene.header.playback.state === "active" &&
+    scene.sourceTab.activeSourceIndicator === "upload";
+  const localPlaybackLabel = getLocalPlaybackLabel(scene, copy);
+  const title = isLocalPlaybackActive ? copy.currentPlayback : copy.openPlayer;
+  const description = isLocalPlaybackActive && localPlaybackLabel
+    ? localPlaybackLabel
+    : copy.playerDesc;
+
   return (
     <div className="flex flex-col flex-1 animate-in fade-in zoom-in-95 duration-500">
       <div
-        className="flex-1 group relative overflow-hidden rounded-[2rem] border border-border/50 bg-gradient-to-b from-zinc-50/50 to-white dark:from-zinc-900/50 dark:to-zinc-950 flex flex-col items-center text-center shadow-xl shadow-black/5  justify-center cursor-pointer"
+        data-testid="popup-upload-panel"
+        className={cn(
+          "flex-1 group relative overflow-hidden rounded-[2rem] border bg-gradient-to-b flex flex-col items-center text-center shadow-xl shadow-black/5 justify-center cursor-pointer transition-all duration-500",
+          isLocalPlaybackActive
+            ? "border-emerald-500/25 from-emerald-50/40 to-white dark:from-emerald-900/10 dark:to-zinc-950"
+            : "border-border/50 from-zinc-50/50 to-white dark:from-zinc-900/50 dark:to-zinc-950",
+        )}
         onClick={onOpenPlayer}
       >
-        <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-border/50 to-transparent" />
+        <div
+          className={cn(
+            "absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent to-transparent",
+            isLocalPlaybackActive ? "via-emerald-500/40" : "via-border/50",
+          )}
+        />
 
         <div className="relative mb-8 group-hover:scale-110 transition-transform duration-500">
-          <div className="absolute -inset-8 rounded-full bg-blue-500/10 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-          <div className="relative size-20 rounded-full bg-white dark:bg-zinc-900 border border-border shadow-2xl flex items-center justify-center text-blue-500 transition-all duration-500 group-hover:rotate-6">
-            <FileVideo className="size-9 fill-blue-500/10" />
-            <div className="absolute -right-1 -top-1 size-7 rounded-full bg-blue-50 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800/50 flex items-center justify-center shadow-lg">
-              <Play className="size-3.5 text-blue-600 dark:text-blue-400 fill-current" />
+          <div
+            className={cn(
+              "absolute -inset-8 rounded-full blur-3xl transition-opacity duration-700",
+              isLocalPlaybackActive
+                ? "bg-emerald-500/15 opacity-100 animate-pulse"
+                : "bg-blue-500/10 opacity-0 group-hover:opacity-100",
+            )}
+          />
+          <div
+            className={cn(
+              "relative size-20 rounded-full border shadow-2xl flex items-center justify-center transition-all duration-500 group-hover:rotate-6",
+              isLocalPlaybackActive
+                ? "bg-emerald-500 text-white border-emerald-400/50"
+                : "bg-white dark:bg-zinc-900 border-border text-blue-500",
+            )}
+          >
+            <FileVideo
+              className={cn(
+                "size-9",
+                isLocalPlaybackActive ? "fill-white/10" : "fill-blue-500/10",
+              )}
+            />
+            <div
+              className={cn(
+                "absolute -right-1 -top-1 size-7 rounded-full border flex items-center justify-center shadow-lg",
+                isLocalPlaybackActive
+                  ? "bg-white dark:bg-zinc-950 border-emerald-100 dark:border-emerald-800/60"
+                  : "bg-blue-50 dark:bg-blue-900/30 border-blue-100 dark:border-blue-800/50",
+              )}
+            >
+              {isLocalPlaybackActive ? (
+                <Activity className="size-3.5 text-emerald-600 dark:text-emerald-400 animate-pulse" />
+              ) : (
+                <Play className="size-3.5 text-blue-600 dark:text-blue-400 fill-current" />
+              )}
             </div>
           </div>
         </div>
 
-        <div className="mb-10 space-y-2 relative h-[70px] w-full flex flex-col justify-center">
+        <div className="mb-10 space-y-2 relative h-[86px] w-full flex flex-col justify-center">
+          {isLocalPlaybackActive ? (
+            <div className="mx-auto mb-1 flex w-fit items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-tight text-emerald-600 dark:text-emerald-400">
+              <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              {copy.activeSource}
+            </div>
+          ) : null}
           <h3 className="text-lg font-black text-foreground tracking-tight">
-            {copy.openPlayer}
+            {title}
           </h3>
-          <p className="text-xs text-muted-foreground max-w-[220px] mx-auto leading-relaxed font-medium opacity-80 line-clamp-2 min-h-[32px] flex items-center justify-center">
-            {copy.playerDesc}
+          <p
+            className="text-xs text-muted-foreground max-w-[260px] mx-auto leading-relaxed font-medium opacity-80 line-clamp-2 min-h-[32px] flex items-center justify-center break-words px-2"
+            title={description}
+          >
+            {description}
           </p>
         </div>
 
-        <button
-          type="button"
-          className="group/btn relative h-12 w-full max-w-[200px] bg-zinc-900 dark:bg-zinc-100 text-white dark:text-black rounded-2xl font-bold text-sm shadow-2xl transition-all hover:scale-[1.02] active:scale-[0.98] overflow-hidden"
-        >
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/20 to-blue-500/0 -translate-x-full group-hover/btn:translate-x-full transition-transform duration-1000" />
-          <span className="relative flex items-center justify-center gap-2">
-            {copy.openPlayer}
-            <ChevronRight className="size-4 transition-transform group-hover/btn:translate-x-0.5" />
-          </span>
-        </button>
+        <div className="flex w-full max-w-[200px] flex-col items-center gap-2">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenPlayer();
+            }}
+            className={cn(
+              "group/btn relative h-12 w-full rounded-2xl font-bold text-sm shadow-2xl transition-all hover:scale-[1.02] active:scale-[0.98] overflow-hidden",
+              isLocalPlaybackActive
+                ? "bg-white dark:bg-zinc-800 text-foreground border border-border"
+                : "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-black",
+            )}
+          >
+            <div
+              className={cn(
+                "absolute inset-0 bg-gradient-to-r from-transparent to-transparent -translate-x-full group-hover/btn:translate-x-full transition-transform duration-1000",
+                isLocalPlaybackActive ? "via-emerald-500/10" : "via-blue-500/20",
+              )}
+            />
+            <span className="relative flex items-center justify-center gap-2">
+              {copy.openPlayer}
+              <ChevronRight className="size-4 transition-transform group-hover/btn:translate-x-0.5" />
+            </span>
+          </button>
+
+          {isLocalPlaybackActive ? (
+            <button
+              aria-label={copy.closeLocalPlayback}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-2xl border border-red-200/70 bg-red-50/70 text-xs font-bold text-red-600 shadow-sm transition-all hover:scale-[1.01] hover:bg-red-100 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-400 dark:hover:bg-red-950/35"
+              disabled={scene.meta.isBusy}
+              onClick={(event) => {
+                event.stopPropagation();
+                onStopLocalPlayback();
+              }}
+              type="button"
+            >
+              <Square className="size-3.5 fill-current" />
+              {copy.closeLocalPlayback}
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );
-} function CaptureOptionCard({
+}
+
+function getLocalPlaybackLabel(
+  scene: ExtensionSceneModel,
+  copy: ExtensionDictionary,
+) {
+  if (scene.header.source.detail?.kind === "local-file") {
+    return formatPlaybackLabel(scene.header.source.detail.label, copy);
+  }
+
+  return formatPlaybackLabel(scene.header.playback.label, copy);
+}
+
+function CaptureOptionCard({
   title,
   description,
   icon,
@@ -629,10 +775,10 @@ export function UploadPanel({
         {icon}
       </div>
       <div className="flex-1 min-w-0 space-y-1">
-        <p className="text-[13px] font-bold text-foreground leading-none group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+        <p className="text-sm font-bold text-foreground leading-none group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
           {title}
         </p>
-        <p className="text-[11px] text-muted-foreground leading-tight line-clamp-2 opacity-80 group-hover:opacity-100">
+        <p className="text-xs text-muted-foreground leading-tight line-clamp-2 opacity-80 group-hover:opacity-100">
           {description}
         </p>
       </div>

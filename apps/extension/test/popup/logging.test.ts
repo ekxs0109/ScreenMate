@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildStartSharingRequest,
+  buildStopSourceRequest,
   buildStopSharingRequest,
   normalizeSnapshot,
   parseVideoSelectionKey,
@@ -197,6 +198,9 @@ describe("popup room action messages", () => {
     );
     expect(buildStopSharingRequest()).toEqual({
       type: "screenmate:stop-room",
+    });
+    expect(buildStopSourceRequest()).toEqual({
+      type: "screenmate:stop-source",
     });
   });
 

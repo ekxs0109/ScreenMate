@@ -55,6 +55,11 @@ const messages = {
   sourceShareBrowserTab: "タブ共有",
   sourceShareScreen: "画面共有",
   sourceShareWindow: "ウィンドウ共有",
+  closeBrowserTabShare: "タブ共有を停止",
+  closeScreenShare: "画面共有を停止",
+  closeWindowShare: "ウィンドウ共有を停止",
+  closeDisplayShare: "共有を停止",
+  closeLocalPlayback: "ローカル再生を停止",
 };
 
 vi.mock("#i18n", () => ({
@@ -79,6 +84,8 @@ describe("popup i18n", () => {
     expect(copy.themeSystem).toBe("システム");
     expect(copy.noViewers).toBe("視聴者はまだいません");
     expect(copy.sourceShareBrowserTab).toBe("タブ共有");
+    expect(copy.closeBrowserTabShare).toBe("タブ共有を停止");
+    expect(copy.closeLocalPlayback).toBe("ローカル再生を停止");
     expect("languageLabel" in copy).toBe(false);
     expect("systemLabel" in copy).toBe(false);
   });

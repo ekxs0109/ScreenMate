@@ -26,7 +26,7 @@ captureTitle: 画面 / ウィンドウをキャプチャ
 captureDescription: 特定のタブ、アプリウィンドウ、またはデスクトップ全体を共有します
 captureButton: 共有コンテンツを選択
 screenReady: 画面準備完了
-screenReadyDescription: 画面共有を開始しました。変更する場合は再選択してください。
+screenReadyDescription: 画面共有中です。停止すると別のソースを選べます。
 reselect: 再選択
 uploadDropzone: クリックまたはドラッグしてアップロード
 roomId: ルーム ID
@@ -62,3 +62,8 @@ roomStatusWaiting: 待機中
 sourceShareBrowserTab: タブ共有
 sourceShareScreen: 画面共有
 sourceShareWindow: ウィンドウ共有
+closeBrowserTabShare: タブ共有を停止
+closeScreenShare: 画面共有を停止
+closeWindowShare: ウィンドウ共有を停止
+closeDisplayShare: 共有を停止
+closeLocalPlayback: ローカル再生を停止

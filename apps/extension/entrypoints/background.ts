@@ -103,6 +103,7 @@ export type HostMessage =
       roomId: string;
       reason: "track-ended" | "content-invalidated" | "manual-detach";
     }
+  | { type: "screenmate:stop-source" }
   | { type: "screenmate:stop-room" }
   | {
       type: "screenmate:content-ready";
@@ -544,6 +545,12 @@ export function createHostMessageHandler(
       await detachCurrentAttachmentOwner(dependencies);
       preparedSourceState = createEmptyPreparedSourceState();
       return dependencies.runtime.close("Room closed.");
+    }
+
+    if (message.type === "screenmate:stop-source") {
+      await detachCurrentAttachmentOwner(dependencies);
+      preparedSourceState = createEmptyPreparedSourceState();
+      return dependencies.runtime.markMissing("No video attached.");
     }
 
     if (message.type === "screenmate:offscreen-source-detached") {
@@ -2995,6 +3002,7 @@ function isHostMessage(message: unknown): message is HostMessage {
         typeof message.refresh === "boolean"
       );
     case "screenmate:stop-room":
+    case "screenmate:stop-source":
     case "screenmate:clear-preview":
       return true;
     case "screenmate:content-ready":

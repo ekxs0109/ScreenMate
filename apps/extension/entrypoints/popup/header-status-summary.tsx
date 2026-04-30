@@ -14,15 +14,15 @@ export function PopupHeaderStatusSummary({
   scene: ExtensionSceneModel;
 }) {
   const roomLabel = formatRoomLabel(scene, copy);
-  const sourceModeLabel = formatSourceModeLabel(
-    scene.header.source.selectedType,
+  const sourceMode = scene.header.source.type ??
+    (scene.sourceTab.followActiveTabVideo ? "auto" : null);
+  const sourceModeLabel = sourceMode
+    ? formatSourceModeLabel(sourceMode, copy)
+    : "";
+  const sourceDetailLabel = formatSourceDetailLabel(
+    scene.header.source.detail,
     copy,
   );
-  const sourceDetailLabel =
-    formatSourceDetailLabel(scene.header.source.detail, copy) ||
-    (scene.header.playback.state === "active"
-      ? copy.currentPlayback
-      : copy.waitingPlayback);
   const labels = [roomLabel, sourceModeLabel, sourceDetailLabel].filter(Boolean);
   const isActive = scene.header.playback.state === "active";
 
@@ -44,21 +44,29 @@ export function PopupHeaderStatusSummary({
         <span className="shrink-0 font-medium text-[12px] text-foreground">
           {roomLabel}
         </span>
-        <StatusSeparator />
-        <span
-          className={cn(
-            "shrink-0 font-medium text-[12px]",
-            scene.header.source.selectedType === "auto"
-              ? "text-emerald-600 dark:text-emerald-400"
-              : "text-muted-foreground",
-          )}
-        >
-          {sourceModeLabel}
-        </span>
-        <StatusSeparator />
-        <span className="truncate text-[12px] text-muted-foreground">
-          {sourceDetailLabel}
-        </span>
+        {sourceModeLabel ? (
+          <>
+            <StatusSeparator />
+            <span
+              className={cn(
+                "shrink-0 font-medium text-[12px]",
+                sourceMode === "auto"
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-muted-foreground",
+              )}
+            >
+              {sourceModeLabel}
+            </span>
+          </>
+        ) : null}
+        {sourceDetailLabel ? (
+          <>
+            <StatusSeparator />
+            <span className="truncate text-[12px] text-muted-foreground">
+              {sourceDetailLabel}
+            </span>
+          </>
+        ) : null}
       </div>
       <span data-testid="popup-room-status" className="sr-only">
         {scene.header.statusText}

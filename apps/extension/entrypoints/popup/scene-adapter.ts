@@ -62,8 +62,10 @@ export function buildExtensionSceneModel(input: {
     snapshot: input.snapshot,
     videos: input.videos,
   });
-  const screenReady = input.preparedSourceState?.kind === "screen" &&
-    input.preparedSourceState.ready;
+  const screenReady =
+    (input.preparedSourceState?.kind === "screen" &&
+      input.preparedSourceState.ready) ||
+    isAttachedScreenShareSource(input.snapshot);
   const uploadReady = input.preparedSourceState?.kind === "upload" &&
     input.preparedSourceState.ready;
   const localFile = input.preparedSourceState?.kind === "upload"
@@ -376,6 +378,15 @@ function isScreenShareSourceLabel(sourceLabel: string | null) {
     sourceLabel === "Shared screen" ||
     sourceLabel === "Shared window" ||
     sourceLabel === "Shared browser tab"
+  );
+}
+
+function isAttachedScreenShareSource(snapshot: HostRoomSnapshot) {
+  return (
+    snapshot.sourceState === "attached" &&
+    snapshot.activeTabId === OFFSCREEN_ATTACHMENT_TAB_ID &&
+    snapshot.activeFrameId === OFFSCREEN_ATTACHMENT_FRAME_ID &&
+    isScreenShareSourceLabel(snapshot.sourceLabel)
   );
 }
 

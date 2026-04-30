@@ -12,7 +12,7 @@ sourceUpload: 本地播放
 detected: 嗅探到的网页资源
 followAuto: 自动
 followAutoDescription: 跟随房主正在看的标签页
-currentPlayback: 当前播放
+currentPlayback: 正在播放
 waitingPlayback: 等待视频源
 webVideoStream: 网页视频流
 autoMode: 自动跟随
@@ -26,7 +26,7 @@ captureTitle: 捕获屏幕或窗口
 captureDescription: 支持共享单个网页标签、应用软件或整个桌面
 captureButton: 选择共享内容
 screenReady: 屏幕已就绪
-screenReadyDescription: 屏幕共享已开始。如需更换来源，请重新选择。
+screenReadyDescription: 屏幕共享已开启。关闭后可重新选择来源。
 reselect: 重选
 captureEntireScreen: 整个屏幕
 captureEntireScreenDesc: 分享显示器上的所有内容
@@ -70,3 +70,8 @@ roomStatusWaiting: 等待资源
 sourceShareBrowserTab: 标签页共享
 sourceShareScreen: 屏幕共享
 sourceShareWindow: 窗口共享
+closeBrowserTabShare: 关闭标签页共享
+closeScreenShare: 关闭屏幕共享
+closeWindowShare: 关闭窗口共享
+closeDisplayShare: 关闭共享
+closeLocalPlayback: 关闭本地播放

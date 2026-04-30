@@ -134,6 +134,7 @@ describe("buildExtensionSceneModel", () => {
 
     expect(scene.header.source.selectedType).toBe("upload");
     expect(scene.sourceTab.activeSourceIndicator).toBe("screen");
+    expect(scene.sourceTab.screenReady).toBe(true);
     expect(scene.header.source.detail).toEqual({
       kind: "display-tab",
       label: "Shared browser tab",

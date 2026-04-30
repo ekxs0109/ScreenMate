@@ -26,7 +26,7 @@ captureTitle: Capturar pantalla o ventana
 captureDescription: Comparte una pestaña, una ventana de app o todo el escritorio.
 captureButton: Seleccionar contenido
 screenReady: Pantalla lista
-screenReadyDescription: La pantalla ya se está compartiendo. Vuelve a seleccionar para cambiar la fuente.
+screenReadyDescription: La pantalla se está compartiendo. Deténla aquí antes de elegir otra fuente.
 reselect: Volver a elegir
 uploadDropzone: Haz clic o arrastra archivos de video
 roomId: ID Sala
@@ -62,3 +62,8 @@ roomStatusWaiting: Esperando
 sourceShareBrowserTab: Pestaña compartida
 sourceShareScreen: Pantalla compartida
 sourceShareWindow: Ventana compartida
+closeBrowserTabShare: Cerrar pestaña compartida
+closeScreenShare: Cerrar pantalla compartida
+closeWindowShare: Cerrar ventana compartida
+closeDisplayShare: Cerrar compartir pantalla
+closeLocalPlayback: Cerrar reproducción local

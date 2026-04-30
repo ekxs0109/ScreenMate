@@ -26,7 +26,7 @@ captureTitle: Capture Screen/Window
 captureDescription: Share a specific tab, app window, or entire desktop.
 captureButton: Select Content
 screenReady: Screen Ready
-screenReadyDescription: Screen sharing has started. Reselect to change the source.
+screenReadyDescription: Screen sharing is active. Stop it here before choosing another source.
 reselect: Reselect
 captureEntireScreen: Entire Screen
 captureEntireScreenDesc: Share everything on your display
@@ -70,3 +70,8 @@ roomStatusWaiting: Waiting
 sourceShareBrowserTab: Shared browser tab
 sourceShareScreen: Shared screen
 sourceShareWindow: Shared window
+closeBrowserTabShare: Stop tab sharing
+closeScreenShare: Stop screen sharing
+closeWindowShare: Stop window sharing
+closeDisplayShare: Stop sharing
+closeLocalPlayback: Stop local playback

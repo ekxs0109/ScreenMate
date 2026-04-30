@@ -54,6 +54,7 @@ function App() {
     clearVideoPreview,
     createRoomSession,
     startSharing,
+    stopSource,
     stopRoom,
     sendChatMessage,
     saveRoomPassword,
@@ -215,6 +216,18 @@ function App() {
           await prepareScreenSource(type);
         }}
         onToggleScreenReady={clearPreparedSourceState}
+        onStopScreenShare={async () => {
+          if (followActiveTabVideo) {
+            await setFollowActiveTabVideo(false);
+          }
+          await stopSource();
+        }}
+        onStopLocalPlayback={async () => {
+          if (followActiveTabVideo) {
+            await setFollowActiveTabVideo(false);
+          }
+          await stopSource();
+        }}
         onStartOrAttach={async (sourceType = activeSourceType, options = {}) => {
           if (options.selectedVideoId) {
             setSelectedVideoId(options.selectedVideoId);
