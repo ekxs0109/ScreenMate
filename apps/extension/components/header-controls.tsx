@@ -1,17 +1,9 @@
-import { Globe, MonitorUp, Moon, Sun } from "lucide-react";
+import { MonitorUp, Moon, Sun } from "lucide-react";
 import { cn } from "../lib/utils";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
+
 
 export function HeaderControls({
   language = "en",
-  onLanguageChange,
   themeMode,
   resolvedThemeMode,
   onThemeToggle,
@@ -42,21 +34,6 @@ export function HeaderControls({
 
   return (
     <div className="flex items-center gap-1.5">
-      <Select value={language} onValueChange={onLanguageChange || (() => {})}>
-        <SelectTrigger aria-label="Language" className="h-8 w-[105px] gap-1.5 border-border bg-background px-2.5 text-xs font-medium shadow-sm">
-          <Globe className="size-3.5 shrink-0 text-muted-foreground" />
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent align="end">
-          <SelectGroup>
-            <SelectItem value="zh">中文</SelectItem>
-            <SelectItem value="en">English</SelectItem>
-            <SelectItem value="ja">日本語</SelectItem>
-            <SelectItem value="es">Español</SelectItem>
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-
       <button
         onClick={onThemeToggle}
         className={cn(
