@@ -168,7 +168,14 @@ export function showVideoSelectionPreview({
   overlay.style.left = `${rect.left}px`;
   overlay.style.width = `${rect.width}px`;
   overlay.style.height = `${rect.height}px`;
-  overlay.innerHTML = `<div style="position:absolute;inset:0;border-radius:16px;background:rgba(250,204,21,0.14);"></div><div style="position:absolute;left:12px;bottom:12px;">${escapeHtml(label)}${frameId === 0 ? "" : ` · iframe #${frameId}`}</div>`;
+  
+  overlay.innerHTML = `
+    <div style="position:absolute;top:16px;left:16px;background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:6px 12px;border-radius:8px;display:flex;align-items:center;gap:8px;border:1px solid rgba(255,255,255,0.15);box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+      <div style="width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 10px #10b981;animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
+      <span style="letter-spacing:0.3px;">${escapeHtml(label)}</span>
+      ${frameId === 0 ? "" : `<span style="opacity:0.6;font-size:11px;margin-left:4px;border-left:1px solid rgba(255,255,255,0.2);padding-left:8px;">iframe #${frameId}</span>`}
+    </div>
+  `;
 }
 
 export function clearVideoSelectionPreview() {
@@ -213,19 +220,18 @@ function ensurePreviewOverlay() {
     position: "fixed",
     zIndex: "2147483647",
     pointerEvents: "none",
-    border: "3px dashed #ffffff",
-    background: "transparent",
-    boxShadow: "0 0 0 4px rgba(234, 179, 8, 0.9), 0 18px 36px rgba(15, 23, 42, 0.35)",
-    borderRadius: "16px",
-    color: "#f8fafc",
-    fontFamily: "\"IBM Plex Sans\", \"Segoe UI\", sans-serif",
+    border: "3px solid #10b981",
+    background: "rgba(16, 185, 129, 0.15)",
+    boxShadow: "0 0 0 1px rgba(0,0,0,0.1), 0 8px 32px rgba(16, 185, 129, 0.2), inset 0 0 0 1px rgba(255,255,255,0.2)",
+    borderRadius: "12px",
+    color: "#ffffff",
+    fontFamily: "system-ui, -apple-system, sans-serif",
     fontSize: "13px",
-    fontWeight: "700",
-    lineHeight: "1.35",
-    padding: "12px",
+    fontWeight: "600",
     display: "none",
     overflow: "hidden",
-    textShadow: "0 1px 1px rgba(15, 23, 42, 0.6)",
+    textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+    transition: "all 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
   });
 
   document.documentElement.appendChild(overlay);
