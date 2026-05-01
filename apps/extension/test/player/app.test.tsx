@@ -5,24 +5,40 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { browser } from "wxt/browser";
 import { readLocalMediaFile, saveLocalMediaFile } from "../../lib/local-media-store";
 
-const dplayerCalls: Array<{ options: { container: HTMLElement; video?: { url?: string } } }> = [];
+const videojsReactCalls: Array<{ src?: string; id?: string }> = [];
 
-vi.mock("dplayer", () => {
-  class MockDPlayer {
-    public readonly video: HTMLVideoElement;
-    public readonly destroy = vi.fn();
-    public readonly off = vi.fn();
-    public readonly on = vi.fn();
+vi.mock("@videojs/react", async () => {
+  const React = await import("react");
 
-    constructor(options: { container: HTMLElement; video?: { url?: string } }) {
-      this.video = document.createElement("video");
-      this.video.src = options.video?.url ?? "";
-      options.container.append(this.video);
-      dplayerCalls.push({ options });
-    }
-  }
+  return {
+    createPlayer: vi.fn(() => ({
+      Provider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+      Container: React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+        function MockVideoJsContainer({ children, ...props }, ref) {
+          return (
+            <div ref={ref} {...props}>
+              {children}
+            </div>
+          );
+        },
+      ),
+    })),
+  };
+});
 
-  return { default: MockDPlayer };
+vi.mock("@videojs/react/video", async () => {
+  const React = await import("react");
+
+  return {
+    videoFeatures: [],
+    VideoSkin: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    Video: React.forwardRef<HTMLVideoElement, React.VideoHTMLAttributes<HTMLVideoElement>>(
+      function MockVideoJsVideo(props, ref) {
+        videojsReactCalls.push({ src: props.src, id: props.id });
+        return <video ref={ref} {...props} />;
+      },
+    ),
+  };
 });
 
 vi.mock("#i18n", () => ({
@@ -89,11 +105,11 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  dplayerCalls.length = 0;
+  videojsReactCalls.length = 0;
 });
 
 describe("PlayerApp", () => {
-  it("renders a DPlayer surface and starts the offscreen local file source", async () => {
+  it("renders a Video.js surface and starts the offscreen local file source", async () => {
     const sendMessage = vi
       .spyOn(browser.runtime, "sendMessage")
       .mockImplementation(async (message: unknown) => {
@@ -153,7 +169,7 @@ describe("PlayerApp", () => {
         return undefined;
       });
 
-    render(
+    const { unmount } = render(
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
         <PlayerApp />
       </ThemeProvider>,
@@ -171,8 +187,20 @@ describe("PlayerApp", () => {
     await waitFor(() => {
       expect(screen.getByText("demo.mp4")).toBeTruthy();
     });
-    expect(dplayerCalls).toHaveLength(1);
-    expect(dplayerCalls[0]?.options.video?.url).toBe("blob:demo-video");
+    await waitFor(() => {
+      expect(
+        document.getElementById("screenmate-player-local-video"),
+      ).toBeTruthy();
+    });
+    const video = document.getElementById(
+      "screenmate-player-local-video",
+    ) as HTMLVideoElement | null;
+    expect(video?.src).toBe("blob:demo-video");
+    expect(video?.controls).toBe(false);
+    expect(videojsReactCalls).toContainEqual({
+      id: "screenmate-player-local-video",
+      src: "blob:demo-video",
+    });
     expect(sendMessage).toHaveBeenCalledWith({
       type: "screenmate:prepare-local-file-source",
       fileId: "local-demo",
@@ -200,6 +228,11 @@ describe("PlayerApp", () => {
         },
       },
     });
+
+    unmount();
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:demo-video");
+    expect(HTMLMediaElement.prototype.load).toHaveBeenCalled();
   });
 
   it("restores a prepared offscreen upload preview after player refresh without restarting sharing", async () => {
@@ -281,13 +314,16 @@ describe("PlayerApp", () => {
     });
 
     expect(readLocalMediaFile).toHaveBeenCalledWith("local-demo");
-    expect(dplayerCalls).toHaveLength(1);
-    expect(dplayerCalls[0]?.options.video?.url).toBe("blob:restored-video");
     await waitFor(() => {
       const video = document.getElementById(
         "screenmate-player-local-video",
       ) as HTMLVideoElement | null;
+      expect(video?.src).toBe("blob:restored-video");
       expect(video?.currentTime).toBe(42);
+    });
+    expect(videojsReactCalls).toContainEqual({
+      id: "screenmate-player-local-video",
+      src: "blob:restored-video",
     });
     expect(play).toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith({
