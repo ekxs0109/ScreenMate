@@ -462,11 +462,13 @@ describe("buildExtensionSceneModel", () => {
         id: "msg_1",
         sender: "Mina",
         text: "hello room",
+        timestamp: 10,
       },
       {
         id: "msg_2",
         sender: "Host",
         text: "hello back",
+        timestamp: 11,
       },
     ]);
   });

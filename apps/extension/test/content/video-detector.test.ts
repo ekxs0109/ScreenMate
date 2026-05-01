@@ -11,10 +11,12 @@ import {
 } from "../../entrypoints/content/video-detector";
 import {
   createContentReadyNotifier,
+  createLazyContentChatWidgetController,
   createVideoChangeNotifier,
   createVideoMessageListener,
   getScreenMatePageKind,
 } from "../../entrypoints/content";
+import { ContentScriptContext } from "wxt/utils/content-script-context";
 
 function setVideoRect(element: Element | null, width: number, height: number) {
   Object.defineProperty(element, "getBoundingClientRect", {
@@ -454,6 +456,37 @@ describe("createVideoMessageListener", () => {
 
     expect(sourceAttachmentRuntime.destroy).toHaveBeenCalledWith("manual-detach");
     expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+  });
+
+  it("keeps video listing independent from chat widget load failures", async () => {
+    document.body.innerHTML = `<video id="message-video" src="https://example.com/message.mp4"></video>`;
+    const video = document.getElementById("message-video") as HTMLVideoElement;
+    setVideoRect(video, 400, 225);
+
+    const chatWidget = createLazyContentChatWidgetController(
+      new ContentScriptContext("content-chat-widget-test"),
+      {
+        importWidget: vi.fn().mockRejectedValue(new Error("ui unavailable")),
+        onError: vi.fn(),
+      },
+    );
+    const listener = createVideoMessageListener(undefined, undefined, chatWidget);
+    const sendResponse = vi.fn();
+
+    chatWidget.show();
+    const shouldKeepOpen = listener({ type: "screenmate:list-videos" }, {} as never, sendResponse);
+
+    expect(shouldKeepOpen).toBe(true);
+
+    await Promise.resolve();
+
+    expect(sendResponse).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: getVideoHandle(video),
+        label: "https://example.com/message.mp4",
+        primaryUrl: "https://example.com/message.mp4",
+      }),
+    ]);
   });
 });
 

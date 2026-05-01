@@ -12,6 +12,7 @@ import { cn } from "../../lib/utils";
 import type { ExtensionDictionary } from "./i18n";
 import type { ExtensionSceneModel } from "./scene-model";
 import { PopupScrollArea } from "./presenter";
+import { ViewerList } from "../../components/viewer-list";
 
 export function RoomTabPanel({
   scene,
@@ -149,77 +150,13 @@ export function RoomTabPanel({
               </div>
             </div>
 
-            <div
-              className="bg-white dark:bg-zinc-900 border border-border rounded-xl shadow-sm text-sm overflow-hidden flex flex-col animate-in slide-in-from-bottom-3 duration-400"
-              data-testid="popup-viewer-roster"
-            >
-              <div className="p-3.5 border-b border-border bg-zinc-50/50 dark:bg-zinc-950/50 flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-blue-500" />
-                  <span className="font-bold">{copy.viewerList}</span>
-                </div>
-                <span
-                  data-testid="popup-viewer-count"
-                  className="px-2 py-0.5 rounded-full bg-blue-100/80 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10px] font-bold border border-blue-200 dark:border-blue-800/30 tabular-nums"
-                >
-                  {scene.roomTab.viewerCount}
-                </span>
-              </div>
-              <div className="grid grid-cols-[1fr_70px_50px] gap-2 px-3.5 py-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest items-center border-b border-border/50 bg-zinc-50 dark:bg-zinc-900/30 transition-colors">
-                <span>{copy.viewerName}</span>
-                <span className="text-center">{copy.connType}</span>
-                <span className="text-right flex items-center justify-end gap-1">
-                  <Activity className="w-2.5 h-2.5" />
-                  {copy.connPing}
-                </span>
-              </div>
-              <div className="divide-y divide-border/50 max-h-[180px] overflow-y-auto">
-                {scene.roomTab.viewerDetails.map((viewer) => (
-                  <div
-                    key={viewer.id}
-                    data-testid={`popup-viewer-row-${viewer.id}`}
-                    data-online={viewer.online ? "true" : "false"}
-                    className="grid grid-cols-[1fr_70px_50px] gap-2 px-3.5 py-2.5 items-center hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group"
-                  >
-                    <div className="font-bold text-xs flex items-center gap-2 min-w-0 pr-1">
-                      <div
-                        className={cn(
-                          "size-1.5 rounded-full shrink-0",
-                          viewer.online
-                            ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]"
-                            : "bg-zinc-300 dark:bg-zinc-600",
-                        )}
-                      />
-                      <span
-                        data-testid={`popup-viewer-name-${viewer.id}`}
-                        className="truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors"
-                      >
-                        {viewer.name}
-                      </span>
-                    </div>
-                    <div className="flex justify-center">
-                      <span className="text-[9px] font-bold text-muted-foreground bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md border border-border whitespace-nowrap transition-colors group-hover:border-zinc-300 dark:group-hover:border-zinc-700">
-                        {viewer.connType}
-                      </span>
-                    </div>
-                    <div
-                      className={cn(
-                        "font-mono font-bold text-[11px] text-right transition-colors",
-                        viewer.isGood
-                          ? "text-green-600 dark:text-green-400"
-                          : "text-amber-500",
-                      )}
-                    >
-                      {viewer.ping}
-                    </div>
-                  </div>
-                ))}
-                {scene.roomTab.viewerDetails.length === 0 && (
-                  <div className="px-3.5 py-8 text-center text-xs text-muted-foreground italic">
-                    {copy.noViewers ?? "No viewers yet"}
-                  </div>
-                )}
-              </div>
+            <div className="rounded-xl shadow-sm border border-border overflow-hidden animate-in slide-in-from-bottom-3 duration-400">
+              <ViewerList
+                viewers={scene.roomTab.viewerDetails}
+                emptyMessage={copy.noViewers}
+                title={copy.viewerList}
+                className="max-h-[250px]"
+              />
             </div>
           </>
         )}

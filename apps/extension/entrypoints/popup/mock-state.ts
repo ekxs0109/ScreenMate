@@ -43,6 +43,7 @@ export function createExtensionMockState(): ExtensionMockState {
         id: "system-1",
         sender: "System",
         text: "Room created. Waiting for viewers to join.",
+        timestamp: Date.now() - 60000,
       },
     ],
     viewerDetails: [

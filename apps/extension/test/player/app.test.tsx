@@ -87,8 +87,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.restoreAllMocks();
   cleanup();
+  vi.restoreAllMocks();
   dplayerCalls.length = 0;
 });
 

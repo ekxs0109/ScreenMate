@@ -75,3 +75,15 @@ closeScreenShare: Stop screen sharing
 closeWindowShare: Stop window sharing
 closeDisplayShare: Stop sharing
 closeLocalPlayback: Stop local playback
+chatSystemSender: System
+chatRoomCreated: Room created. Waiting for viewers to join.
+chatSendFailed: Message could not be sent. Please try again.
+localFileLabel: Local File
+changeFile: Change File
+loadLocalVideo: Load Local Video
+dropzoneDesc: Drag and drop your local video file here, or click to browse. The video stays on your browser and is not uploaded to any server.
+selectVideoFile: Select Video File
+chatTab: Chat
+viewersTab: Viewers
+playerTitle: ScreenMate
+playerSubtitle: Local Host

@@ -459,6 +459,7 @@ function toExtensionChatMessage(message: RoomChatMessage): ExtensionChatMessage 
     id: message.messageId,
     sender: message.senderRole === "host" ? "Host" : message.senderName,
     text: message.text,
+    timestamp: message.sentAt,
   };
 }
 

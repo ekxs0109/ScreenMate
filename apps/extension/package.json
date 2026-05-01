@@ -5,10 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "wxt",
-    "dev:brave": "SCREENMATE_WXT_CHROMIUM=brave wxt -b chrome",
-    "build": "wxt build",
-    "typecheck": "wxt prepare && tsc --noEmit",
-    "test": "wxt prepare && vitest run --passWithNoTests"
+    "build": "DEBUG= wxt build",
+    "typecheck": "DEBUG= wxt prepare && tsc --noEmit",
+    "test": "DEBUG= wxt prepare && DEBUG= vitest run --passWithNoTests"
   },
   "dependencies": {
     "@radix-ui/react-dropdown-menu": "^2.1.16",

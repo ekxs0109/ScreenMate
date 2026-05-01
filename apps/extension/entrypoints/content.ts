@@ -1,8 +1,8 @@
 import { browser, type Browser } from "wxt/browser";
+import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import type { RoomChatMessage } from "@screenmate/shared";
 import { createLogger } from "../lib/logger";
-import { createContentChatWidgetController } from "./content/content-chat-widget";
 import { createSourceAttachmentRuntime } from "./content/source-attachment";
 import { createVideoPreviewController } from "./content/video-preview";
 import {
@@ -57,6 +57,22 @@ export type ContentControlMessage =
   | { type: "screenmate:clear-preview" };
 
 type ContentMessage = ListVideosMessage | ContentControlMessage;
+type ContentChatMessage = {
+  id: string;
+  sender: string;
+  text: string;
+  timestamp?: number;
+};
+type ContentChatWidgetController = {
+  hide: () => void;
+  setMessages: (messages: ContentChatMessage[]) => void;
+  show: () => void;
+};
+type ContentChatWidgetModule = {
+  createContentChatWidgetController: (
+    ctx: ContentScriptContext,
+  ) => ContentChatWidgetController;
+};
 type ListenerResponse =
   | VideoSource[]
   | {
@@ -110,7 +126,7 @@ export function getScreenMatePageKind(
 export function createVideoMessageListener(
   sourceAttachmentRuntime?: ReturnType<typeof createSourceAttachmentRuntime>,
   previewController = createVideoPreviewController(),
-  chatWidget = createContentChatWidgetController(),
+  chatWidget?: ContentChatWidgetController,
 ) {
   return (
     message: ContentMessage,
@@ -157,7 +173,7 @@ export function createVideoMessageListener(
             videoId: message.videoId,
           })
           .then((response) => {
-            chatWidget.show();
+            chatWidget?.show();
             sendResponse(response);
           })
           .catch((error) => {
@@ -222,7 +238,7 @@ export function createVideoMessageListener(
           href: window.location.href,
         });
         sourceAttachmentRuntime.destroy("manual-detach");
-        chatWidget.hide();
+        chatWidget?.hide();
         sendResponse({ ok: true });
       });
 
@@ -245,7 +261,7 @@ export function createVideoMessageListener(
       Array.isArray(message.messages)
     ) {
       queueMicrotask(() => {
-        chatWidget.setMessages(message.messages.map(toExtensionChatMessage));
+        chatWidget?.setMessages(message.messages.map(toExtensionChatMessage));
         sendResponse({ ok: true });
       });
 
@@ -282,11 +298,101 @@ export function createVideoMessageListener(
   };
 }
 
-function toExtensionChatMessage(message: RoomChatMessage) {
+function toExtensionChatMessage(message: RoomChatMessage): ContentChatMessage {
   return {
     id: message.messageId,
     sender: message.senderRole === "host" ? "Host" : message.senderName,
     text: message.text,
+    timestamp: message.sentAt,
+  };
+}
+
+export function createLazyContentChatWidgetController(
+  ctx: ContentScriptContext,
+  {
+    importWidget = () => import("./content/content-chat-widget"),
+    onError = (error) => {
+      contentLogger.warn("Content chat widget could not be initialized.", {
+        error: error instanceof Error ? error.message : String(error),
+        href: window.location.href,
+      });
+    },
+  }: {
+    importWidget?: () => Promise<ContentChatWidgetModule>;
+    onError?: (error: unknown) => void;
+  } = {},
+): ContentChatWidgetController {
+  let widget: ContentChatWidgetController | null = null;
+  let loadPromise: Promise<ContentChatWidgetController | null> | null = null;
+  let desiredVisible = false;
+  let pendingMessages: ContentChatMessage[] | null = null;
+
+  ctx.onInvalidated(() => {
+    widget = null;
+    loadPromise = null;
+  });
+
+  function loadWidget() {
+    if (ctx.isInvalid) {
+      return Promise.resolve(null);
+    }
+
+    if (widget) {
+      return Promise.resolve(widget);
+    }
+
+    if (!loadPromise) {
+      loadPromise = importWidget()
+        .then((module) => {
+          if (ctx.isInvalid) {
+            return null;
+          }
+
+          widget = module.createContentChatWidgetController(ctx);
+          syncWidget(widget);
+          return widget;
+        })
+        .catch((error) => {
+          loadPromise = null;
+          onError(error);
+          return null;
+        });
+    }
+
+    return loadPromise;
+  }
+
+  function syncWidget(currentWidget: ContentChatWidgetController) {
+    if (pendingMessages !== null) {
+      currentWidget.setMessages(pendingMessages);
+    }
+
+    if (desiredVisible) {
+      currentWidget.show();
+    } else {
+      currentWidget.hide();
+    }
+  }
+
+  return {
+    hide() {
+      desiredVisible = false;
+      if (widget) {
+        widget.hide();
+      }
+    },
+    setMessages(messages) {
+      pendingMessages = messages;
+      if (widget) {
+        widget.setMessages(messages);
+      } else if (desiredVisible) {
+        void loadWidget();
+      }
+    },
+    show() {
+      desiredVisible = true;
+      void loadWidget();
+    },
   };
 }
 
@@ -314,6 +420,7 @@ export function createContentReadyNotifier({
 export default defineContentScript({
   matches: ["<all_urls>"],
   allFrames: true,
+  cssInjectionMode: "ui",
   main(ctx) {
     const sourceAttachmentRuntime = createSourceAttachmentRuntime({
       onSignal(envelope) {
@@ -336,7 +443,8 @@ export default defineContentScript({
       },
     });
     const previewController = createVideoPreviewController();
-    const chatWidget = createContentChatWidgetController();
+    const chatWidget = createLazyContentChatWidgetController(ctx);
+
     const listener = createVideoMessageListener(
       sourceAttachmentRuntime,
       previewController,

@@ -141,7 +141,7 @@ export function ExtensionPopupPresenter({
         "bg-card text-card-foreground flex min-h-0 flex-col border border-border/80 overflow-hidden",
         windowMode === "popup"
           ? "h-[600px] w-[400px]"
-          : "h-[min(600px,calc(100dvh-2rem))] w-[min(400px,calc(100vw-2rem))] rounded-2xl shadow-2xl",
+          : "h-[min(600px,calc(100dvh-2rem))] w-[min(400px,calc(100vw-2rem))] rounded-xl shadow-2xl",
       )}
     >
       <header className="shrink-0 border-b border-border bg-zinc-50/85 dark:bg-zinc-950/85 backdrop-blur transition-colors p-3 flex flex-col gap-2">

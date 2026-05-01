@@ -1,56 +1,26 @@
 import { defineConfig } from "wxt";
 import tailwindcss from "@tailwindcss/vite";
-import { codeInspectorPlugin } from "code-inspector-plugin";
-import { existsSync } from "node:fs";
+import type { codeInspectorPlugin } from "code-inspector-plugin";
+import { createRequire } from "node:module";
 import path from "path";
 
-const googleChromeBinary =
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const braveBrowserBinary =
-  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
-
-export function resolveChromiumLaunchConfig(
-  env: NodeJS.ProcessEnv,
-  fileExists = existsSync,
-) {
-  const chromiumBrowser = env.SCREENMATE_WXT_CHROMIUM?.trim().toLowerCase();
-  const useBrave =
-    chromiumBrowser === "brave" ||
-    (chromiumBrowser == null &&
-      !fileExists(googleChromeBinary) &&
-      fileExists(braveBrowserBinary));
-  const braveProfileDirectory =
-    env.SCREENMATE_WXT_BRAVE_PROFILE_DIRECTORY?.trim() || "Default";
-  const braveUserDataDir =
-    env.SCREENMATE_WXT_BRAVE_USER_DATA_DIR?.trim() ||
-    path.resolve(__dirname, ".wxt/brave-data");
-
-  return {
-    chromiumArgs: useBrave
-      ? [
-          `--user-data-dir=${braveUserDataDir}`,
-          `--profile-directory=${braveProfileDirectory}`,
-        ]
-      : [`--user-data-dir=${path.resolve(__dirname, ".wxt/chrome-data")}`],
-    chromiumBinaries: useBrave
-      ? {
-          chrome: braveBrowserBinary,
-        }
-      : undefined,
-  };
-}
-
-const { chromiumArgs, chromiumBinaries } = resolveChromiumLaunchConfig(
-  process.env,
-);
+const require = createRequire(import.meta.url);
 
 export function isCodeInspectorDevProcess(
   env: NodeJS.ProcessEnv = process.env,
   argv = process.argv,
 ) {
+  const npmLifecycleEvent = env.npm_lifecycle_event?.trim();
+  const npmLifecycleScript = env.npm_lifecycle_script?.trim();
+
   return (
+    env.CODE_INSPECTOR === "true" &&
     env.NODE_ENV !== "test" &&
     env.VITEST !== "true" &&
+    npmLifecycleEvent !== "build" &&
+    npmLifecycleEvent !== "test" &&
+    npmLifecycleEvent !== "typecheck" &&
+    !npmLifecycleScript?.includes("wxt prepare") &&
     !argv.some(
       (arg) =>
         arg === "build" ||
@@ -77,6 +47,9 @@ export const extensionCodeInspectorOptions = {
 } satisfies Parameters<typeof codeInspectorPlugin>[0];
 
 export function createExtensionCodeInspectorPlugin() {
+  const { codeInspectorPlugin } = require(
+    "code-inspector-plugin",
+  ) as typeof import("code-inspector-plugin");
   const plugin = codeInspectorPlugin(extensionCodeInspectorOptions);
   const transform = plugin.transform;
 
@@ -101,12 +74,20 @@ export function createExtensionCodeInspectorPlugin() {
   };
 }
 
+export function createExtensionVitePlugins(
+  env: NodeJS.ProcessEnv = process.env,
+  argv = process.argv,
+) {
+  return [
+    ...(isCodeInspectorDevProcess(env, argv)
+      ? [createExtensionCodeInspectorPlugin()]
+      : []),
+    tailwindcss(),
+  ];
+}
+
 export default defineConfig({
   modules: ["@wxt-dev/module-react", "@wxt-dev/i18n/module"],
-  webExt: {
-    ...(chromiumBinaries ? { binaries: chromiumBinaries } : {}),
-    chromiumArgs,
-  },
   manifest: {
     default_locale: "en",
     permissions: ["activeTab", "tabs", "webNavigation", "storage", "offscreen"],
@@ -119,7 +100,7 @@ export default defineConfig({
     ],
   },
   vite: () => ({
-    plugins: [createExtensionCodeInspectorPlugin(), tailwindcss()],
+    plugins: createExtensionVitePlugins(),
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "."),

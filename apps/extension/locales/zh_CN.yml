@@ -75,3 +75,15 @@ closeScreenShare: 关闭屏幕共享
 closeWindowShare: 关闭窗口共享
 closeDisplayShare: 关闭共享
 closeLocalPlayback: 关闭本地播放
+chatSystemSender: 系统
+chatRoomCreated: 房间已创建，等待观众加入。
+chatSendFailed: 消息发送失败，请重试。
+localFileLabel: 本地文件
+changeFile: 更换文件
+loadLocalVideo: 加载本地视频
+dropzoneDesc: 将本地视频文件拖放到此处，或点击浏览。视频只在您的浏览器内处理，不会上传到任何服务器。
+selectVideoFile: 选择视频文件
+chatTab: 聊天
+viewersTab: 观众
+playerTitle: ScreenMate
+playerSubtitle: 本地播放器

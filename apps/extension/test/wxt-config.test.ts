@@ -1,13 +1,26 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import wxtConfig, {
+  createExtensionVitePlugins,
   createExtensionCodeInspectorPlugin,
   extensionCodeInspectorOptions,
   isCodeInspectorDevProcess,
-  resolveChromiumLaunchConfig,
 } from "../wxt.config";
 
 describe("wxt config", () => {
+  it("keeps inherited DEBUG logs out of build, typecheck, and test scripts", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { scripts: Record<string, string> };
+
+    expect(packageJson.scripts.dev).toBe("wxt");
+    expect(packageJson.scripts.build).toMatch(/^DEBUG= /);
+    expect(packageJson.scripts.typecheck).toContain("DEBUG= wxt prepare");
+    expect(packageJson.scripts.test).toContain("DEBUG= wxt prepare");
+    expect(packageJson.scripts.test).toContain("DEBUG= vitest run");
+  });
+
   it("does not override WXT-managed html entrypoints with manual rollup inputs", () => {
     const viteConfig = wxtConfig.vite?.({} as never) as any;
 
@@ -25,13 +38,16 @@ describe("wxt config", () => {
     });
   });
 
-  it("enables code inspector for extension Vite builds", () => {
-    const viteConfig = wxtConfig.vite?.({} as never) as any;
+  it("enables code inspector for extension dev builds", () => {
+    const plugins = createExtensionVitePlugins(
+      { CODE_INSPECTOR: "true" },
+      ["node", "wxt"],
+    );
     const excludedConditions = Array.isArray(extensionCodeInspectorOptions.exclude)
       ? extensionCodeInspectorOptions.exclude
       : [extensionCodeInspectorOptions.exclude];
 
-    expect(viteConfig?.plugins?.map((plugin: any) => plugin?.name)).toContain(
+    expect(plugins.map((plugin: any) => plugin?.name)).toContain(
       "@code-inspector/vite",
     );
     expect(extensionCodeInspectorOptions.injectTo).toEqual([
@@ -63,17 +79,43 @@ describe("wxt config", () => {
   });
 
   it("keeps code inspector side effects out of tests and WXT prepare", () => {
+    expect(isCodeInspectorDevProcess({}, ["node", "wxt"])).toBe(false);
+    expect(
+      isCodeInspectorDevProcess({ CODE_INSPECTOR: "true" }, ["node", "wxt"]),
+    ).toBe(true);
     expect(isCodeInspectorDevProcess({ NODE_ENV: "test" }, ["node"])).toBe(
       false,
     );
     expect(isCodeInspectorDevProcess({ VITEST: "true" }, ["node"])).toBe(false);
+    expect(isCodeInspectorDevProcess({ npm_lifecycle_event: "test" }, ["node"])).toBe(
+      false,
+    );
+    expect(
+      isCodeInspectorDevProcess({ npm_lifecycle_event: "typecheck" }, ["node"]),
+    ).toBe(false);
+    expect(
+      isCodeInspectorDevProcess(
+        { npm_lifecycle_script: "wxt prepare && vitest run --passWithNoTests" },
+        ["node"],
+      ),
+    ).toBe(false);
     expect(isCodeInspectorDevProcess({}, ["node", "wxt", "prepare"])).toBe(
       false,
     );
     expect(isCodeInspectorDevProcess({}, ["node", "wxt", "build"])).toBe(
       false,
     );
-    expect(isCodeInspectorDevProcess({}, ["node", "wxt"])).toBe(true);
+  });
+
+  it("does not create code inspector plugin outside extension dev builds", () => {
+    const plugins = createExtensionVitePlugins(
+      { npm_lifecycle_event: "test" },
+      ["node"],
+    );
+
+    expect(plugins.map((plugin: any) => plugin?.name)).not.toContain(
+      "@code-inspector/vite",
+    );
   });
 
   it("does not inject code inspector during WXT SSR pre-render transforms", async () => {
@@ -87,33 +129,7 @@ describe("wxt config", () => {
     ).resolves.toBe(source);
   });
 
-  it("uses Brave when Chrome is missing and Brave is installed", () => {
-    const launchConfig = resolveChromiumLaunchConfig(
-      { HOME: "/Users/example" },
-      (filePath) => String(filePath).includes("Brave Browser.app"),
-    );
-
-    expect(launchConfig.chromiumBinaries).toEqual({
-      chrome: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-    });
-    expect(
-      launchConfig.chromiumArgs.some((arg) =>
-        arg.endsWith("apps/extension/.wxt/brave-data"),
-      ),
-    ).toBe(true);
-  });
-
-  it("allows overriding the Brave user data directory", () => {
-    const launchConfig = resolveChromiumLaunchConfig(
-      {
-        SCREENMATE_WXT_BRAVE_USER_DATA_DIR: "/tmp/screenmate-brave",
-        SCREENMATE_WXT_CHROMIUM: "brave",
-      },
-      () => false,
-    );
-
-    expect(launchConfig.chromiumArgs).toContain(
-      "--user-data-dir=/tmp/screenmate-brave",
-    );
+  it("uses the WXT-managed Chrome profile by default", () => {
+    expect(wxtConfig.webExt).toBeUndefined();
   });
 });

@@ -365,43 +365,40 @@ export function SniffPanel({
                         </div>
                       </button>
 
-                      <div
-                        className={cn(
-                          "grid transition-all duration-300 ease-in-out",
-                          isCollapsed ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100 mt-3"
-                        )}
-                      >
-                        <div className="overflow-hidden min-h-0">
-                          {group.cards.length > 0 ? (
-                            <div className="flex flex-col gap-2">
-                              {group.cards.map((card) => (
-                                <SniffCard
-                                  key={card.id}
-                                  card={card}
-                                  copy={copy}
-                                  isBusy={scene.meta.isBusy}
-                                  onPreview={onPreviewSource}
-                                  onClearPreview={onClearSourcePreview}
-                                  onStartOrAttach={onStartOrAttach}
-                                />
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="rounded-xl border border-dashed border-border/60 py-8 px-4 flex flex-col items-center justify-center gap-3 bg-zinc-50/50 dark:bg-zinc-900/20 text-center transition-all hover:bg-zinc-50 dark:hover:bg-zinc-900/40">
-                              <span className="text-xs font-bold text-muted-foreground">
-                                {copy.noVideo}
-                              </span>
-                            </div>
-                          )}
+                      {!isCollapsed && (
+                        <div className="mt-3 grid grid-rows-[1fr] opacity-100 transition-all duration-300 ease-in-out">
+                          <div className="min-h-0">
+                            {group.cards.length > 0 ? (
+                              <div className="flex flex-col gap-2">
+                                {group.cards.map((card) => (
+                                  <SniffCard
+                                    key={card.id}
+                                    card={card}
+                                    copy={copy}
+                                    isBusy={scene.meta.isBusy}
+                                    onPreview={onPreviewSource}
+                                    onClearPreview={onClearSourcePreview}
+                                    onStartOrAttach={onStartOrAttach}
+                                  />
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="rounded-xl border border-dashed border-border/60 py-8 px-4 flex flex-col items-center justify-center gap-3 bg-zinc-50/50 dark:bg-zinc-900/20 text-center transition-all hover:bg-zinc-50 dark:hover:bg-zinc-900/40">
+                                <span className="text-xs font-bold text-muted-foreground">
+                                  {copy.noVideo}
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </>
                   );
                 })()}
               </section>
             ))
           ) : (
-            <div className="flex flex-col items-center justify-center py-20 px-6 rounded-[2rem] border border-dashed border-border/60 bg-gradient-to-b from-white/50 to-zinc-50/80 dark:from-zinc-900/20 dark:to-zinc-950/40 text-center gap-5 shadow-sm">
+            <div className="flex flex-col items-center justify-center py-20 px-6 rounded-xl border border-dashed border-border/60 bg-gradient-to-b from-white/50 to-zinc-50/80 dark:from-zinc-900/20 dark:to-zinc-950/40 text-center gap-5 shadow-sm">
               <div className="relative group">
                 <div className="absolute -inset-4 rounded-full bg-blue-500/5 blur-xl animate-pulse" />
                 <div className="relative size-16 rounded-2xl bg-white dark:bg-zinc-900 border border-border shadow-sm flex items-center justify-center overflow-hidden transition-transform duration-500 group-hover:scale-105 group-hover:shadow-md">
@@ -456,6 +453,7 @@ function SniffCard({
     >
       {/* Clickable Overlay */}
       <button
+        data-testid={`popup-sniff-switch-${card.id}`}
         type="button"
         onClick={() => onStartOrAttach("sniff", { selectedVideoId: card.id })}
         disabled={isBusy}
@@ -660,8 +658,11 @@ export function UploadPanel({
     : copy.playerDesc;
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 animate-in fade-in zoom-in-95 duration-400">
-      <div onClick={onOpenPlayer} className="cursor-pointer group/upload" data-testid="popup-upload-panel">
+    <div
+      className="flex-1 flex flex-col items-center justify-center p-6 animate-in fade-in zoom-in-95 duration-400"
+      data-testid="popup-upload-panel"
+    >
+      <div onClick={onOpenPlayer} className="cursor-pointer group/upload">
         <StatusIconVisual
           icon={FileVideo}
           colorClass={isLocalPlaybackActive ? "emerald" : "blue"}

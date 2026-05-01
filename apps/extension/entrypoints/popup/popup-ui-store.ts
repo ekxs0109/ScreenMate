@@ -39,12 +39,15 @@ export const usePopupUiStore = create<PopupUiStore>()(
         set({ passwordDraft, passwordSaved: false }),
       markPasswordSaved: () => set({ passwordSaved: true }),
       appendLocalMessage: (text) =>
-        set((state) => ({
-          messages: [
-            ...state.messages,
-            { id: `local-${Date.now()}`, sender: "You", text },
-          ],
-        })),
+        set((state) => {
+          const now = Date.now();
+          return {
+            messages: [
+              ...state.messages,
+              { id: `local-${now}`, sender: "You", text, timestamp: now },
+            ],
+          };
+        }),
       setSniffScrollTop: (sniffScrollTop) => set({ sniffScrollTop }),
     }),
     {
