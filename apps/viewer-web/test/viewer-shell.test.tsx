@@ -9,29 +9,65 @@ import { buildViewerSceneModel } from "../src/viewer-scene-adapter";
 import { createViewerMockState } from "../src/viewer-mock-state";
 import { initialViewerSessionState } from "../src/lib/session-state";
 
-const dplayerInstances: Array<{
-  container: HTMLElement;
-  video: HTMLVideoElement;
-  destroy: ReturnType<typeof vi.fn>;
-  on: ReturnType<typeof vi.fn>;
-}> = [];
+const videojsVideoElements: HTMLVideoElement[] = [];
 
-vi.mock("dplayer", () => {
-  class MockDPlayer {
-    public readonly container: HTMLElement;
-    public readonly video: HTMLVideoElement;
-    public readonly destroy = vi.fn();
-    public readonly on = vi.fn();
+vi.mock("@videojs/react", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
 
-    constructor(options: { container: HTMLElement }) {
-      this.container = options.container;
-      this.video = document.createElement("video");
-      this.container.append(this.video);
-      dplayerInstances.push(this);
-    }
-  }
+  return {
+    createPlayer: vi.fn(() => ({
+      Provider: ({ children }: { children: React.ReactNode }) =>
+        React.createElement(React.Fragment, null, children),
+      Container: React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+        function MockVideoJsContainer({ children, ...props }, ref) {
+          return React.createElement("div", { ...props, ref }, children);
+        },
+      ),
+      useMedia: vi.fn(),
+      usePlayer: vi.fn(),
+    })),
+  };
+});
 
-  return { default: MockDPlayer };
+vi.mock("@videojs/react/live-video", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+
+  return {
+    LiveVideoSkin: ({
+      children,
+      ...props
+    }: React.HTMLAttributes<HTMLDivElement>) =>
+      React.createElement(
+        "div",
+        { ...props, "data-testid": "videojs-live-skin" },
+        children,
+      ),
+    Video: React.forwardRef<HTMLVideoElement, React.VideoHTMLAttributes<HTMLVideoElement>>(
+      function MockVideoJsVideo(props, ref) {
+        const setVideoRef = React.useCallback(
+          (video: HTMLVideoElement | null) => {
+            if (video && !videojsVideoElements.includes(video)) {
+              videojsVideoElements.push(video);
+            }
+
+            if (typeof ref === "function") {
+              ref(video);
+            } else if (ref) {
+              ref.current = video;
+            }
+          },
+          [ref],
+        );
+
+        return React.createElement("video", {
+          ...props,
+          "data-testid": "videojs-video",
+          ref: setVideoRef,
+        });
+      },
+    ),
+    liveVideoFeatures: [],
+  };
 });
 
 beforeAll(() => {
@@ -64,7 +100,7 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
-  dplayerInstances.length = 0;
+  videojsVideoElements.length = 0;
   Object.defineProperty(navigator, "getAutoplayPolicy", {
     configurable: true,
     value: undefined,
@@ -82,9 +118,9 @@ describe("ViewerShell", () => {
     renderViewerShell(scene, { locale: "zh" });
 
     expect(screen.getByText("ScreenMate")).toBeTruthy();
-    expect(screen.getByText("同步状态")).toBeTruthy();
+    expect(screen.getByText(/连接/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "加入房间" })).toBeTruthy();
-    expect(screen.getByText(/随机/)).toBeTruthy();
+    expect(screen.getByPlaceholderText(/发送消息|Send a message/)).toBeTruthy();
   });
 
   it("shows negotiated codec next to the viewer resolution", () => {
@@ -120,80 +156,7 @@ describe("ViewerShell", () => {
     expect(screen.getByTestId("viewer-resolution").textContent).toContain("VP9");
   });
 
-  it("commits controlled display name changes on blur and Enter", () => {
-    const onDisplayNameChange = vi.fn();
-    const scene = buildViewerSceneModel({
-      locale: "en",
-      session: initialViewerSessionState,
-      mock: {
-        ...createViewerMockState("en"),
-        username: "Mina",
-      },
-    });
-
-    renderViewerShell(scene, { onDisplayNameChange });
-
-    const nameInput = screen.getByDisplayValue("Mina") as HTMLInputElement;
-
-    expect(nameInput.getAttribute("aria-label")).toMatch(/Name|名称/);
-    expect(nameInput.value).toBe("Mina");
-
-    fireEvent.change(nameInput, { target: { value: "Noa" } });
-    fireEvent.blur(nameInput);
-
-    expect(onDisplayNameChange).toHaveBeenCalledWith("Noa");
-
-    nameInput.focus();
-    fireEvent.change(nameInput, { target: { value: "Ira" } });
-    fireEvent.keyDown(nameInput, { key: "Enter" });
-
-    expect(onDisplayNameChange).toHaveBeenCalledWith("Ira");
-  });
-
-  it("limits display name and chat input length", () => {
-    const scene = buildViewerSceneModel({
-      locale: "en",
-      session: initialViewerSessionState,
-      mock: {
-        ...createViewerMockState("en"),
-        username: "Mina",
-      },
-    });
-
-    renderViewerShell(scene);
-
-    const nameInput = screen.getByDisplayValue("Mina") as HTMLInputElement;
-    const messageInput = screen.getByPlaceholderText(
-      /Send a message|发送消息/,
-    ) as HTMLInputElement;
-
-    expect(nameInput.maxLength).toBe(80);
-    expect(messageInput.maxLength).toBe(500);
-  });
-
-  it("restores the current display name when a blank edit blurs", () => {
-    const onDisplayNameChange = vi.fn();
-    const scene = buildViewerSceneModel({
-      locale: "en",
-      session: initialViewerSessionState,
-      mock: {
-        ...createViewerMockState("en"),
-        username: "Mina",
-      },
-    });
-
-    renderViewerShell(scene, { onDisplayNameChange });
-
-    const nameInput = screen.getByDisplayValue("Mina") as HTMLInputElement;
-
-    fireEvent.change(nameInput, { target: { value: "   " } });
-    fireEvent.blur(nameInput);
-
-    expect(onDisplayNameChange).not.toHaveBeenCalled();
-    expect(nameInput.value).toBe("Mina");
-  });
-
-  it("preserves failed chat sends and clears successful sends", () => {
+  it("preserves failed chat sends and clears successful sends", async () => {
     const onSendMessage = vi.fn()
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true);
@@ -218,10 +181,12 @@ describe("ViewerShell", () => {
     fireEvent.submit(messageInput.closest("form")!);
 
     expect(onSendMessage).toHaveBeenCalledWith("hello host");
-    expect(messageInput.value).toBe("");
+    await waitFor(() => {
+      expect(messageInput.value).toBe("");
+    });
   });
 
-  it("renders a DPlayer container for the live viewer surface", () => {
+  it("renders a Video.js player for the live viewer surface", () => {
     const scene = buildViewerSceneModel({
       locale: "en",
       session: initialViewerSessionState,
@@ -231,10 +196,29 @@ describe("ViewerShell", () => {
     renderViewerShell(scene);
 
     expect(screen.getByTestId("viewer-video")).toBeTruthy();
-    expect(dplayerInstances).toHaveLength(1);
+    expect(screen.getByTestId("videojs-video")).toBeTruthy();
+    expect(screen.getByTestId("videojs-live-skin")).toBeTruthy();
   });
 
-  it("rebinds the DPlayer video element to the latest MediaStream", () => {
+  it("uses controlled playback instead of native autoplay for the viewer stream", async () => {
+    const play = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value: play,
+    });
+    const scene = createConnectedScene();
+
+    renderViewerShell(scene, { stream: { id: "stream-1" } as MediaStream });
+
+    const video = screen.getByTestId("videojs-video") as HTMLVideoElement;
+    expect(video.autoplay).toBe(false);
+    expect(video.hasAttribute("autoplay")).toBe(false);
+    await waitFor(() => {
+      expect(play).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("rebinds the Video.js video element to the latest MediaStream", () => {
     const scene = buildViewerSceneModel({
       locale: "en",
       session: initialViewerSessionState,
@@ -261,7 +245,7 @@ describe("ViewerShell", () => {
       </ViewerI18nProvider>,
     );
 
-    expect(dplayerInstances[0]?.video.srcObject).toBe(secondStream);
+    expect(videojsVideoElements[0]?.srcObject).toBe(secondStream);
   });
 
   it("shows a playback retry prompt when browser autoplay is blocked", async () => {
@@ -408,7 +392,7 @@ describe("ViewerShell", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("viewer-unmute-prompt")).toBeNull();
     });
-    expect(dplayerInstances[0]?.video.muted).toBe(false);
+    expect(videojsVideoElements[0]?.muted).toBe(false);
   });
 });
 

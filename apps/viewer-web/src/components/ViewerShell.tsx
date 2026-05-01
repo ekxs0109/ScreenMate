@@ -1,7 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, LogIn, LogOut, Monitor, Pause, Radio, Send, Shuffle, Users } from "lucide-react";
+import {
+  Activity,
+  LogIn,
+  LogOut,
+  Monitor,
+  Pause,
+  Radio,
+  Send,
+  Shuffle,
+  Users,
+} from "lucide-react";
 import { useTheme } from "next-themes";
-import DPlayer from "dplayer";
+import { createPlayer } from "@videojs/react";
+import {
+  LiveVideoSkin,
+  Video,
+  liveVideoFeatures,
+} from "@videojs/react/live-video";
+import "@videojs/react/live-video/skin.css";
 import { JoinForm } from "./JoinForm";
 import type { ViewerSceneModel } from "../viewer-scene-model";
 import { cn } from "../lib/utils";
@@ -20,6 +36,11 @@ import {
 type PlaybackPrompt = "play" | "unmute" | null;
 
 const viewerPlayerLogger = createLogger("viewer:player");
+const viewerVideoPlayer = createPlayer({
+  displayName: "ViewerVideoPlayer",
+  features: liveVideoFeatures,
+});
+const ViewerVideoProvider = viewerVideoPlayer.Provider;
 
 function getStreamResolution(stream: MediaStream | null) {
   if (!stream) {
@@ -58,9 +79,9 @@ export function ViewerShell({
   const { resolvedTheme, setTheme, theme } = useTheme();
   const { copy, locale, setLocale } = useViewerI18n();
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
-  const playerRef = useRef<DPlayer | null>(null);
   const playerVideoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(stream);
+  const boundStreamRef = useRef<MediaStream | null>(null);
   const resolutionCleanupRef = useRef<(() => void) | null>(null);
   const playbackAttemptRef = useRef(0);
   const [playbackPrompt, setPlaybackPrompt] = useState<PlaybackPrompt>(null);
@@ -150,6 +171,7 @@ export function ViewerShell({
     playbackAttemptRef.current += 1;
     resolutionCleanupRef.current?.();
     resolutionCleanupRef.current = null;
+    boundStreamRef.current = null;
     viewerPlayerLogger.debug("Clearing viewer video element.", {
       hadStream: Boolean(video.srcObject),
       paused: video.paused,
@@ -320,8 +342,12 @@ export function ViewerShell({
 
   const bindStreamToVideo = useCallback(
     (video: HTMLVideoElement, nextStream: MediaStream | null) => {
+      if (video.srcObject === nextStream && boundStreamRef.current === nextStream) {
+        return;
+      }
+
       clearPlayerVideo(video);
-      video.autoplay = true;
+      video.autoplay = false;
       video.playsInline = true;
 
       if (!nextStream) {
@@ -330,6 +356,7 @@ export function ViewerShell({
       }
 
       video.srcObject = nextStream;
+      boundStreamRef.current = nextStream;
       trackVideoResolution(video, nextStream);
 
       const autoplayPolicy = getAutoplayPolicy(video);
@@ -376,7 +403,6 @@ export function ViewerShell({
     (nextStream: MediaStream | null) => {
       const nextVideo =
         playerVideoRef.current ??
-        playerRef.current?.video ??
         playerContainerRef.current?.querySelector("video") ??
         null;
 
@@ -398,7 +424,6 @@ export function ViewerShell({
   const retryPlayback = useCallback(() => {
     const video =
       playerVideoRef.current ??
-      playerRef.current?.video ??
       playerContainerRef.current?.querySelector("video") ??
       null;
 
@@ -417,7 +442,6 @@ export function ViewerShell({
   const resumeAudio = useCallback(() => {
     const video =
       playerVideoRef.current ??
-      playerRef.current?.video ??
       playerContainerRef.current?.querySelector("video") ??
       null;
 
@@ -433,64 +457,54 @@ export function ViewerShell({
     });
   }, [tryPlayVideo]);
 
+  const attachPlayerVideo = useCallback(
+    (video: HTMLVideoElement | null) => {
+      if (!video) {
+        return;
+      }
+
+      playerVideoRef.current = video;
+      bindStreamToVideo(video, streamRef.current);
+      viewerPlayerLogger.info("Attached viewer Video.js video element.", {
+        hasInitialStream: Boolean(streamRef.current),
+      });
+    },
+    [bindStreamToVideo],
+  );
+
   useEffect(() => {
-    const container = playerContainerRef.current;
-    if (!container || playerRef.current) {
-      return;
-    }
+    const handleFullscreenChange = () => {
+      const container = playerContainerRef.current;
+      setIsWebFullscreen(
+        Boolean(
+          container &&
+            document.fullscreenElement &&
+            container.contains(document.fullscreenElement),
+        ),
+      );
+    };
 
-    const nextPlayer = new DPlayer({
-      autoplay: true,
-      container,
-      live: true,
-      mutex: false,
-      video: {
-        url: "about:blank",
-        type: "webrtc-stream",
-        customType: {
-          "webrtc-stream": (video) => {
-            playerVideoRef.current = video;
-            bindStreamToVideo(video, streamRef.current);
-          },
-        },
-      },
-    });
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
 
-    viewerPlayerLogger.info("Created viewer DPlayer instance.", {
-      hasInitialStream: Boolean(streamRef.current),
-    });
-    playerRef.current = nextPlayer;
-
-    const handleWebFullscreen = () => setIsWebFullscreen(true);
-    const handleWebFullscreenCancel = () => setIsWebFullscreen(false);
-
-    nextPlayer.on("webfullscreen", handleWebFullscreen);
-    nextPlayer.on("webfullscreen_cancel", handleWebFullscreenCancel);
-
-    if (nextPlayer.video) {
-      playerVideoRef.current = nextPlayer.video;
-      bindStreamToVideo(nextPlayer.video, streamRef.current);
-    }
-
+  useEffect(() => {
     return () => {
       const video =
         playerVideoRef.current ??
-        nextPlayer.video ??
-        container.querySelector("video") ??
+        playerContainerRef.current?.querySelector("video") ??
         null;
 
       if (video) {
         clearPlayerVideo(video);
       }
 
-      nextPlayer.destroy();
-      viewerPlayerLogger.info("Destroyed viewer DPlayer instance.");
-      if (playerRef.current === nextPlayer) {
-        playerRef.current = null;
-      }
+      viewerPlayerLogger.info("Unmounted viewer Video.js player.");
       playerVideoRef.current = null;
     };
-  }, [bindStreamToVideo, clearPlayerVideo]);
+  }, [clearPlayerVideo]);
 
   const handleThemeToggle = useCallback(() => {
     const nextTheme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
@@ -569,8 +583,19 @@ export function ViewerShell({
               <div
                 data-testid="viewer-video"
                 ref={playerContainerRef}
-                className="absolute inset-0 h-full w-full outline-none [&_.dplayer]:h-full [&_.dplayer]:w-full [&_.dplayer-video-wrap]:h-full [&_video]:h-full [&_video]:w-full [&_video]:object-contain"
-              />
+                className="absolute inset-0 h-full w-full outline-none [&_.vjs-root]:h-full [&_.vjs-root]:w-full [&_video]:h-full [&_video]:w-full [&_video]:object-contain"
+              >
+                <ViewerVideoProvider>
+                  <LiveVideoSkin className="vjs-root h-full w-full bg-black">
+                    <Video
+                      ref={attachPlayerVideo}
+                      playsInline
+                      preload="auto"
+                      className="h-full w-full bg-black object-contain"
+                    />
+                  </LiveVideoSkin>
+                </ViewerVideoProvider>
+              </div>
 
               {/* OSD Status (Host pausing) */}            {scene.player.showWaitingOverlay && (
                 <div className="absolute inset-0 bg-black/60 flex items-center justify-center transition-opacity backdrop-blur-sm pointer-events-none">

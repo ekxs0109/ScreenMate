@@ -1,6 +1,12 @@
 import { useState, useMemo, useEffect, useRef, ChangeEvent } from "react";
 import { useTheme } from "next-themes";
-import DPlayer from "dplayer";
+import { createPlayer } from "@videojs/react";
+import {
+  Video as VideoJsVideo,
+  VideoSkin,
+  videoFeatures,
+} from "@videojs/react/video";
+import "@videojs/react/video/skin.css";
 import { browser } from "wxt/browser";
 import {
   Video,
@@ -29,7 +35,7 @@ import {
   MonitorPlay,
   Play,
   Pause,
-  Maximize
+  Maximize,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { HeaderControls } from "../../components/header-controls";
@@ -45,6 +51,17 @@ import { ChatPanel } from "../../components/chat-panel";
 import { ViewerList } from "../../components/viewer-list";
 const cubesPattern = "/patterns/cubes.png";
 const RESTORED_PLAYBACK_SYNC_SUPPRESSION_MS = 750;
+const LocalVideoJsPlayer = createPlayer({
+  features: videoFeatures,
+  displayName: "ScreenMateLocalVideoPlayer",
+});
+
+function releaseVideoSurface(video: HTMLVideoElement) {
+  video.pause?.();
+  video.srcObject = null;
+  video.removeAttribute("src");
+  video.load?.();
+}
 
 function getPlayerI18nMessage(key: string, fallback: string) {
   try {
@@ -103,8 +120,7 @@ export default function PlayerApp() {
   const [isResizing, setIsResizing] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const playerContainerRef = useRef<HTMLDivElement | null>(null);
-  const playerRef = useRef<DPlayer | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const fileUrlRef = useRef<string | null>(null);
   const lastToastMessageRef = useRef<string | null>(null);
   const attemptedPreparedUploadRestoreRef = useRef<string | null>(null);
@@ -181,25 +197,12 @@ export default function PlayerApp() {
   );
 
   const clearPlayerSurface = () => {
-    const player = playerRef.current;
-    if (!player) {
+    const video = localVideoRef.current;
+    if (!video) {
       return;
     }
 
-    const video =
-      player.video ??
-      playerContainerRef.current?.querySelector("video") ??
-      null;
-
-    if (video) {
-      video.pause?.();
-      video.srcObject = null;
-      video.removeAttribute("src");
-      video.load?.();
-    }
-
-    player.destroy();
-    playerRef.current = null;
+    releaseVideoSurface(video);
   };
 
   const releasePlaybackSyncSuppression = () => {
@@ -397,33 +400,23 @@ export default function PlayerApp() {
   }, [preparedSourceState, pushToast, setActiveSourceType, setLocalFile]);
 
   useEffect(() => {
-    clearPlayerSurface();
+    const handleFullscreenChange = () => {
+      const video = localVideoRef.current;
+      setIsWebFullscreen(
+        Boolean(video && document.fullscreenElement?.contains(video)),
+      );
+    };
 
-    const container = playerContainerRef.current;
-    if (!fileUrl || !container) {
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const video = localVideoRef.current;
+    if (!fileUrl || !video) {
       return;
-    }
-
-    const nextPlayer = new DPlayer({
-      autoplay: true,
-      container,
-      mutex: false,
-      video: {
-        url: fileUrl,
-      },
-    });
-
-    playerRef.current = nextPlayer;
-
-    const handleWebFullscreen = () => setIsWebFullscreen(true);
-    const handleWebFullscreenCancel = () => setIsWebFullscreen(false);
-
-    nextPlayer.on("webfullscreen", handleWebFullscreen);
-    nextPlayer.on("webfullscreen_cancel", handleWebFullscreenCancel);
-
-    const video = nextPlayer.video ?? container.querySelector("video");
-    if (video) {
-      video.id ||= "screenmate-player-local-video";
     }
 
     const syncPlayback = (action: "play" | "pause" | "seek") => {
@@ -498,9 +491,7 @@ export default function PlayerApp() {
       video?.removeEventListener("pause", handlePause);
       video?.removeEventListener("seeked", handleSeeked);
       video?.removeEventListener("ratechange", syncPlaybackRate);
-      if (playerRef.current === nextPlayer) {
-        clearPlayerSurface();
-      }
+      releaseVideoSurface(video);
     };
   }, [fileUrl]);
 
@@ -555,11 +546,25 @@ export default function PlayerApp() {
           >
             {fileUrl ? (
               <div className="absolute inset-0 w-full h-full flex items-center justify-center group overflow-hidden bg-black">
-                <div
-                  ref={playerContainerRef}
-                  data-testid="extension-player-video"
-                  className="absolute inset-0 h-full w-full outline-none [&_.dplayer]:h-full [&_.dplayer]:w-full [&_.dplayer-video-wrap]:h-full [&_video]:h-full [&_video]:w-full [&_video]:object-contain"
-                />
+                <LocalVideoJsPlayer.Provider>
+                  <div
+                    data-testid="extension-player-video"
+                    className="absolute inset-0 h-full w-full outline-none [&_video]:h-full [&_video]:w-full [&_video]:object-contain"
+                  >
+                    <VideoSkin className="h-full w-full !rounded-none">
+                      <VideoJsVideo
+                        ref={localVideoRef}
+                        key={fileUrl}
+                        id="screenmate-player-local-video"
+                        src={fileUrl}
+                        autoPlay
+                        playsInline
+                        preload="metadata"
+                        className="h-full w-full object-contain"
+                      />
+                    </VideoSkin>
+                  </div>
+                </LocalVideoJsPlayer.Provider>
 
                 {/* Custom floating title overlay on hover */}
                 <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex items-start justify-between">
