@@ -288,6 +288,12 @@ type AttachmentSignalTarget = {
   tabId: number;
   frameId: number;
 };
+type ActiveTabCandidate = {
+  id: number;
+  title?: string;
+  url?: string;
+  isLastFocused?: boolean;
+};
 type AttachmentRoutingState = {
   pendingAttachmentTarget: AttachmentSignalTarget | null;
   followActiveTabVideoPromise: Promise<HostRoomSnapshot> | null;
@@ -306,6 +312,7 @@ type HostMessageHandlerDependencies = {
   queryCurrentWindowTabs?: () => Promise<
     Array<{ id: number; title?: string; url?: string }>
   >;
+  queryActiveTabCandidates?: () => Promise<ActiveTabCandidate[]>;
   queryFrameIds: (tabId: number) => Promise<number[]>;
   runtime: HostRoomRuntime;
   videoCache?: VideoSourceCache;
@@ -953,6 +960,29 @@ export default defineBackground(() => {
           url: tab.url,
         }));
     },
+    queryActiveTabCandidates: async () => {
+      const lastFocusedActiveTabId = await messageDependencies.queryActiveTabId();
+      const windows = await browser.windows.getAll({ populate: true });
+
+      return windows
+        .filter(
+          (window) =>
+            window.type === "normal" &&
+            window.state !== "minimized" &&
+            Array.isArray(window.tabs),
+        )
+        .flatMap((window) => window.tabs ?? [])
+        .filter(
+          (tab): tab is Browser.tabs.Tab & { id: number } =>
+            tab.active === true && typeof tab.id === "number",
+        )
+        .map((tab) => ({
+          id: tab.id,
+          title: tab.title,
+          url: tab.url,
+          isLastFocused: tab.id === lastFocusedActiveTabId,
+        }));
+    },
     queryFrameIds: async (tabId) => {
       const frames = (await browser.webNavigation.getAllFrames({ tabId })) ?? [];
       const frameIds = frames
@@ -1000,6 +1030,12 @@ export default defineBackground(() => {
 
   browser.tabs.onRemoved.addListener((tabId) => {
     void videoCache.removeTab(tabId);
+    void markRemovedTabAttachmentOwner(messageDependencies, tabId).catch((error) => {
+      backgroundLogger.warn("Could not mark removed attachment owner.", {
+        error: toErrorMessage(error),
+        tabId,
+      });
+    });
   });
 
   const scheduleFollowActiveTabVideo = createFollowActiveTabVideoScheduler({
@@ -1057,6 +1093,24 @@ export async function notifyAttachedContentChat({
     });
     return false;
   }
+}
+
+export async function markRemovedTabAttachmentOwner(
+  dependencies: {
+    runtime: Pick<HostRoomRuntime, "getSnapshot" | "markRecovering">;
+  },
+  tabId: number,
+): Promise<HostRoomSnapshot> {
+  const snapshot = dependencies.runtime.getSnapshot();
+  if (
+    snapshot.sourceState !== "attached" ||
+    snapshot.activeTabId !== tabId ||
+    isSpecialAttachmentOwner(snapshot)
+  ) {
+    return snapshot;
+  }
+
+  return dependencies.runtime.markRecovering("content-invalidated");
 }
 
 function createOffscreenDocumentEnsurer() {
@@ -1508,7 +1562,8 @@ async function shouldFollowContentReadyTab(
     return false;
   }
 
-  if (await isScreenMateViewerTab(dependencies, tabId)) {
+  const tabMetadata = await querySniffTabById(dependencies, tabId);
+  if (isScreenMateViewerUrl(tabMetadata?.url, dependencies.viewerBaseUrl)) {
     backgroundLogger.info("Ignoring content-ready follow from ScreenMate viewer tab.", {
       tabId,
     });
@@ -1631,23 +1686,34 @@ async function followActiveTabVideoOnceUnserialized(
     return snapshot;
   }
 
-  if (activeTabId === null) {
-    if (
-      isStaleFollowActiveTabVideoRun(
-        dependencies,
-        followActiveTabVideoGeneration,
-      )
-    ) {
-      return getStaleFollowActiveTabVideoSnapshot(dependencies, {
-        activeTabId,
-        stage: "missing-active-tab",
-      });
-    }
-    await detachCurrentAttachmentOwner(dependencies, snapshot);
-    return dependencies.runtime.markMissing("No video attached.");
-  }
+  const candidates = await resolveFollowActiveTabCandidates(
+    dependencies,
+    activeTabId,
+    snapshot,
+  );
+  let scannedTabCount = 0;
+  let videoCount = 0;
 
-  if (await isScreenMateViewerTab(dependencies, activeTabId)) {
+  for (const candidate of candidates) {
+    const scannableCandidate = await toScannableFollowCandidate(
+      dependencies,
+      candidate,
+    );
+    if (!scannableCandidate) {
+      continue;
+    }
+
+    const candidateVideos = await listVideosForTab(
+      dependencies,
+      scannableCandidate.id,
+      scannableCandidate.title,
+    );
+    scannedTabCount += 1;
+    videoCount += candidateVideos.length;
+    await getVideoCache(dependencies).setForTab(
+      scannableCandidate.id,
+      candidateVideos,
+    );
     if (
       isStaleFollowActiveTabVideoRun(
         dependencies,
@@ -1655,19 +1721,56 @@ async function followActiveTabVideoOnceUnserialized(
       )
     ) {
       return getStaleFollowActiveTabVideoSnapshot(dependencies, {
-        activeTabId,
-        stage: "viewer-tab",
+        activeTabId: scannableCandidate.id,
+        stage: "after-video-scan",
       });
     }
-    backgroundLogger.info("Active tab follow ignored the ScreenMate viewer tab.", {
-      activeTabId,
+
+    const bestVideo = selectBestFollowVideo(candidateVideos);
+    if (!bestVideo) {
+      continue;
+    }
+
+    const latestSnapshot = dependencies.runtime.getSnapshot();
+    const currentFingerprint = dependencies.runtime.getSourceFingerprint();
+    if (
+      latestSnapshot.sourceState === "attached" &&
+      currentFingerprint &&
+      bestVideo.fingerprint &&
+      isSameAttachedFollowSource(currentFingerprint, bestVideo)
+    ) {
+      backgroundLogger.info("Active tab follow skipped duplicate source.", {
+        activeTabId: scannableCandidate.id,
+        frameId: bestVideo.frameId,
+        videoId: bestVideo.id,
+      });
+      return latestSnapshot;
+    }
+
+    backgroundLogger.info("Active tab follow attaching best video.", {
+      activeTabId: scannableCandidate.id,
+      frameId: bestVideo.frameId,
+      isPlaying: bestVideo.isPlaying === true,
+      label: bestVideo.label,
+      videoId: bestVideo.id,
+      visibleArea: bestVideo.visibleArea ?? null,
     });
-    await detachCurrentAttachmentOwner(dependencies, snapshot);
-    return dependencies.runtime.markMissing("No video attached.");
+
+    return attachSourceInFrame(
+      dependencies,
+      scannableCandidate.id,
+      {
+        type: "screenmate:attach-source",
+        frameId: bestVideo.frameId,
+        tabId: scannableCandidate.id,
+        videoId: bestVideo.id,
+      },
+      {
+        followActiveTabVideoGeneration,
+      },
+    );
   }
 
-  const videos = await listVideosForTab(dependencies, activeTabId);
-  await getVideoCache(dependencies).setForTab(activeTabId, videos);
   if (
     isStaleFollowActiveTabVideoRun(
       dependencies,
@@ -1676,58 +1779,114 @@ async function followActiveTabVideoOnceUnserialized(
   ) {
     return getStaleFollowActiveTabVideoSnapshot(dependencies, {
       activeTabId,
-      stage: "after-video-scan",
+      stage: "after-candidate-scan",
     });
   }
 
-  const bestVideo = selectBestFollowVideo(videos);
+  backgroundLogger.info("Active tab follow found no usable video.", {
+    activeTabId,
+    candidateCount: candidates.length,
+    scannedTabCount,
+    videoCount,
+  });
+  return preserveCurrentFollowSourceOrMarkMissing(dependencies);
+}
 
-  if (!bestVideo) {
-    backgroundLogger.info("Active tab follow found no usable video.", {
-      activeTabId,
-      videoCount: videos.length,
+async function resolveFollowActiveTabCandidates(
+  dependencies: HostMessageHandlerDependencies,
+  activeTabId: number | null,
+  snapshot: HostRoomSnapshot,
+): Promise<ActiveTabCandidate[]> {
+  const candidates: ActiveTabCandidate[] = [];
+  const seenTabIds = new Set<number>();
+  const addCandidate = (candidate: ActiveTabCandidate | null | undefined) => {
+    if (!candidate || seenTabIds.has(candidate.id)) {
+      return;
+    }
+
+    seenTabIds.add(candidate.id);
+    candidates.push(candidate);
+  };
+
+  if (activeTabId !== null) {
+    addCandidate({
+      id: activeTabId,
+      isLastFocused: true,
     });
-    await detachCurrentAttachmentOwner(dependencies, snapshot);
-    return dependencies.runtime.markMissing("No video attached.");
   }
 
-  const currentFingerprint = dependencies.runtime.getSourceFingerprint();
   if (
-    snapshot.sourceState === "attached" &&
-    currentFingerprint &&
-    bestVideo.fingerprint &&
-    isSameAttachedFollowSource(currentFingerprint, bestVideo)
+    (snapshot.sourceState === "attached" || snapshot.sourceState === "recovering") &&
+    typeof snapshot.activeTabId === "number" &&
+    !isSpecialAttachmentOwner(snapshot)
   ) {
-    backgroundLogger.info("Active tab follow skipped duplicate source.", {
-      activeTabId,
-      frameId: bestVideo.frameId,
-      videoId: bestVideo.id,
+    addCandidate({
+      id: snapshot.activeTabId,
+    });
+  }
+
+  const activeCandidates = await dependencies.queryActiveTabCandidates?.() ?? [];
+  for (const candidate of activeCandidates
+    .filter((candidate) => typeof candidate.id === "number")
+    .sort((left, right) => Number(right.isLastFocused === true) - Number(left.isLastFocused === true))) {
+    addCandidate(candidate);
+  }
+
+  return candidates;
+}
+
+async function toScannableFollowCandidate(
+  dependencies: HostMessageHandlerDependencies,
+  candidate: ActiveTabCandidate,
+): Promise<ActiveTabCandidate | null> {
+  const tabMetadata = await querySniffTabById(dependencies, candidate.id);
+  const enrichedCandidate = {
+    ...candidate,
+    ...(candidate.title === undefined && tabMetadata?.title !== undefined
+      ? { title: tabMetadata.title }
+      : {}),
+    ...(candidate.url === undefined && tabMetadata?.url !== undefined
+      ? { url: tabMetadata.url }
+      : {}),
+  };
+
+  if (isScreenMateViewerUrl(enrichedCandidate.url, dependencies.viewerBaseUrl)) {
+    backgroundLogger.info("Active tab follow ignored the ScreenMate viewer tab.", {
+      activeTabId: candidate.id,
+    });
+    return null;
+  }
+
+  if (!isScannableSourceTab(enrichedCandidate, dependencies.viewerBaseUrl)) {
+    backgroundLogger.info("Active tab follow ignored a non-scannable tab.", {
+      activeTabId: candidate.id,
+      url: enrichedCandidate.url ?? null,
+    });
+    return null;
+  }
+
+  return enrichedCandidate;
+}
+
+async function preserveCurrentFollowSourceOrMarkMissing(
+  dependencies: HostMessageHandlerDependencies,
+): Promise<HostRoomSnapshot> {
+  const snapshot = dependencies.runtime.getSnapshot();
+  if (
+    snapshot.sourceState === "attached" ||
+    snapshot.sourceState === "attaching" ||
+    snapshot.sourceState === "recovering" ||
+    snapshot.sourceState === "missing"
+  ) {
+    backgroundLogger.info("Keeping current automatic follow source state.", {
+      activeFrameId: snapshot.activeFrameId,
+      activeTabId: snapshot.activeTabId,
+      sourceState: snapshot.sourceState,
     });
     return snapshot;
   }
 
-  backgroundLogger.info("Active tab follow attaching best video.", {
-    activeTabId,
-    frameId: bestVideo.frameId,
-    isPlaying: bestVideo.isPlaying === true,
-    label: bestVideo.label,
-    videoId: bestVideo.id,
-    visibleArea: bestVideo.visibleArea ?? null,
-  });
-
-  return attachSourceInFrame(
-    dependencies,
-    activeTabId,
-    {
-      type: "screenmate:attach-source",
-      frameId: bestVideo.frameId,
-      tabId: activeTabId,
-      videoId: bestVideo.id,
-    },
-    {
-      followActiveTabVideoGeneration,
-    },
-  );
+  return dependencies.runtime.markMissing("No video attached.");
 }
 
 function isStaleFollowActiveTabVideoRun(
@@ -1993,14 +2152,6 @@ function isScannableSourceTab(
   }
 
   return !isScreenMateViewerUrl(tab.url, viewerBaseUrl);
-}
-
-async function isScreenMateViewerTab(
-  dependencies: HostMessageHandlerDependencies,
-  tabId: number,
-) {
-  const tab = await querySniffTabById(dependencies, tabId);
-  return isScreenMateViewerUrl(tab?.url, dependencies.viewerBaseUrl);
 }
 
 async function querySniffTabById(

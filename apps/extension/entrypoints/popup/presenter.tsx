@@ -8,7 +8,6 @@ import {
   Search,
   Sun,
   UploadCloud,
-  Zap,
   MonitorUp,
 } from "lucide-react";
 
@@ -305,14 +304,14 @@ function PopupCreateRoomGate({
       <div className="absolute -bottom-24 -right-24 size-64 rounded-full bg-emerald-500/10 blur-[60px] pointer-events-none" />
 
       <div className="group relative mb-8">
-        <div className="absolute -inset-1 rounded-3xl bg-gradient-to-b from-blue-500/20 to-transparent blur-lg transition-all duration-500 group-hover:opacity-100 opacity-60" />
-        <div className="relative flex size-20 items-center justify-center rounded-3xl border border-zinc-200/60 bg-white/50 text-blue-600 shadow-xl backdrop-blur-md transition-all duration-500 group-hover:scale-105 group-hover:border-blue-500/20 dark:border-zinc-800/60 dark:bg-zinc-950/50 dark:text-blue-400">
-          <div className="absolute inset-0 rounded-3xl bg-gradient-to-tr from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-          <LinkIcon className="size-8 stroke-[2]" />
+        {/* Pulse glow effect */}
+        <div className="absolute -inset-1.5 rounded-[2rem] bg-gradient-to-b from-blue-500/20 to-purple-500/20 blur-xl transition-all duration-700 opacity-60 group-hover:opacity-100 group-hover:scale-110 group-hover:animate-pulse" />
 
-          <div className="absolute -right-2 -top-2 flex size-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900 shadow-sm border border-white dark:border-zinc-900 transition-transform duration-500 group-hover:scale-110">
-            <Zap className="size-3 text-blue-600 dark:text-blue-400" />
-          </div>
+        <div className="relative flex size-20 items-center justify-center rounded-3xl border border-zinc-200/60 bg-white/50 text-blue-600 shadow-xl backdrop-blur-xl transition-all duration-500 group-hover:-translate-y-1 group-hover:scale-105 group-hover:border-blue-500/30 group-hover:shadow-2xl group-hover:shadow-blue-500/20 dark:border-zinc-800/60 dark:bg-zinc-950/50 dark:text-blue-400">
+          <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-blue-500/5 via-transparent to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+          {/* Main icon with subtle rotate and scale on hover */}
+          <LinkIcon className="relative size-8 stroke-[2] transition-all duration-500 group-hover:scale-110 group-hover:-rotate-12 group-hover:text-blue-500 dark:group-hover:text-blue-300" />
         </div>
       </div>
 

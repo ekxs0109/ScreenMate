@@ -505,10 +505,10 @@ export default function PlayerApp() {
   }, [fileUrl]);
 
   return (
-    <div className="w-full min-h-screen bg-zinc-100/50 dark:bg-zinc-950 p-0 sm:p-4 lg:p-6 flex flex-col font-sans transition-colors">
-      <div className="flex-1 flex flex-col bg-background text-foreground sm:rounded-xl overflow-hidden shadow-xl ring-1 ring-border/50 relative">
+    <div className="w-full min-h-screen bg-zinc-100/50 dark:bg-black p-0 sm:p-4 lg:p-6 flex flex-col font-sans transition-colors">
+      <div className="flex-1 flex flex-col bg-background dark:bg-zinc-900 text-foreground sm:rounded-xl overflow-hidden shadow-xl ring-1 ring-border/50 relative">
         {/* Header */}
-        <header className="h-14 border-b border-border bg-zinc-50/80 dark:bg-zinc-950/80 backdrop-blur-md flex items-center justify-between px-4 lg:px-6 shrink-0 relative z-20 ">
+        <header className="h-14 border-b border-border bg-zinc-50/80 dark:bg-zinc-900/80 backdrop-blur-md flex items-center justify-between px-4 lg:px-6 shrink-0 relative z-20 ">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold tracking-tight hidden sm:block">
@@ -527,7 +527,7 @@ export default function PlayerApp() {
                   <Hash className="w-3.5 h-3.5 text-blue-500" />
                   <span className="text-xs font-mono font-bold tracking-tight text-foreground">{snapshot.roomId}</span>
                 </div>
-                <button onClick={() => navigator.clipboard.writeText(snapshot.roomId!)} className="p-1.5 text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors border border-transparent hover:border-border flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-tight" title="Copy Room ID">
+                <button onClick={() => navigator.clipboard.writeText(snapshot.roomId!)} className="p-1.5 text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors border border-transparent hover:border-border flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-tight" title="Copy Room ID">
                   <Copy className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -544,11 +544,11 @@ export default function PlayerApp() {
         </header>
 
         {/* Main Content Floor */}
-        <main className="flex-1 overflow-hidden flex flex-col lg:flex-row bg-zinc-50 dark:bg-zinc-950">
+        <main className="flex-1 overflow-hidden flex flex-col lg:flex-row bg-zinc-50 dark:bg-zinc-900">
 
           {/* Left Side: Video Player or Upload Zone */}
           <div
-            className="flex-1 lg:flex-[2] flex flex-col relative shrink-0 z-10 bg-zinc-100 dark:bg-zinc-900/50 min-h-[40vh] lg:min-h-0"
+            className="flex-1 lg:flex-[2] flex flex-col relative shrink-0 z-10 bg-zinc-100 dark:bg-zinc-800/50 min-h-[40vh] lg:min-h-0"
             onDragOver={(e) => { e.preventDefault(); setIsHoveringDrop(true); }}
             onDragLeave={(e) => { e.preventDefault(); setIsHoveringDrop(false); }}
             onDrop={handleDrop}
@@ -584,7 +584,7 @@ export default function PlayerApp() {
                 </div>
               </div>
             ) : (
-              <div className={`absolute inset-0 flex items-center justify-center transition-colors duration-300 ${isHoveringDrop ? 'bg-blue-50/50 dark:bg-zinc-800/80 border-blue-500' : 'bg-transparent border-zinc-300 dark:border-zinc-800'} border-2 border-dashed m-4 lg:m-6 rounded-2xl`}>
+              <div className={`absolute inset-0 flex items-center justify-center transition-colors duration-300 ${isHoveringDrop ? 'bg-blue-50/50 dark:bg-zinc-800/80 border-blue-500' : 'bg-transparent border-zinc-300 dark:border-zinc-700'} border-2 border-dashed m-4 lg:m-6 rounded-2xl`}>
                 <div className="flex flex-col items-center max-w-md text-center p-6">
                   <div className={`w-20 h-20 rounded-full flex items-center justify-center mb-6 transition-all duration-300 shadow-sm ${isHoveringDrop ? 'bg-blue-600 scale-110 text-white' : 'bg-white dark:bg-zinc-800 text-zinc-400 border border-border'}`}>
                     <UploadCloud className={`w-10 h-10 ${isHoveringDrop ? 'text-white' : 'text-zinc-500'}`} />
@@ -626,13 +626,13 @@ export default function PlayerApp() {
           <div
             style={isWebFullscreen ? { width: 0 } : { "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
             className={cn(
-              "flex-1 lg:flex-none bg-zinc-50 dark:bg-zinc-950 flex flex-col shrink-0 border-t lg:border-l lg:border-t-0 border-border relative z-20 w-full lg:w-[var(--sidebar-width)]",
+              "flex-1 lg:flex-none bg-zinc-50 dark:bg-zinc-900 flex flex-col shrink-0 border-t lg:border-l lg:border-t-0 border-border relative z-20 w-full lg:w-[var(--sidebar-width)]",
               !isResizing && "transition-[width,transform,opacity] duration-300 ease-in-out",
               isWebFullscreen ? "translate-x-full opacity-0 pointer-events-none" : "translate-x-0 opacity-100"
             )}
           >
             {/* Sidebar Tabs */}
-            <div className="flex shrink-0 px-4 pt-3 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm border-b border-border gap-6">
+            <div className="flex shrink-0 px-4 pt-3 bg-white/50 dark:bg-zinc-800/50 backdrop-blur-sm border-b border-border gap-6">
               <button
                 onClick={() => setActiveTab('chat')}
                 className={cn(
@@ -650,7 +650,7 @@ export default function PlayerApp() {
                 )}
               >
                 {getPlayerI18nMessage("viewersTab", "Viewers")}
-                <span className="px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px] font-bold">
+                <span className="px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-700 text-[10px] font-bold">
                   {scene.roomTab.viewerDetails.length}
                 </span>
               </button>

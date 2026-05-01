@@ -365,9 +365,14 @@ export function SniffPanel({
                         </div>
                       </button>
 
-                      {!isCollapsed && (
-                        <div className="mt-3 grid grid-rows-[1fr] opacity-100 transition-all duration-300 ease-in-out">
-                          <div className="min-h-0">
+                      <div
+                        className={cn(
+                          "grid transition-all duration-300 ease-in-out",
+                          isCollapsed ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100"
+                        )}
+                      >
+                        <div className="min-h-0 overflow-hidden">
+                          <div className="pt-3">
                             {group.cards.length > 0 ? (
                               <div className="flex flex-col gap-2">
                                 {group.cards.map((card) => (
@@ -391,7 +396,7 @@ export function SniffPanel({
                             )}
                           </div>
                         </div>
-                      )}
+                      </div>
                     </>
                   );
                 })()}

@@ -4,6 +4,7 @@ import {
   ExternalLink,
   Hash,
   Info,
+  Check,
   Key,
   Users,
   LogOut,
@@ -80,7 +81,7 @@ export function RoomTabPanel({
 
                   <div className="flex flex-col gap-2 shrink-0 items-end">
                     <button
-                      className="h-8 px-3 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 font-bold text-xs flex items-center gap-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors border border-blue-100 dark:border-blue-800/50"
+                      className="h-8 px-3 rounded-lg bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200 font-bold text-xs flex items-center gap-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors border border-border/50"
                       onClick={onJumpToRoom}
                       type="button"
                     >
@@ -137,13 +138,20 @@ export function RoomTabPanel({
                       onClick={onSavePassword}
                       type="button"
                       className={cn(
-                        "h-8 px-4 rounded-lg font-bold text-xs transition-all shadow-sm whitespace-nowrap",
+                        "h-8 px-4 rounded-lg font-bold text-xs transition-all whitespace-nowrap border flex items-center justify-center",
                         scene.roomTab.passwordSaved
-                          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800/50"
-                          : "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 border border-transparent",
+                          ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 border-emerald-200/50 dark:border-emerald-500/20"
+                          : "bg-zinc-100 text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 border-border/50 shadow-sm",
                       )}
                     >
-                      {scene.roomTab.passwordSaved ? copy.saved : copy.save}
+                      {scene.roomTab.passwordSaved ? (
+                        <span className="flex items-center gap-1.5">
+                          <Check className="w-3.5 h-3.5" />
+                          {copy.saved}
+                        </span>
+                      ) : (
+                        copy.save
+                      )}
                     </button>
                   </div>
                 </div>

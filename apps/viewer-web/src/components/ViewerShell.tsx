@@ -498,10 +498,10 @@ export function ViewerShell({
   }, [theme, setTheme]);
 
   return (
-    <div className="w-full min-h-screen bg-zinc-100/50 dark:bg-zinc-950 p-0 sm:p-4 lg:p-6 flex flex-col font-sans transition-colors">
-      <div className="flex-1 flex flex-col bg-background text-foreground sm:rounded-xl overflow-hidden shadow-xl ring-1 ring-border/50 relative">
+    <div className="w-full min-h-screen bg-zinc-100/50 dark:bg-black p-0 sm:p-4 lg:p-6 flex flex-col font-sans transition-colors">
+      <div className="flex-1 flex flex-col bg-background dark:bg-zinc-900 text-foreground sm:rounded-xl overflow-hidden shadow-xl ring-1 ring-border/50 relative">
         {/* Header */}
-        <header className="h-14 border-b border-border bg-zinc-50/80 dark:bg-zinc-950/80 backdrop-blur-md flex items-center justify-between px-4 lg:px-6 shrink-0 relative z-20">
+        <header className="h-14 border-b border-border bg-zinc-50/80 dark:bg-zinc-900/80 backdrop-blur-md flex items-center justify-between px-4 lg:px-6 shrink-0 relative z-20">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold tracking-tight hidden sm:block">{scene.header.title || 'ScreenMate'}</h1>
@@ -509,7 +509,7 @@ export function ViewerShell({
             </div>
 
             {/* Connection Status Indicator in Header */}
-            <div className="hidden md:flex items-center gap-4 px-4 py-1.5 bg-zinc-100 dark:bg-zinc-900 border border-border rounded-full text-xs font-medium ml-4 tracking-wide shadow-inner">
+            <div className="hidden md:flex items-center gap-4 px-4 py-1.5 bg-zinc-100 dark:bg-zinc-800 border border-border rounded-full text-xs font-medium ml-4 tracking-wide shadow-inner">
               <div className="flex items-center gap-1.5 text-muted-foreground">
                 <Radio className="w-3.5 h-3.5 text-green-500" />
                 {copy.connectionLabel}: <span className="text-foreground">{scene.connection.typeLabel}</span>
@@ -561,7 +561,7 @@ export function ViewerShell({
         </header>
 
         {/* Main Content Floor */}
-        <main className="flex-1 overflow-hidden flex flex-col lg:flex-row bg-zinc-50 dark:bg-zinc-950">
+        <main className="flex-1 overflow-hidden flex flex-col lg:flex-row bg-zinc-50 dark:bg-zinc-900">
 
           {/* Left Side: Video Player */}
           <div className="w-full lg:flex-[3] aspect-video lg:aspect-auto flex flex-col relative shrink-0 z-10 bg-black lg:border-r border-border/10">
@@ -623,13 +623,13 @@ export function ViewerShell({
               {/* Join Overlay */}
               <Dialog open={scene.player.showJoinOverlay}>
                 <DialogContent
-                  className="sm:max-w-md [&>button]:hidden"
+                  className="sm:max-w-md [&>button]:hidden overflow-hidden rounded-[24px] border-border/50 bg-background/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-2xl p-8"
                   onInteractOutside={(e) => e.preventDefault()}
                   onEscapeKeyDown={(e) => e.preventDefault()}
                 >
-                  <DialogHeader>
-                    <DialogTitle>{copy.joinRoomTitle}</DialogTitle>
-                    <DialogDescription>
+                  <DialogHeader className="mb-2">
+                    <DialogTitle className="text-xl font-bold tracking-tight">{copy.joinRoomTitle}</DialogTitle>
+                    <DialogDescription className="text-sm text-muted-foreground mt-1.5">
                       {copy.joinRoomDescription}
                     </DialogDescription>
                   </DialogHeader>
@@ -665,13 +665,13 @@ export function ViewerShell({
           <div
             style={isWebFullscreen ? { width: 0 } : { "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
             className={cn(
-              "flex-1 lg:flex-none bg-zinc-50 dark:bg-zinc-950 flex flex-col shrink-0 border-t lg:border-l lg:border-t-0 border-border relative z-20 w-full lg:w-[var(--sidebar-width)]",
+              "flex-1 lg:flex-none bg-zinc-50 dark:bg-zinc-900 flex flex-col shrink-0 border-t lg:border-l lg:border-t-0 border-border relative z-20 w-full lg:w-[var(--sidebar-width)]",
               !isResizing && "transition-[width,transform,opacity] duration-300 ease-in-out",
               isWebFullscreen ? "translate-x-full opacity-0 pointer-events-none" : "translate-x-0 opacity-100"
             )}
           >
             {/* Sidebar Tabs */}
-            <div className="flex shrink-0 px-4 pt-3 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm border-b border-border gap-6">
+            <div className="flex shrink-0 px-4 pt-3 bg-white/50 dark:bg-zinc-800/50 backdrop-blur-sm border-b border-border gap-6">
               <button
                 onClick={() => setActiveTab('chat')}
                 className={cn(
@@ -722,7 +722,7 @@ export function ViewerShell({
 
               {activeTab === 'viewers' && (
                 <div className="flex-1 overflow-y-auto p-4 flex flex-col items-center justify-center text-center animate-in fade-in duration-500">
-                  <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center mb-4">
+                  <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mb-4">
                     <Users className="w-6 h-6 text-muted-foreground/30" />
                   </div>
                   <p className="text-sm font-medium text-muted-foreground">List hidden for privacy</p>

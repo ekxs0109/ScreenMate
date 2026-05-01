@@ -50,7 +50,7 @@ export function ChatPanel({
   };
 
   return (
-    <div className={cn("flex flex-col h-full bg-zinc-50 dark:bg-zinc-950/40 relative overflow-hidden", className)}>
+    <div className={cn("flex flex-col h-full bg-zinc-50 dark:bg-zinc-950/20 relative overflow-hidden", className)}>
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto p-4 space-y-5 scroll-smooth pb-20"
@@ -105,7 +105,7 @@ export function ChatPanel({
                         "px-3.5 py-2.5 max-w-[85%] flex flex-col relative",
                         isMe
                           ? "bg-[#95ec69] dark:bg-[#26b553] text-[#000] dark:text-[#fff] rounded-xl "
-                          : "bg-white dark:bg-zinc-900  text-foreground rounded-xl "
+                          : "bg-white dark:bg-zinc-800 text-foreground rounded-xl "
                       )}
                       style={{ wordBreak: 'break-word' }}
                     >
@@ -114,7 +114,7 @@ export function ChatPanel({
                         "absolute top-[14px] w-2.5 h-2.5 rotate-45 -z-10",
                         isMe
                           ? "right-[-4px] bg-[#95ec69] dark:bg-[#26b553]"
-                          : "left-[-4px] bg-white dark:bg-zinc-900 "
+                          : "left-[-4px] bg-white dark:bg-zinc-800"
                       )} />
                       <span className="text-[14px] leading-relaxed relative z-10">{msg.text}</span>
                     </div>
@@ -127,7 +127,7 @@ export function ChatPanel({
       </div>
 
       <div className="absolute bottom-4 left-4 right-4 z-10">
-        <form onSubmit={handleSubmit} className="flex items-center gap-2 relative bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md shadow-lg border border-border rounded-full p-1.5">
+        <form onSubmit={handleSubmit} className="flex items-center gap-2 relative bg-white/90 dark:bg-zinc-800/90 backdrop-blur-md shadow-lg border border-border rounded-full p-1.5">
           <input
             type="text"
             value={inputValue}

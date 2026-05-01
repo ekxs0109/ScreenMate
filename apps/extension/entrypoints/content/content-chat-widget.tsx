@@ -16,6 +16,8 @@ function getI18nMessage(key: string, fallback: string) {
 
 export function createContentChatWidgetController(ctx: any) {
   let ui: ShadowRootContentScriptUi<Root> | null = null;
+  let uiPromise: Promise<ShadowRootContentScriptUi<Root>> | null = null;
+  let renderGeneration = 0;
   let minimized = false;
   let visible = false;
   let messages: ExtensionChatMessage[] = [
@@ -32,21 +34,29 @@ export function createContentChatWidgetController(ctx: any) {
 
   async function initUi() {
     if (ui) return ui;
-    ui = await createShadowRootUi(ctx, {
-      name: "screenmate-content-chat",
-      position: "inline",
-      anchor: "body",
-      append: "last",
-      onMount: (container: any) => {
-        const root = createRoot(container);
-        root.render(<App />);
-        return root;
-      },
-      onRemove: (root: any) => {
-        root?.unmount();
-      },
-    });
-    return ui;
+    if (!uiPromise) {
+      uiPromise = createShadowRootUi(ctx, {
+        name: "screenmate-content-chat",
+        position: "inline",
+        anchor: "body",
+        append: "last",
+        onMount: (container: any) => {
+          const root = createRoot(container);
+          root.render(<App />);
+          return root;
+        },
+        onRemove: (root: any) => {
+          root?.unmount();
+        },
+      }).then((nextUi) => {
+        ui = nextUi;
+        return nextUi;
+      }).finally(() => {
+        uiPromise = null;
+      });
+    }
+
+    return uiPromise;
   }
 
   function App() {
@@ -101,6 +111,8 @@ export function createContentChatWidgetController(ctx: any) {
   }
 
   function render() {
+    renderGeneration += 1;
+    const generation = renderGeneration;
     if (!visible) {
       if (ui) {
         ui.remove();
@@ -109,6 +121,18 @@ export function createContentChatWidgetController(ctx: any) {
       return;
     }
     initUi().then(currentUi => {
+      if (!visible) {
+        if (ui === currentUi) {
+          currentUi.remove();
+          ui = null;
+        }
+        return;
+      }
+
+      if (generation !== renderGeneration) {
+        return;
+      }
+
       if (currentUi.mounted) {
         currentUi.mounted.render(<App />);
       } else {

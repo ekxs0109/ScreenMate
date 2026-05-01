@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { MessageCircle, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { ExtensionSceneModel } from "./scene-model";
@@ -41,6 +42,27 @@ export function ContentChatWidget({
   title: string;
   placeholder: string;
 }) {
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const previousMessageIdsRef = useRef<Set<string> | null>(null);
+
+  useEffect(() => {
+    const nextMessageIds = new Set(messages.map((message) => message.id));
+    const previousMessageIds = previousMessageIdsRef.current;
+    const hasNewMessage =
+      previousMessageIds !== null &&
+      messages.some((message) => !previousMessageIds.has(message.id));
+
+    previousMessageIdsRef.current = nextMessageIds;
+    if (!minimized) {
+      setHasUnreadMessages(false);
+      return;
+    }
+
+    if (hasNewMessage) {
+      setHasUnreadMessages(true);
+    }
+  }, [messages, minimized]);
+
   return (
     <div
       className={cn(
@@ -58,8 +80,13 @@ export function ContentChatWidget({
           <MessageCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
           <span className="font-bold text-sm tracking-tight">{title}</span>
         </div>
-        {minimized ? (
-          <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse mr-2" />
+        {minimized && hasUnreadMessages ? (
+          <div
+            aria-label="New chat messages"
+            className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse mr-2"
+          />
+        ) : minimized ? (
+          <span className="mr-2 w-2.5 h-2.5" aria-hidden="true" />
         ) : (
           <span className="w-7 h-7 hover:bg-zinc-200 dark:hover:bg-zinc-800 dark:hover:bg-zinc-700 rounded-md flex items-center justify-center transition-colors">
             <X className="w-4 h-4 text-muted-foreground stroke-[3]" />
