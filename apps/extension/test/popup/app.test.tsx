@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const messages = {
-  appName: "SyncPlay",
+  appName: "ScreenMate",
   tabSource: "Origen",
   tabRoom: "Sala Ajustes",
   tabChat: "Chat",
@@ -147,7 +147,7 @@ describe("ExtensionPopupPresenter", () => {
       />,
     );
 
-    expect(screen.getByText("SyncPlay")).toBeTruthy();
+    expect(screen.getByText("ScreenMate")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Origen" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Sala Ajustes" })).toBeTruthy();
     expect(screen.getByText("Medios detectados")).toBeTruthy();

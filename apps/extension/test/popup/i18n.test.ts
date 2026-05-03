@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 const messages = {
-  appName: "SyncPlay JP",
+  appName: "ScreenMate JP",
   tabSource: "メディア元",
   tabRoom: "ルーム設定",
   tabChat: "チャット",
@@ -81,7 +81,7 @@ describe("popup i18n", () => {
   it("returns presenter copy from WXT i18n", () => {
     const copy = popupI18n.getExtensionDictionary();
 
-    expect(copy.appName).toBe("SyncPlay JP");
+    expect(copy.appName).toBe("ScreenMate JP");
     expect(copy.tabSource).toBe("メディア元");
     expect(copy.themeSystem).toBe("システム");
     expect(copy.noViewers).toBe("視聴者はまだいません");

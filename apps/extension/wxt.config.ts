@@ -89,6 +89,9 @@ export function createExtensionVitePlugins(
 export default defineConfig({
   modules: ["@wxt-dev/module-react", "@wxt-dev/i18n/module"],
   manifest: {
+    name: "__MSG_extName__",
+    short_name: "ScreenMate",
+    description: "__MSG_extDescription__",
     default_locale: "en",
     permissions: ["activeTab", "tabs", "webNavigation", "storage", "offscreen"],
     host_permissions: ["http://*/*", "https://*/*"],

@@ -1,4 +1,6 @@
-appName: SyncPlay
+extName: ScreenMate
+extDescription: 通过网页视频、本地文件或屏幕共享一起同步观看。
+appName: ScreenMate
 tabSource: 资源选择
 tabRoom: 房间设置
 tabChat: 房间群聊

@@ -1,4 +1,6 @@
-appName: SyncPlay
+extName: ScreenMate
+extDescription: Ve videos en sincronía desde páginas web, archivos locales o pantalla compartida.
+appName: ScreenMate
 tabSource: Orígenes
 tabRoom: Sala Ajustes
 tabChat: Chat

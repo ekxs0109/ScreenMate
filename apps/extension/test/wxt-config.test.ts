@@ -27,6 +27,13 @@ describe("wxt config", () => {
     expect(viteConfig?.build?.rollupOptions?.input).toBeUndefined();
   });
 
+  it("sets localized extension metadata instead of exposing the package name", () => {
+    expect(wxtConfig.manifest?.name).toBe("__MSG_extName__");
+    expect(wxtConfig.manifest?.short_name).toBe("ScreenMate");
+    expect(wxtConfig.manifest?.description).toBe("__MSG_extDescription__");
+    expect(wxtConfig.manifest?.default_locale).toBe("en");
+  });
+
   it("resolves internal workspace packages from source during extension dev", () => {
     const viteConfig = wxtConfig.vite?.({} as never) as any;
 

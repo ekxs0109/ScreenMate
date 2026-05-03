@@ -1,4 +1,6 @@
-appName: SyncPlay
+extName: ScreenMate
+extDescription: Web動画、ローカルファイル、画面共有で一緒に同期視聴できます。
+appName: ScreenMate
 tabSource: メディア元
 tabRoom: ルーム設定
 tabChat: チャット
