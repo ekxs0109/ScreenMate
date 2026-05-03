@@ -36,3 +36,9 @@ export function getViewerRoomIdFromLocation(
     return encodedRoomId;
   }
 }
+
+export function getViewerRoomPasswordFromLocation(
+  locationLike: Pick<Location, "search"> = window.location,
+): string {
+  return new URLSearchParams(locationLike.search).get("password") ?? "";
+}

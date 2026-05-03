@@ -182,7 +182,7 @@ type TabContentMessage =
   | Extract<HostMessage, { type: "screenmate:list-videos" }>
   | Extract<HostMessage, { type: "screenmate:preview-video" }>
   | Extract<HostMessage, { type: "screenmate:clear-preview" }>
-  | { type: "screenmate:detach-source" }
+  | { type: "screenmate:detach-source"; hideChat?: boolean }
   | {
       type: "screenmate:attach-source";
       videoId: string;
@@ -549,7 +549,9 @@ export function createHostMessageHandler(
     }
 
     if (message.type === "screenmate:stop-room") {
-      await detachCurrentAttachmentOwner(dependencies);
+      await detachCurrentAttachmentOwner(dependencies, undefined, {
+        hideChat: true,
+      });
       preparedSourceState = createEmptyPreparedSourceState();
       return dependencies.runtime.close("Room closed.");
     }
@@ -2874,6 +2876,7 @@ async function sendInboundSignalToAttachmentTarget(
 async function detachCurrentAttachmentOwner(
   dependencies: HostMessageHandlerDependencies,
   snapshot = dependencies.runtime.getSnapshot(),
+  options: { hideChat?: boolean } = {},
 ) {
   if (isOffscreenAttachmentOwner(snapshot)) {
     try {
@@ -2909,9 +2912,13 @@ async function detachCurrentAttachmentOwner(
   }
 
   try {
+    const message: Extract<TabContentMessage, { type: "screenmate:detach-source" }> = {
+      type: "screenmate:detach-source",
+      ...(options.hideChat === true ? { hideChat: true } : {}),
+    };
     await dependencies.sendTabMessage(
       snapshot.activeTabId,
-      { type: "screenmate:detach-source" },
+      message,
       { frameId: snapshot.activeFrameId },
     );
   } catch (error) {

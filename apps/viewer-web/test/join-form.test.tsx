@@ -10,12 +10,20 @@ describe("JoinForm", () => {
     const onJoin = vi.fn();
     render(
       <ViewerI18nProvider initialLocale="ja">
-        <JoinForm initialRoomCode="room_prefilled" isBusy={false} onJoin={onJoin} />
+        <JoinForm
+          initialPassword="pass_prefilled"
+          initialRoomCode="room_prefilled"
+          isBusy={false}
+          onJoin={onJoin}
+        />
       </ViewerI18nProvider>,
     );
 
     expect((screen.getByLabelText("ルームコード") as HTMLInputElement).value).toBe(
       "room_prefilled",
+    );
+    expect((screen.getByLabelText("パスワード") as HTMLInputElement).value).toBe(
+      "pass_prefilled",
     );
     fireEvent.change(screen.getByLabelText("ルームコード"), {
       target: { value: "room_123" },

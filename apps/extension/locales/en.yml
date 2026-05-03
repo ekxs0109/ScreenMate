@@ -40,6 +40,8 @@ uploadDropzone: Click or drag to open player
 roomId: Room ID
 openRoom: Open Room
 passwordPlaceholder: Leave blank for none
+passwordInvalid: Password must be 4-32 characters and use letters, numbers, underscores, or hyphens.
+passwordSaveFailed: Could not save the room password.
 save: Save
 saved: Saved
 viewerList: Viewer Connection Status

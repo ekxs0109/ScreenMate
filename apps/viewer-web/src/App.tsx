@@ -6,6 +6,7 @@ import {
 } from "./i18n";
 import {
   getViewerApiBaseUrl,
+  getViewerRoomPasswordFromLocation,
   getViewerRoomIdFromLocation,
 } from "./lib/config";
 import {
@@ -27,6 +28,7 @@ import { JoinForm } from "./components/JoinForm";
 export default function App() {
   const { copy, locale } = useViewerI18n();
   const initialRoomId = getViewerRoomIdFromLocation();
+  const initialRoomPassword = getViewerRoomPasswordFromLocation();
   const [displayName, setDisplayName] = useState(() =>
     buildRandomViewerUsername(locale),
   );
@@ -66,8 +68,8 @@ export default function App() {
       return;
     }
 
-    void viewerSession.join(initialRoomId, "");
-  }, [initialRoomId, viewerSession]);
+    void viewerSession.join(initialRoomId, initialRoomPassword);
+  }, [initialRoomId, initialRoomPassword, viewerSession]);
 
   async function handleJoin(roomCode: string, password: string) {
     await viewerSession.join(roomCode, password);
@@ -87,6 +89,7 @@ export default function App() {
   return (
     <>
       <ViewerShell
+        initialRoomPassword={initialRoomPassword}
         scene={scene}
         stream={session.remoteStream}
         onJoin={handleJoin}
@@ -134,6 +137,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           <JoinForm
+            initialPassword={initialRoomPassword}
             isBusy={scene.player.joinBusy}
             onJoin={(roomCode, password) => {
               void viewerSession.join(roomCode, password).then(() => {

@@ -6,21 +6,27 @@ import { Loader2, LogIn } from "lucide-react";
 import { useViewerI18n } from "../i18n";
 
 export function JoinForm({
+  initialPassword = "",
   initialRoomCode = "",
   isBusy,
   onJoin,
 }: {
+  initialPassword?: string;
   initialRoomCode?: string;
   isBusy: boolean;
   onJoin: (roomCode: string, password: string) => void;
 }) {
   const { copy } = useViewerI18n();
   const [roomCode, setRoomCode] = useState(initialRoomCode);
-  const [password, setPassword] = useState("");
+  const [password, setPassword] = useState(initialPassword);
 
   useEffect(() => {
     setRoomCode(initialRoomCode);
   }, [initialRoomCode]);
+
+  useEffect(() => {
+    setPassword(initialPassword);
+  }, [initialPassword]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -9,6 +9,7 @@ import {
   Users,
   LogOut,
 } from "lucide-react";
+import { ROOM_PASSWORD_RULES } from "@screenmate/shared";
 import { cn } from "../../lib/utils";
 import type { ExtensionDictionary } from "./i18n";
 import type { ExtensionSceneModel } from "./scene-model";
@@ -38,7 +39,7 @@ export function RoomTabPanel({
     <div className="flex h-full min-h-0 flex-col">
       <PopupScrollArea
         className="min-h-0 flex-1"
-        contentClassName="p-4 flex flex-col gap-6"
+        contentClassName="p-4 flex flex-col gap-3"
       >
         {scene.roomTab.state === "empty" ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center gap-4 opacity-70 px-8 py-20 min-h-[400px] animate-in fade-in duration-500">
@@ -126,6 +127,9 @@ export function RoomTabPanel({
                       <Key className="absolute left-3 w-3.5 h-3.5 text-muted-foreground" />
                       <input
                         data-testid="popup-room-password-input"
+                        autoComplete="off"
+                        maxLength={ROOM_PASSWORD_RULES.maxLength}
+                        pattern="[A-Za-z0-9_-]*"
                         type="text"
                         value={scene.roomTab.passwordDraft}
                         onChange={(event) => onPasswordChange(event.target.value)}

@@ -412,6 +412,52 @@ describe("room routes", () => {
     });
   });
 
+  it("rejects host access password updates with unsupported formats", async () => {
+    const roomNamespace = createRoomNamespace(async (roomId, request) => {
+      expect(roomId).toBe("room_demo");
+      expect(new URL(request.url).pathname).toBe("/internal/state");
+      return Response.json({
+        roomId,
+        hostSessionId: "host_123",
+        hostConnected: true,
+        viewerCount: 0,
+        state: "hosting",
+        sourceState: "attached",
+      });
+    });
+    const token = await issueScopedToken(
+      { roomId: "room_demo", role: "host", sessionId: "host_123" },
+      {
+        secret: TEST_SECRET,
+        now: Math.floor(TEST_NOW / 1_000),
+        ttlSeconds: 2 * 60 * 60,
+      },
+    );
+
+    const response = await app.request(
+      "/rooms/room_demo/access",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ password: "bad password" }),
+      },
+      {
+        ROOM_OBJECT: roomNamespace,
+        ROOM_TOKEN_SECRET: TEST_SECRET,
+        SCREENMATE_NOW: TEST_NOW,
+      } as never,
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "ROOM_PASSWORD_INVALID",
+    });
+    expect(roomNamespace.calls).toHaveLength(1);
+  });
+
   it("rejects room access updates without a valid host bearer token", async () => {
     const roomNamespace = createRoomNamespace(() => {
       throw new Error("unexpected durable object request");

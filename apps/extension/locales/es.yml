@@ -32,6 +32,8 @@ uploadDropzone: Haz clic o arrastra archivos de video
 roomId: ID Sala
 openRoom: Entrar
 passwordPlaceholder: Dejar en blanco para sin contraseña
+passwordInvalid: La contraseña debe tener 4-32 caracteres y usar letras, números, guiones bajos o guiones.
+passwordSaveFailed: No se pudo guardar la contraseña de la sala.
 save: Guardar
 saved: Guardado
 viewerList: Conexiones de Espectadores

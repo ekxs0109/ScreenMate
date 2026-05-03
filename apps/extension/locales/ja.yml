@@ -32,6 +32,8 @@ uploadDropzone: クリックまたはドラッグしてアップロード
 roomId: ルーム ID
 openRoom: 開く
 passwordPlaceholder: パスワードなし(空白)
+passwordInvalid: パスワードは4〜32文字で、英字・数字・アンダースコア・ハイフンのみ使用できます。
+passwordSaveFailed: ルームパスワードを保存できませんでした。
 save: 保存
 saved: 保存済み
 viewerList: 視聴者の接続状態

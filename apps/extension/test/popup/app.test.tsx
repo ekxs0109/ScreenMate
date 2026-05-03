@@ -40,10 +40,13 @@ const messages = {
   roomId: "ID Sala",
   openRoom: "Entrar",
   passwordPlaceholder: "Dejar en blanco para sin contraseña",
+  passwordInvalid: "Contraseña inválida",
+  passwordSaveFailed: "No se pudo guardar la contraseña",
   save: "Guardar",
   saved: "Guardado",
   viewerList: "Conexiones de Espectadores",
   viewerName: "Nombre",
+  noViewers: "Sin espectadores todavía",
   connType: "Método",
   connPing: "Ping",
   notSharedYet: "No compartido",
@@ -87,6 +90,7 @@ import { getExtensionDictionary } from "../../entrypoints/popup/i18n";
 import { buildExtensionSceneModel } from "../../entrypoints/popup/scene-adapter";
 import { createExtensionMockState } from "../../entrypoints/popup/mock-state";
 import { createHostRoomSnapshot } from "../../entrypoints/background/host-room-snapshot";
+import { ROOM_PASSWORD_RULES } from "@screenmate/shared";
 
 describe("ExtensionPopupPresenter", () => {
   afterEach(() => {
@@ -154,6 +158,59 @@ describe("ExtensionPopupPresenter", () => {
         selector: ":not([data-testid='popup-room-status'])",
       }),
     ).toBeNull();
+  });
+
+  it("limits room password input to the shared password format", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        viewerCount: 0,
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: { ...createExtensionMockState(), activeTab: "room" },
+    });
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={vi.fn()}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onStartOrAttach={vi.fn()}
+        onStopRoom={vi.fn()}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByTestId("popup-room-password-input");
+
+    expect(input.getAttribute("maxLength")).toBe(String(ROOM_PASSWORD_RULES.maxLength));
+    expect(input.getAttribute("pattern")).toBe("[A-Za-z0-9_-]*");
   });
 
   it("renders the compact header as room state, active source mode, and source detail", () => {
@@ -1162,6 +1219,65 @@ describe("ExtensionPopupPresenter", () => {
     expect(within(viewerListHeader as HTMLElement).getByText("1")).toBeTruthy();
     expect(offlineRow?.innerHTML).toContain("bg-zinc-300");
     expect(offlineRow?.innerHTML).not.toContain("bg-green-500");
+  });
+
+  it("does not render the empty viewer state inside a scroll container", () => {
+    const scene = buildExtensionSceneModel({
+      snapshot: createHostRoomSnapshot({
+        roomLifecycle: "open",
+        sourceState: "attached",
+        roomId: "room_demo",
+        viewerCount: 0,
+        viewerRoster: [],
+      }),
+      videos: [],
+      selectedVideoId: null,
+      isBusy: false,
+      busyAction: null,
+      viewerRoomUrl: "https://viewer.example/rooms/room_demo",
+      mock: {
+        ...createExtensionMockState(),
+        activeTab: "room",
+      },
+    });
+
+    render(
+      <ExtensionPopupPresenter
+        windowMode="popup"
+        scene={scene}
+        copy={getExtensionDictionary()}
+        themeMode="dark"
+        resolvedThemeMode="dark"
+        sniffScrollTop={0}
+        onThemeToggle={vi.fn()}
+        onOpenPopout={vi.fn()}
+        onSelectTab={vi.fn()}
+        onSelectSourceType={vi.fn()}
+        onSelectSource={vi.fn()}
+        onPreviewSource={vi.fn()}
+        onClearSourcePreview={vi.fn()}
+        onRefreshSniff={vi.fn()}
+        onSniffScrollChange={vi.fn()}
+        onToggleScreenReady={vi.fn()}
+        onCaptureScreen={vi.fn()}
+        onOpenPlayer={vi.fn()}
+        onStartOrAttach={vi.fn()}
+        onStopRoom={vi.fn()}
+        onSavePassword={vi.fn()}
+        onPasswordChange={vi.fn()}
+        onCopyLink={vi.fn()}
+        onCopyRoomId={vi.fn()}
+        onJumpToRoom={vi.fn()}
+        onSendChat={vi.fn()}
+      />,
+    );
+
+    const emptyMessage = screen.getByText("Sin espectadores todavía");
+    const emptyState = emptyMessage.closest(".animate-in");
+    const viewerRoster = screen.getByTestId("popup-viewer-roster");
+
+    expect(emptyState).toBeTruthy();
+    expect(viewerRoster.querySelector(".overflow-y-auto")).toBeNull();
   });
 
   it("preserves the chat draft when async send returns false", async () => {

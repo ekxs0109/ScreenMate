@@ -247,7 +247,12 @@ function App() {
           setSourceTab();
         }}
         onSavePassword={async () => {
-          if (await saveRoomPassword(passwordDraft)) {
+          if (
+            await saveRoomPassword(passwordDraft, {
+              invalid: copy.passwordInvalid,
+              saveFailed: copy.passwordSaveFailed,
+            })
+          ) {
             markPasswordSaved();
           }
         }}
@@ -263,8 +268,13 @@ function App() {
           }
         }}
         onJumpToRoom={() => {
-          if (viewerRoomUrl) {
-            window.open(viewerRoomUrl, "_blank");
+          if (snapshot.roomId) {
+            window.open(
+              buildScreenMateViewerRoomUrl(snapshot.roomId, undefined, {
+                password: passwordDraft,
+              }),
+              "_blank",
+            );
           }
         }}
         onSendChat={async (text) => {

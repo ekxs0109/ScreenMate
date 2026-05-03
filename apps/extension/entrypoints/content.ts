@@ -29,6 +29,7 @@ export type ListVideosMessage = {
 export type ContentControlMessage =
   | {
       type: "screenmate:detach-source";
+      hideChat?: boolean;
     }
   | {
       type: "screenmate:attach-source";
@@ -238,7 +239,9 @@ export function createVideoMessageListener(
           href: window.location.href,
         });
         sourceAttachmentRuntime.destroy("manual-detach");
-        chatWidget?.hide();
+        if (message.hideChat === true) {
+          chatWidget?.hide();
+        }
         sendResponse({ ok: true });
       });
 

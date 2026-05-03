@@ -50,9 +50,9 @@ export function HeaderControls({
       >
         <SelectTrigger
           aria-label={copy.languageLabel}
-          className="h-8 w-[105px] gap-1.5 border-border bg-background px-2.5 text-xs font-medium shadow-sm"
+          className="h-8 w-8 sm:w-[92px] lg:w-[105px] px-0 sm:px-2.5 justify-center sm:justify-between gap-0 sm:gap-1.5 border-border bg-background text-xs font-medium shadow-sm [&>span]:hidden sm:[&>span]:block [&>svg:last-child]:hidden sm:[&>svg:last-child]:block"
         >
-          <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+          <Globe className="size-3.5 shrink-0 text-muted-foreground sm:!block" />
           <SelectValue />
         </SelectTrigger>
         <SelectContent align="end">

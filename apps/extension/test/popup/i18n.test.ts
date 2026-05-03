@@ -33,6 +33,8 @@ const messages = {
   roomId: "ルーム ID",
   openRoom: "開く",
   passwordPlaceholder: "パスワードなし(空白)",
+  passwordInvalid: "パスワード形式が正しくありません",
+  passwordSaveFailed: "パスワードを保存できませんでした",
   save: "保存",
   saved: "保存済み",
   viewerList: "視聴者の接続状態",
@@ -83,6 +85,8 @@ describe("popup i18n", () => {
     expect(copy.tabSource).toBe("メディア元");
     expect(copy.themeSystem).toBe("システム");
     expect(copy.noViewers).toBe("視聴者はまだいません");
+    expect(copy.passwordInvalid).toBe("パスワード形式が正しくありません");
+    expect(copy.passwordSaveFailed).toBe("パスワードを保存できませんでした");
     expect(copy.sourceShareBrowserTab).toBe("タブ共有");
     expect(copy.closeBrowserTabShare).toBe("タブ共有を停止");
     expect(copy.closeLocalPlayback).toBe("ローカル再生を停止");

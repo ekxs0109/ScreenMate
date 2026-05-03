@@ -123,6 +123,34 @@ describe("ViewerShell", () => {
     expect(screen.getByPlaceholderText(/发送消息|Send a message/)).toBeTruthy();
   });
 
+  it("keeps the viewer header compact before wide desktop breakpoints", () => {
+    const scene = buildViewerSceneModel({
+      locale: "en",
+      session: {
+        ...initialViewerSessionState,
+        roomId: "room_demo",
+        status: "connected",
+        roomState: "streaming",
+        sourceState: "attached",
+        remoteStream: { id: "existing-stream" } as MediaStream,
+      },
+      mock: createViewerMockState("en"),
+    });
+
+    renderViewerShell(scene);
+
+    expect(screen.getByTestId("viewer-connection-summary").className).toContain(
+      "hidden lg:flex",
+    );
+    expect(screen.getByTestId("viewer-room-controls").className).toContain(
+      "hidden md:flex",
+    );
+    expect(screen.getByText("Join Other").className).toContain(
+      "hidden md:inline",
+    );
+    expect(screen.getByText("Leave").className).toContain("hidden md:inline");
+  });
+
   it("shows negotiated codec next to the viewer resolution", () => {
     const scene = buildViewerSceneModel({
       locale: "en",

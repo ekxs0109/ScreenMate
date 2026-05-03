@@ -99,6 +99,20 @@ describe("App room routing", () => {
     });
   });
 
+  it("auto-joins the room with a password from the room URL", async () => {
+    window.history.replaceState({}, "", "/rooms/room_demo?password=pass_123");
+
+    render(
+      <ViewerI18nProvider initialLocale="en">
+        <App />
+      </ViewerI18nProvider>,
+    );
+
+    await waitFor(() => {
+      expect(joinSpy).toHaveBeenCalledWith("room_demo", "pass_123");
+    });
+  });
+
   it("retries route auto-join after React StrictMode remount cleanup", async () => {
     window.history.replaceState({}, "", "/rooms/room_demo");
 

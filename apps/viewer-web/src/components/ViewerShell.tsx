@@ -66,6 +66,7 @@ export function ViewerShell({
   onRandomizeUsername,
   onDisplayNameChange,
   onSendMessage,
+  initialRoomPassword = "",
 }: {
   scene: ViewerSceneModel;
   stream: MediaStream | null;
@@ -75,6 +76,7 @@ export function ViewerShell({
   onRandomizeUsername: () => void;
   onDisplayNameChange: (displayName: string) => void;
   onSendMessage: (text: string) => boolean;
+  initialRoomPassword?: string;
 }) {
   const { resolvedTheme, setTheme, theme } = useTheme();
   const { copy, locale, setLocale } = useViewerI18n();
@@ -515,32 +517,32 @@ export function ViewerShell({
     <div className="w-full min-h-screen bg-zinc-100/50 dark:bg-black p-0 sm:p-4 lg:p-6 flex flex-col font-sans transition-colors">
       <div className="flex-1 flex flex-col bg-background dark:bg-zinc-900 text-foreground sm:rounded-xl overflow-hidden shadow-xl ring-1 ring-border/50 relative">
         {/* Header */}
-        <header className="h-14 border-b border-border bg-zinc-50/80 dark:bg-zinc-900/80 backdrop-blur-md flex items-center justify-between px-4 lg:px-6 shrink-0 relative z-20">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
+        <header className="h-14 border-b border-border bg-zinc-50/80 dark:bg-zinc-900/80 backdrop-blur-md flex items-center justify-between gap-2 px-3 sm:px-4 lg:px-6 shrink-0 relative z-20">
+          <div className="flex min-w-0 flex-1 items-center gap-2 lg:gap-4">
+            <div className="flex items-center gap-2 shrink-0">
               <h1 className="text-lg font-bold tracking-tight hidden sm:block">{scene.header.title || 'ScreenMate'}</h1>
-              <span className="ml-2 px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border border-red-200 dark:border-red-900/50 shadow-sm uppercase tracking-wider">{copy.liveBadge}</span>
+              <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border border-red-200 dark:border-red-900/50 shadow-sm uppercase tracking-wider">{copy.liveBadge}</span>
             </div>
 
             {/* Connection Status Indicator in Header */}
-            <div className="hidden md:flex items-center gap-4 px-4 py-1.5 bg-zinc-100 dark:bg-zinc-800 border border-border rounded-full text-xs font-medium ml-4 tracking-wide shadow-inner">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Radio className="w-3.5 h-3.5 text-green-500" />
-                {copy.connectionLabel}: <span className="text-foreground">{scene.connection.typeLabel}</span>
+            <div data-testid="viewer-connection-summary" className="flex flex-1 sm:flex-none min-w-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] items-center gap-2 sm:gap-3 px-2 sm:px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 border border-border rounded-full text-[10px] sm:text-xs font-medium ml-1 sm:ml-2 tracking-wide shadow-inner xl:gap-4 xl:px-4">
+              <div className="flex items-center gap-1 sm:gap-1.5 text-muted-foreground shrink-0">
+                <Radio className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-green-500" />
+                <span className="hidden lg:inline">{copy.connectionLabel}: </span><span className="text-foreground">{scene.connection.typeLabel}</span>
               </div>
-              <div className="w-px h-3 bg-border" />
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Activity className="w-3.5 h-3.5 text-green-500" />
-                {copy.pingLabel}: <span className="text-green-600 dark:text-green-400">{scene.connection.pingLabel}</span>
+              <div className="w-px h-3 bg-border shrink-0" />
+              <div className="flex items-center gap-1 sm:gap-1.5 text-muted-foreground shrink-0">
+                <Activity className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-green-500" />
+                <span className="hidden lg:inline">{copy.pingLabel}: </span><span className="text-green-600 dark:text-green-400">{scene.connection.pingLabel}</span>
               </div>
               {displayedResolution && (
                 <>
-                  <div className="w-px h-3 bg-border" />
-                  <div className="flex items-center gap-1.5 text-muted-foreground" data-testid="viewer-resolution">
-                    <Monitor className="w-3.5 h-3.5 text-blue-500" />
+                  <div className="hidden sm:block w-px h-3 bg-border shrink-0" />
+                  <div className="hidden sm:flex items-center gap-1 sm:gap-1.5 text-muted-foreground shrink-0" data-testid="viewer-resolution">
+                    <Monitor className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-blue-500" />
                     <span className="text-foreground">{displayedResolution}</span>
                     {scene.connection.videoCodecLabel && (
-                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                      <span className="rounded bg-blue-100 px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
                         {scene.connection.videoCodecLabel}
                       </span>
                     )}
@@ -550,17 +552,17 @@ export function ViewerShell({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 lg:gap-3">
+          <div className="flex items-center gap-2 lg:gap-3 shrink-0">
 
             {/* Room Controls Group */}
-            <div className="flex items-center mr-2 border-r border-border pr-3 gap-2">
-              <button onClick={onJoinOtherRoom} className="hidden sm:flex p-2 text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors border border-transparent hover:border-border text-xs font-medium items-center gap-1.5">
+            <div data-testid="viewer-room-controls" className="hidden md:flex items-center mr-1 border-r border-border pr-2 gap-1 lg:mr-2 lg:pr-3 lg:gap-2">
+              <button onClick={onJoinOtherRoom} className="flex p-2 text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors border border-transparent hover:border-border text-xs font-medium items-center gap-1.5">
                 <LogIn className="w-4 h-4" />
-                <span className="hidden sm:inline">{copy.joinOtherRoom}</span>
+                <span className="hidden md:inline">{copy.joinOtherRoom}</span>
               </button>
-              <button onClick={onLeaveRoom} className="hidden sm:flex p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40 rounded-lg transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-900/50 text-xs font-medium items-center gap-1.5">
+              <button onClick={onLeaveRoom} className="flex p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40 rounded-lg transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-900/50 text-xs font-medium items-center gap-1.5">
                 <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">{copy.leaveRoom}</span>
+                <span className="hidden md:inline">{copy.leaveRoom}</span>
               </button>
             </div>
 
@@ -667,6 +669,7 @@ export function ViewerShell({
                     </p>
                   )}
                   <JoinForm
+                    initialPassword={initialRoomPassword}
                     initialRoomCode={scene.header.roomId ?? ""}
                     isBusy={scene.player.joinBusy}
                     onJoin={onJoin}

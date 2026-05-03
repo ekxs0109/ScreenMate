@@ -17,7 +17,7 @@ import { VideoSourceCache } from "../../entrypoints/background/video-source-cach
 
 type TestTabMessage =
   | HostMessage
-  | { type: "screenmate:detach-source" }
+  | { type: "screenmate:detach-source"; hideChat?: boolean }
   | { type: "screenmate:attach-source"; videoId: string; roomSession?: unknown };
 
 function createHandlerDependencies(
@@ -3875,7 +3875,7 @@ describe("createHostMessageHandler", () => {
 
     expect(sendTabMessage).toHaveBeenCalledWith(
       42,
-      { type: "screenmate:detach-source" },
+      { type: "screenmate:detach-source", hideChat: true },
       { frameId: 7 },
     );
     expect(close).toHaveBeenCalledWith("Room closed.");

@@ -1,4 +1,4 @@
-import { errorCodes } from "@screenmate/shared";
+import { errorCodes, validateRoomPassword } from "@screenmate/shared";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { nanoid } from "nanoid";
@@ -195,8 +195,16 @@ app.put("/rooms/:roomId/access", async (c) => {
   }
 
   const body = await c.req.json().catch(() => ({})) as { password?: unknown };
-  const password = typeof body.password === "string" ? body.password.trim() : "";
-  const passwordHash = password ? await hashRoomPassword(password) : null;
+  const validation = validateRoomPassword(
+    typeof body.password === "string" ? body.password : "",
+  );
+  if (!validation.ok) {
+    return c.json({ error: errorCodes.ROOM_PASSWORD_INVALID }, 400);
+  }
+
+  const passwordHash = validation.password
+    ? await hashRoomPassword(validation.password)
+    : null;
 
   return roomObject.fetch(
     buildInternalRequest("/internal/access", {

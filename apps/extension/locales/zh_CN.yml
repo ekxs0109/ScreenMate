@@ -40,6 +40,8 @@ uploadDropzone: 点击或拖拽文件开启播放器
 roomId: 房间号
 openRoom: 进入房间
 passwordPlaceholder: 留空则无密码
+passwordInvalid: 密码需为 4-32 位，仅支持英文字母、数字、下划线或短横线。
+passwordSaveFailed: 房间密码保存失败，请重试。
 save: 保存
 saved: 已保存
 viewerList: 观众连接状态

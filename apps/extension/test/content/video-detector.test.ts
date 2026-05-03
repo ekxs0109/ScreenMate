@@ -432,15 +432,22 @@ describe("createVideoMessageListener", () => {
     expect(sendResponse).toHaveBeenCalledWith({ ok: true });
   });
 
-  it("tears down the active attachment on explicit detach control messages", async () => {
+  it("tears down the active attachment without hiding chat on source detach", async () => {
     const sourceAttachmentRuntime = {
       attachSource: vi.fn(),
       beginViewerNegotiation: vi.fn(),
       destroy: vi.fn(),
       handleSignal: vi.fn(),
     };
+    const chatWidget = {
+      hide: vi.fn(),
+      setMessages: vi.fn(),
+      show: vi.fn(),
+    };
     const listener = createVideoMessageListener(
       sourceAttachmentRuntime as never,
+      undefined,
+      chatWidget,
     );
     const sendResponse = vi.fn();
 
@@ -455,6 +462,41 @@ describe("createVideoMessageListener", () => {
     await Promise.resolve();
 
     expect(sourceAttachmentRuntime.destroy).toHaveBeenCalledWith("manual-detach");
+    expect(chatWidget.hide).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+  });
+
+  it("hides chat when the room detach explicitly requests it", async () => {
+    const sourceAttachmentRuntime = {
+      attachSource: vi.fn(),
+      beginViewerNegotiation: vi.fn(),
+      destroy: vi.fn(),
+      handleSignal: vi.fn(),
+    };
+    const chatWidget = {
+      hide: vi.fn(),
+      setMessages: vi.fn(),
+      show: vi.fn(),
+    };
+    const listener = createVideoMessageListener(
+      sourceAttachmentRuntime as never,
+      undefined,
+      chatWidget,
+    );
+    const sendResponse = vi.fn();
+
+    const shouldKeepOpen = listener(
+      { type: "screenmate:detach-source", hideChat: true },
+      {} as never,
+      sendResponse,
+    );
+
+    expect(shouldKeepOpen).toBe(true);
+
+    await Promise.resolve();
+
+    expect(sourceAttachmentRuntime.destroy).toHaveBeenCalledWith("manual-detach");
+    expect(chatWidget.hide).toHaveBeenCalledTimes(1);
     expect(sendResponse).toHaveBeenCalledWith({ ok: true });
   });
 

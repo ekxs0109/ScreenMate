@@ -1,3 +1,5 @@
+import { normalizeRoomPassword } from "@screenmate/shared";
+
 const DEFAULT_SCREENMATE_API_BASE_URL = "http://localhost:8787";
 const DEFAULT_SCREENMATE_VIEWER_BASE_URL = "http://localhost:4173";
 
@@ -29,6 +31,7 @@ export function getScreenMateViewerBaseUrl(
 export function buildScreenMateViewerRoomUrl(
   roomId: string,
   viewerBaseUrl = getScreenMateViewerBaseUrl(),
+  options: { password?: string | null } = {},
 ): string {
   const url = new URL(`${normalizeBaseUrl(viewerBaseUrl)}/`);
   const basePath = url.pathname.replace(/\/+$/, "");
@@ -38,6 +41,10 @@ export function buildScreenMateViewerRoomUrl(
   );
   url.search = "";
   url.hash = "";
+  const password = normalizeRoomPassword(options.password ?? "");
+  if (password) {
+    url.searchParams.set("password", password);
+  }
 
   return url.toString();
 }

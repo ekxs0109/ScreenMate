@@ -1,7 +1,12 @@
 import { browser } from "wxt/browser";
 import { storage } from "wxt/utils/storage";
 import { useEffect, useRef, useState } from "react";
-import type { RoomChatMessage, ViewerRosterEntry } from "@screenmate/shared";
+import {
+  normalizeRoomPassword,
+  validateRoomPassword,
+  type RoomChatMessage,
+  type ViewerRosterEntry,
+} from "@screenmate/shared";
 import type { HostMessage, TabVideoSource } from "../background";
 import type { PreparedSourceState } from "../background";
 import {
@@ -152,7 +157,17 @@ export function buildSendChatMessageRequest(
 export function buildSetRoomPasswordRequest(
   password: string,
 ): Extract<HostMessage, { type: "screenmate:set-room-password" }> {
-  return { type: "screenmate:set-room-password", password };
+  return {
+    type: "screenmate:set-room-password",
+    password: normalizeRoomPassword(password),
+  };
+}
+
+export function getRoomPasswordValidationMessage(
+  password: string,
+  invalidMessage: string,
+) {
+  return validateRoomPassword(password).ok ? null : invalidMessage;
 }
 
 export function useHostControls({
@@ -870,17 +885,44 @@ export function useHostControls({
     }
   };
 
-  const saveRoomPassword = async (password: string) => {
+  const saveRoomPassword = async (
+    password: string,
+    messages: {
+      invalid: string;
+      saveFailed: string;
+    },
+  ) => {
+    const validation = validateRoomPassword(password);
+    if (!validation.ok) {
+      setSnapshot((current) =>
+        createHostRoomSnapshot({
+          ...current,
+          message: messages.invalid,
+        }),
+      );
+      return false;
+    }
+
     try {
       const response = await browser.runtime.sendMessage(
-        buildSetRoomPasswordRequest(password),
+        buildSetRoomPasswordRequest(validation.password),
       );
 
       if (isRecord(response) && "snapshot" in response) {
         setSnapshot(normalizeSnapshot(response.snapshot));
       }
 
-      return isRecord(response) && response.ok === true;
+      const ok = isRecord(response) && response.ok === true;
+      if (!ok) {
+        setSnapshot((current) =>
+          createHostRoomSnapshot({
+            ...current,
+            message: current.message || messages.saveFailed,
+          }),
+        );
+      }
+
+      return ok;
     } catch (error) {
       popupLogger.warn("Could not save room password.", {
         error: error instanceof Error ? error.message : String(error),
@@ -888,7 +930,7 @@ export function useHostControls({
       setSnapshot((current) =>
         createHostRoomSnapshot({
           ...current,
-          message: "Could not save the room password.",
+          message: messages.saveFailed,
         }),
       );
       return false;

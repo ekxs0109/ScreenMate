@@ -3,6 +3,8 @@ import {
   buildStartSharingRequest,
   buildStopSourceRequest,
   buildStopSharingRequest,
+  buildSetRoomPasswordRequest,
+  getRoomPasswordValidationMessage,
   normalizeSnapshot,
   parseVideoSelectionKey,
   resolvePopupSelectedVideoKey,
@@ -202,6 +204,22 @@ describe("popup room action messages", () => {
     expect(buildStopSourceRequest()).toEqual({
       type: "screenmate:stop-source",
     });
+  });
+
+  it("trims room password requests before sending them to background", () => {
+    expect(buildSetRoomPasswordRequest("  room_123  ")).toEqual({
+      type: "screenmate:set-room-password",
+      password: "room_123",
+    });
+  });
+
+  it("reports invalid room password drafts before they are sent", () => {
+    const message = "Contraseña inválida";
+
+    expect(getRoomPasswordValidationMessage("abc", message)).toBe(message);
+    expect(getRoomPasswordValidationMessage("bad password", message)).toBe(message);
+    expect(getRoomPasswordValidationMessage("room_123", message)).toBeNull();
+    expect(getRoomPasswordValidationMessage("   ", message)).toBeNull();
   });
 
   it("lets background restart a closed room through the same start-sharing request", () => {

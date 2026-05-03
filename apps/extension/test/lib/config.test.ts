@@ -14,4 +14,12 @@ describe("viewer room url helpers", () => {
       buildScreenMateViewerRoomUrl("room_demo", "http://localhost:4173/"),
     ).toBe("http://localhost:4173/rooms/room_demo");
   });
+
+  it("can include a trimmed room password for direct viewer entry", () => {
+    expect(
+      buildScreenMateViewerRoomUrl("room demo", "http://localhost:4173/", {
+        password: "  pass_123  ",
+      }),
+    ).toBe("http://localhost:4173/rooms/room%20demo?password=pass_123");
+  });
 });

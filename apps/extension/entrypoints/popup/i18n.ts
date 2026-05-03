@@ -43,6 +43,8 @@ export type ExtensionDictionary = {
   roomId: string;
   openRoom: string;
   passwordPlaceholder: string;
+  passwordInvalid: string;
+  passwordSaveFailed: string;
   save: string;
   saved: string;
   viewerList: string;
@@ -124,6 +126,8 @@ export function getExtensionDictionary(): ExtensionDictionary {
     roomId: i18n.t("roomId"),
     openRoom: i18n.t("openRoom"),
     passwordPlaceholder: i18n.t("passwordPlaceholder"),
+    passwordInvalid: i18n.t("passwordInvalid"),
+    passwordSaveFailed: i18n.t("passwordSaveFailed"),
     save: i18n.t("save"),
     saved: i18n.t("saved"),
     viewerList: i18n.t("viewerList"),

@@ -25,6 +25,7 @@ import {
   X,
   Radio,
   Shuffle,
+  FolderOpen,
   LogOut,
   Globe,
   UploadCloud,
@@ -567,14 +568,19 @@ export default function PlayerApp() {
                 </LocalVideoJsPlayer.Provider>
 
                 {/* Custom floating title overlay on hover */}
-                <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-600 rounded-lg shadow-lg">
-                      <FileVideo className="w-5 h-5 text-white" />
+                <div className="absolute top-0 left-0 right-0 p-6 bg-gradient-to-b from-black/80 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-500 pointer-events-none flex items-start justify-between z-10">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center justify-center w-12 h-12 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 shadow-xl">
+                      <FileVideo className="w-6 h-6 text-white drop-shadow-md" />
                     </div>
-                    <div>
-                      <h2 className="text-white font-medium text-base text-shadow-sm">{localFile?.name}</h2>
-                      <p className="text-white/70 text-[10px] mt-0.5">{localFile && formatFileSize(localFile.size)} • {getPlayerI18nMessage("localFileLabel", "Local File")}</p>
+                    <div className="flex flex-col gap-1">
+                      <h2 className="text-white font-bold text-lg leading-tight tracking-tight drop-shadow-md max-w-[600px] truncate">{localFile?.name}</h2>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md bg-blue-500/80 backdrop-blur-sm text-[10px] font-bold text-white shadow-sm tracking-wide">
+                          {getPlayerI18nMessage("localFileLabel", "Local File")}
+                        </span>
+                        <span className="text-white/80 text-[11px] font-medium drop-shadow-sm font-mono tracking-tight">{localFile && formatFileSize(localFile.size)}</span>
+                      </div>
                     </div>
                   </div>
                   <button
@@ -582,8 +588,9 @@ export default function PlayerApp() {
                       e.stopPropagation();
                       handleClearFile();
                     }}
-                    className="px-3 py-1.5 bg-black/50 hover:bg-black/80 text-white rounded-lg backdrop-blur border border-white/10 text-xs font-medium transition-colors pointer-events-auto"
+                    className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/25 text-white rounded-xl backdrop-blur-md border border-white/20 text-xs font-bold transition-all duration-300 hover:scale-105 active:scale-95 pointer-events-auto shadow-lg"
                   >
+                    <FolderOpen className="w-4 h-4" />
                     {getPlayerI18nMessage("changeFile", "Change File")}
                   </button>
                 </div>
