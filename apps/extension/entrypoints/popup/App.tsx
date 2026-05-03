@@ -154,7 +154,7 @@ function App() {
       className={cn(
         "w-full h-full",
         windowMode === "popout" &&
-        "flex min-h-dvh w-screen items-start justify-center overflow-auto bg-background p-4 sm:items-center",
+        "flex min-h-dvh w-screen items-start justify-center overflow-auto bg-background sm:items-center",
       )}
     >
       <ExtensionPopupPresenter

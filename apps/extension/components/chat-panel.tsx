@@ -140,7 +140,7 @@ export function ChatPanel({
             disabled={!inputValue.trim()}
             className="w-10 h-10 shrink-0 bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-40 disabled:active:scale-100 text-white rounded-full flex items-center justify-center transition-all shadow-sm"
           >
-            <Send className="w-4 h-4 ml-0.5" />
+            <Send className="w-4 h-4" />
           </button>
         </form>
       </div>

@@ -137,10 +137,10 @@ export function ExtensionPopupPresenter({
   return (
     <main
       className={cn(
-        "bg-card text-card-foreground flex min-h-0 flex-col border border-border/80 overflow-hidden",
+        "bg-card text-card-foreground flex min-h-0 flex-col overflow-hidden",
         windowMode === "popup"
-          ? "h-[600px] w-[400px]"
-          : "h-[min(600px,calc(100dvh-2rem))] w-[min(400px,calc(100vw-2rem))] rounded-xl shadow-2xl",
+          ? "h-[600px] w-[400px] border border-border/80"
+          : "h-dvh w-dvw min-w-[360px] min-h-[500px]",
       )}
     >
       <header className="shrink-0 border-b border-border bg-zinc-50/85 dark:bg-zinc-950/85 backdrop-blur transition-colors p-3 flex flex-col gap-2">
@@ -161,15 +161,17 @@ export function ExtensionPopupPresenter({
             >
               {themeIcon}
             </button>
-            <button
-              className="text-muted-foreground hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors flex items-center justify-center size-7"
-              onClick={onOpenPopout}
-              aria-label={copy.popout}
-              title={copy.popout}
-              type="button"
-            >
-              <ExternalLink className="w-4 h-4" />
-            </button>
+            {windowMode === "popup" && (
+              <button
+                className="text-muted-foreground hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors flex items-center justify-center size-7"
+                onClick={onOpenPopout}
+                aria-label={copy.popout}
+                title={copy.popout}
+                type="button"
+              >
+                <ExternalLink className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
 
